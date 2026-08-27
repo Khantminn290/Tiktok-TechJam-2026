@@ -1,0 +1,13 @@
+# raw dataset (download it yourself, see README) — too large / not ours to redistribute in git
+kuairand-starter-kit/KuaiRand-Pure/
+kuairand-starter-kit/KuaiRand-Pure.tar.gz
+
+# generated submission files
+submission*.csv
+
+# python
+__pycache__/
+*.pyc
+
+# os
+.DS_Store
