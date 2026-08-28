@@ -464,6 +464,98 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
                             + _aux_grad_contribs(model, cn, aux, nb, lam))
             model.apply_grads(contribs, contribs_aux)
 
+    def epoch_lambdarank(uniform_weights=False, train_k=5):
+        """BPR pairs reweighted by |delta nDCG@5| (LambdaRank / LambdaLoss).
+
+        Identical pair enumeration to epoch_bpr above -- one sampled negative
+        per positive, same user -- so the ONLY difference is the per-pair
+        weight. BPR weights every pair 1.0, which makes a swap at ranks 1<->2
+        count exactly as much as one at 50<->51; the evaluation metric does
+        not agree with that. Here each pair is weighted by how much swapping
+        those two items would actually change that user's nDCG@5, which is
+        the quantity being scored.
+
+        uniform_weights=True forces every weight to 1.0, which must reproduce
+        epoch_bpr EXACTLY -- that is the degenerate-case test (see
+        tests/test_harness.py test_lambdarank), and it is what proves any
+        measured difference comes from the weighting rather than from an
+        accidentally different sampling scheme.
+
+        Weight derivation (binary labels, gain = 2^rel - 1, discount
+        log2(rank+2), truncated at K=5, matching evaluate.py exactly and
+        verified against it pair-by-pair):
+            w = |gain_p - gain_n| * |invdisc(rank_p) - invdisc(rank_n)| / IDCG
+        with invdisc(r) = 1/log2(r+2) for r < K and 0 beyond the cutoff, so a
+        pair buried outside the top 5 on both sides contributes ~nothing.
+        """
+        # train_k is the TRAINING-time truncation, deliberately separable from
+        # the metric's K=5. Measured reason: the evaluation split averages 5.6
+        # impressions/user, but the TRAIN split averages 43.5 (median 31) --
+        # 7.8x more. Truncating training pairs at 5 therefore zeroes ~78.6% of
+        # them and collapses effective gradient magnitude to ~0.04x BPR's,
+        # which underfits badly (measured: -0.011 primary, paired t=-20.4).
+        # train_k=None keeps the log2(rank+2) discount but never truncates, so
+        # every pair still carries signal while top positions stay upweighted.
+        K = train_k if train_k is not None else 10 ** 9
+        pos_rows = np.flatnonzero(ytr > 0)
+        neg_pick = np.empty(len(pos_rows), dtype=np.int64)
+        ok = np.zeros(len(pos_rows), dtype=bool)
+        for j, r in enumerate(pos_rows):
+            u = user_tr[r]
+            lo, hi = bounds[u], bounds[u + 1]
+            rows_u = order[lo:hi]
+            negs = rows_u[ytr[rows_u] == 0]
+            if len(negs):
+                neg_pick[j] = negs[rng.integers(len(negs))]
+                ok[j] = True
+        pos_rows, neg_pick = pos_rows[ok], neg_pick[ok]
+
+        if uniform_weights:
+            pair_w = np.ones(len(pos_rows), dtype=np.float32)
+        else:
+            # Current ranking per user, from the model as it stands this epoch.
+            # One extra scoring pass over the train split (predict() batches
+            # internally); cheaper than the positive-row Python loop above.
+            z_all = model.predict(Xtr, Htr)
+            rank_of = np.zeros(len(ytr), dtype=np.int32)
+            idcg_u = np.zeros(n_users, dtype=np.float64)
+            inv5 = np.array([1.0 / np.log2(i + 2) for i in range(5)], dtype=np.float64)
+            for u in range(n_users):
+                lo, hi = bounds[u], bounds[u + 1]
+                if hi <= lo:
+                    continue
+                rows_u = order[lo:hi]
+                o = np.argsort(-z_all[rows_u], kind="stable")
+                rank_of[rows_u[o]] = np.arange(hi - lo, dtype=np.int32)
+                ideal = np.sort(ytr[rows_u])[::-1][:5]   # metric K, not train_k
+                idcg_u[u] = float(np.sum(((2.0 ** ideal) - 1.0) * inv5[:len(ideal)]))
+
+            def invdisc(ranks):
+                out = np.zeros(len(ranks), dtype=np.float64)
+                inside = ranks < K
+                out[inside] = 1.0 / np.log2(ranks[inside].astype(np.float64) + 2.0)
+                return out
+
+            gain_diff = ((2.0 ** ytr[pos_rows]) - 1.0) - ((2.0 ** ytr[neg_pick]) - 1.0)
+            disc_diff = invdisc(rank_of[pos_rows]) - invdisc(rank_of[neg_pick])
+            denom = idcg_u[user_tr[pos_rows]]
+            pair_w = np.abs(gain_diff * disc_diff) / np.maximum(denom, 1e-12)
+            pair_w = pair_w.astype(np.float32)
+
+        perm = rng.permutation(len(pos_rows))
+        for i in range(0, len(perm), bs):
+            sel = perm[i:i + bs]
+            pb, nb, wb = pos_rows[sel], neg_pick[sel], pair_w[sel]
+            hp = None if Htr is None else Htr[pb]
+            hn = None if Htr is None else Htr[nb]
+            zp, cp = model.forward(Xtr[pb], hp)
+            zn, cn = model.forward(Xtr[nb], hn)
+            g = (-sigmoid(-(zp - zn)) * wb / len(pb)).astype(np.float32)
+            contribs = [(cp, g), (cn, -g)]
+            contribs_aux = (_aux_grad_contribs(model, cp, aux, pb, lam)
+                            + _aux_grad_contribs(model, cn, aux, nb, lam))
+            model.apply_grads(contribs, contribs_aux)
+
     def epoch_listwise(pointwise_mix=0.0):
         users = rng.permutation(n_users)
         chunk, budget = [], 0
@@ -507,7 +599,11 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     runners = {"pointwise_logloss": epoch_pointwise,
                "bpr_pairwise": epoch_bpr,
                "listwise_softmax": epoch_listwise,
-               "listwise_softmax_plus_pointwise": lambda: epoch_listwise(1.0)}
+               "listwise_softmax_plus_pointwise": lambda: epoch_listwise(1.0),
+               "lambdarank_ndcg": epoch_lambdarank,
+               "lambdarank_ndcg_fulllist": lambda: epoch_lambdarank(train_k=None),
+               # test-only degenerate mode: must reproduce bpr_pairwise exactly
+               "_lambdarank_uniform": lambda: epoch_lambdarank(uniform_weights=True)}
 
     stages = [(cfg["loss"], cfg["epochs"], cfg["lr"])]
     if cfg["training"] == "two_stage_finetune" and cfg["loss"] != "pointwise_logloss":

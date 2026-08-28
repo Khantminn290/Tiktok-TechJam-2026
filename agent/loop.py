@@ -493,14 +493,30 @@ class AgentLoop:
               f"({self.spend.rates.describe(self.llm.provider, self.llm.model)}), "
               f"ε={EPSILON}, N={N_CONVERGE}"
               + (f", PARALLEL MODE k={self.parallel_k}" if self.parallel_k else ""))
+        nodes_at_start = len(self.tree.nodes)
         stop = self.stop_reason()
+        if stop is not None:
+            # Loud, because the failure mode is silent and expensive in wasted
+            # time: resuming into an ALREADY-converged journal makes run() a
+            # no-op that still exits 0 and still writes a final_summary.json
+            # reporting the pre-existing journal's iteration count, so it looks
+            # like a successful run that simply had nothing to add. Hit twice
+            # during development before this warning existed.
+            print(f"\n!!! NO ITERATIONS WILL RUN: the existing journal "
+                  f"({nodes_at_start} node(s)) already satisfies a stop "
+                  f"condition before this run began.\n    reason: {stop}\n"
+                  f"    Nothing was generated, trained, or spent. To start a new "
+                  f"search from iteration 0, re-run with --fresh (archives "
+                  f"logs/ to logs/archive_<ts>/, does not delete it).\n", flush=True)
         while stop is None:
             if self.parallel_k:
                 self.iterate_parallel()
             else:
                 self.iterate()
             stop = self.stop_reason()
-        return self.finish(stop)
+        summary = self.finish(stop)
+        summary["iterations_this_run"] = len(self.tree.nodes) - nodes_at_start
+        return summary
 
     def finish(self, stop: str) -> dict:
         best = self.tree.best()

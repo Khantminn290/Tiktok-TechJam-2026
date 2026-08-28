@@ -1157,6 +1157,79 @@ def test_compute_budget_prompt_section():
           "--reseed-top" in merge_prompt)
 
 
+def test_lambdarank():
+    """Part B proof-steps, kept permanently: the |delta nDCG@5| weight must
+    match the OFFICIAL evaluate.py pair-by-pair (never a reimplementation of
+    the metric), and forcing the weight to 1.0 must reproduce bpr_pairwise's
+    pair enumeration exactly -- otherwise a measured score difference could
+    come from different sampling rather than from the position discount.
+    (The full degenerate-equivalence run trains a real model and is verified
+    separately/manually; here we assert the wiring and the math.)
+    """
+    print("\n[lambdarank: |delta nDCG@5| weighting]")
+    import itertools
+    import math
+    sys.path.insert(0, os.path.join(_ROOT, "kuairand-starter-kit"))
+    from evaluate import ndcg_at_k
+
+    K = 5
+
+    def inv_disc(pos):
+        return 1.0 / math.log2(pos + 2) if pos < K else 0.0
+
+    def closed_form(labels, i, j):
+        ideal = sorted(labels, reverse=True)[:K]
+        idcg = sum(((2 ** t) - 1) / math.log2(p + 2) for p, t in enumerate(ideal))
+        if idcg == 0:
+            return 0.0
+        gi, gj = (2 ** labels[i]) - 1, (2 ** labels[j]) - 1
+        return abs((gi - gj) * (inv_disc(i) - inv_disc(j))) / idcg
+
+    import random
+    random.seed(0)
+    checked = worst = 0
+    for n in range(2, 13):
+        for _ in range(15):
+            labels = [random.randint(0, 1) for _ in range(n)]
+            if sum(labels) in (0, n):
+                continue
+            for i, j in itertools.combinations(range(n), 2):
+                if labels[i] == labels[j]:
+                    continue
+                before = ndcg_at_k(labels, K)
+                sw = list(labels)
+                sw[i], sw[j] = sw[j], sw[i]
+                emp = abs(ndcg_at_k(sw, K) - before)
+                worst = max(worst, abs(closed_form(labels, i, j) - emp))
+                checked += 1
+    check(f"|delta nDCG@5| matches the official scorer on {checked} real pairs",
+          worst < 1e-12, f"max deviation {worst:.2e}")
+    check("pairs beyond the @5 cutoff on both sides carry ~zero weight",
+          closed_form([0] * 6 + [1] + [0], 6, 7) == 0.0)
+    check("a swap into rank 0 is weighted more than one at rank 3<->4",
+          closed_form([1, 0, 0, 0, 0], 0, 1) > closed_form([0, 0, 0, 1, 0], 3, 4))
+
+    src = open(os.path.join(_ROOT, "runtime", "train_lib.py")).read()
+    check("lambdarank_ndcg is registered in the numpy runners table",
+          '"lambdarank_ndcg": epoch_lambdarank' in src)
+    check("the uniform-weight degenerate mode exists for the BPR equivalence test",
+          "_lambdarank_uniform" in src and "uniform_weights=True" in src)
+
+    m = Menu(MENU_PATH)
+    check("lambdarank_ndcg is a real, selectable menu option",
+          "lambdarank_ndcg" in m.selectable_options("loss"))
+    base = m.default_choices()
+    m.validate_choices({**base, "loss": "lambdarank_ndcg", "model": "fm_numpy"})
+    check("lambdarank_ndcg validates with the numpy engine", True)
+    expect_menu_error(m, {**base, "loss": "lambdarank_ndcg", "model": "deepfm_mlp"},
+                      "lambdarank_ndcg rejected on the torch engine (not implemented there)")
+    spec = m.options("loss")["lambdarank_ndcg"]["description"]
+    check("menu entry carries citations a grounded_in rationale can use",
+          "LambdaLoss" in spec and "Burges" in spec)
+    check("menu entry states the measured dataset-specific justification",
+          "36.3%" in spec and "nDCG@5" in spec)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1167,7 +1240,7 @@ if __name__ == "__main__":
               test_worker_sandbox_hardlinking, test_run_parallel_round,
               test_merge_acceptance_via_tree_ordering,
               test_standing_override_survives_reload,
-              test_compute_budget_prompt_section):
+              test_compute_budget_prompt_section, test_lambdarank):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -17,6 +17,14 @@ stopping on valid primary, and writing `metrics.json`, `scores_valid.npy`,
 `scores_test.npy` to `output_dir`. A solution that only picks menu options is
 just `seed_solution.py`.
 
+Loss options are `pointwise_logloss`, `bpr_pairwise`, `listwise_softmax`,
+`listwise_softmax_plus_pointwise`, and `lambdarank_ndcg`. The last is BPR's
+identical pair sampling with each pair weighted by |delta nDCG@5| instead of
+uniformly, so gradient concentrates where the metric actually looks (top-5,
+log2(rank+2) discount); it requires `model: fm_numpy` (numpy engine only) and
+costs one extra scoring pass over the train split per epoch to compute the
+current per-user ranking.
+
 ## Path B — custom code (for ideas beyond the menu)
 
 Reusable pieces, all importable from `train_lib`:
