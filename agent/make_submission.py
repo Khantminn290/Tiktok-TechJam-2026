@@ -1,0 +1,213 @@
+"""Generate + validate a submission CSV from the current best node's saved scores.
+
+The best node's training run already wrote row_id-aligned scores_{valid,test}.npy
+(the executor validated shape and finiteness), so a submission is a deterministic
+re-format, checked with the starter kit's own read_submission.
+
+Usage:
+  python3 -m agent.make_submission                       # test-split submission.csv
+  python3 -m agent.make_submission --split valid --score # valid CSV + local score
+  python3 -m agent.make_submission --final-test-eval     # THE one-time test eval
+
+--final-test-eval is the single hidden-test evaluation of the whole run: it scores
+the test submission once with the official evaluate.py and writes
+results/final_results.json. Do not run it during development.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+
+import numpy as np
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+KIT = os.path.join(_ROOT, "kuairand-starter-kit")
+sys.path.insert(0, KIT)
+
+from data import load  # noqa: E402
+from evaluate import evaluate  # noqa: E402
+from submit import read_submission, write_submission  # noqa: E402
+
+BASELINE_VALID = {"GAUC": 0.6674, "nDCG@5": 0.5357, "primary": 0.6016}
+BASELINE_TEST = {"GAUC": 0.6610, "nDCG@5": 0.5282, "primary": 0.5946}
+BASELINE_SEED_STD = 0.0008
+
+
+def _rank_normalize(x: np.ndarray) -> np.ndarray:
+    """Map scores to evenly spaced ranks in [0, 1].
+
+    Different nodes produce scores on completely different scales (a logit from a
+    pointwise model versus a BPR margin), so averaging raw values would silently
+    let whichever model has the widest spread dominate. Ranks are scale-free and
+    preserve each model's ordering, which is all the metric reads.
+    """
+    order = np.argsort(x, kind="stable")
+    ranks = np.empty(len(x), dtype=np.float64)
+    ranks[order] = np.arange(len(x), dtype=np.float64)
+    return ranks / max(1, len(x) - 1)
+
+
+def top_k_distinct_nodes(root: str, k: int) -> list[dict]:
+    """Best k successful nodes with DISTINCT menu_choices, best first.
+
+    Distinctness matters: averaging three near-identical configurations adds no
+    diversity and therefore cancels no noise.
+    """
+    journal = os.path.join(root, "logs", "journal.jsonl")
+    if not os.path.exists(journal):
+        return []
+    nodes = []
+    with open(journal) as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            n = json.loads(line)
+            if n.get("status") == "success" and n.get("metrics"):
+                nodes.append(n)
+    nodes.sort(key=lambda n: -n["metrics"]["primary"])
+    picked, seen = [], set()
+    for n in nodes:
+        sig = json.dumps(n["menu_choices"], sort_keys=True)
+        if sig in seen:
+            continue
+        seen.add(sig)
+        picked.append(n)
+        if len(picked) >= k:
+            break
+    return picked
+
+
+def ensemble_scores(root: str, split: str, nodes: list[dict]) -> np.ndarray | None:
+    """Rank-average the saved score arrays of the given nodes. No model calls."""
+    stacked = []
+    for n in nodes:
+        p = os.path.join(root, "logs", "runs",
+                         f"node_{n['iteration_id']:03d}", f"scores_{split}.npy")
+        if not os.path.exists(p):
+            continue
+        arr = np.load(p)
+        stacked.append(_rank_normalize(arr))
+    if not stacked:
+        return None
+    if len({len(a) for a in stacked}) != 1:
+        return None
+    return np.mean(np.stack(stacked, axis=0), axis=0)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--split", default="test", choices=["valid", "test"])
+    ap.add_argument("--out", default=None)
+    ap.add_argument("--score", action="store_true",
+                    help="also score locally (valid split only)")
+    ap.add_argument("--final-test-eval", action="store_true",
+                    help="the ONE final hidden-test evaluation; writes results/")
+    ap.add_argument("--data_dir", default=os.path.join(KIT, "KuaiRand-Pure", "data"))
+    ap.add_argument("--ensemble", action="store_true",
+                    help="rank-average the top-K distinct successful nodes instead "
+                         "of using the single best node")
+    ap.add_argument("--top-k", type=int, default=None,
+                    help="K for --ensemble (default: config/llm_config.json "
+                         "ensemble_top_k, or 3)")
+    a = ap.parse_args()
+    if a.final_test_eval:
+        a.split = "test"
+
+    k = a.top_k
+    if k is None:
+        cfg_path = os.path.join(_ROOT, "config", "llm_config.json")
+        k = 3
+        if os.path.exists(cfg_path):
+            with open(cfg_path) as fh:
+                k = int(json.load(fh).get("ensemble_top_k", 3))
+
+    best_meta_path = os.path.join(_ROOT, "logs", "best_metrics.json")
+    if not os.path.exists(best_meta_path):
+        sys.exit("no best node yet (logs/best_metrics.json missing) — run the agent first")
+    with open(best_meta_path) as fh:
+        best = json.load(fh)
+    run_dir = os.path.join(_ROOT, "logs", "runs", f"node_{best['iteration_id']:03d}")
+    single_scores = np.load(os.path.join(run_dir, f"scores_{a.split}.npy"))
+
+    members = top_k_distinct_nodes(_ROOT, k)
+    ens_scores = ensemble_scores(_ROOT, a.split, members) if len(members) > 1 else None
+
+    scores = single_scores
+    which = f"best single node {best['iteration_id']}"
+    if a.ensemble:
+        if ens_scores is None:
+            print(f"! ensemble unavailable ({len(members)} distinct successful node(s) "
+                  f"with usable score arrays) — falling back to the single best node")
+        else:
+            scores = ens_scores
+            which = (f"rank-averaged ensemble of nodes "
+                     f"{[m['iteration_id'] for m in members]}")
+
+    out = a.out or os.path.join(_ROOT, f"submission_{a.split}.csv")
+    print(f"loading official split rows ({a.data_dir}) ...")
+    rows = load(a.data_dir)[a.split]
+    if len(rows) != len(scores):
+        sys.exit(f"row count mismatch: split has {len(rows)}, scores {len(scores)}")
+    write_submission(out, rows, scores)
+    # validate with the starter kit's own checker
+    read_submission(out, rows)
+    print(f"✓ wrote and validated {out}: {len(rows):,d} rows ({which})")
+
+    # ---- comparison table: best-single vs best-ensemble ----
+    def _score(arr):
+        r = evaluate([x[1] for x in rows], [x[6] for x in rows], arr)
+        # float() required — see the note in train_lib.run: numpy>=2 returns
+        # np.float32 here, which json.dump cannot serialize.
+        return {"GAUC": float(r["GAUC"]), "nDCG@5": float(r["nDCG@5"]),
+                "primary": float(r["primary"])}
+
+    comparison = None
+    if a.split == "valid" and (a.score or a.ensemble):
+        base = BASELINE_VALID
+        comparison = {"single": _score(single_scores)}
+        if ens_scores is not None:
+            comparison["ensemble"] = _score(ens_scores)
+            comparison["ensemble_members"] = [m["iteration_id"] for m in members]
+        print(f"\n  {'variant':<26} {'GAUC':>8} {'nDCG@5':>8} {'primary':>9} "
+              f"{'Δ vs base':>10} {'Δ in σ':>8}")
+        for name in ("single", "ensemble"):
+            if name not in comparison:
+                continue
+            m = comparison[name]
+            d = m["primary"] - base["primary"]
+            label = (name if name == "single"
+                     else f"ensemble (top-{len(members)})")
+            print(f"  {label:<26} {m['GAUC']:>8.4f} {m['nDCG@5']:>8.4f} "
+                  f"{m['primary']:>9.4f} {d:>+10.4f} "
+                  f"{d / BASELINE_SEED_STD:>+7.1f}σ")
+        print(f"  (σ = {BASELINE_SEED_STD}, the official baseline's own 5-seed std)")
+
+    if a.final_test_eval:
+        base = BASELINE_TEST
+        r = _score(scores)
+        results = {
+            "submission_source": which,
+            "best_node": best["iteration_id"],
+            "menu_choices": best["menu_choices"],
+            "ensemble_used": bool(a.ensemble and ens_scores is not None),
+            "ensemble_members": [m["iteration_id"] for m in members]
+            if (a.ensemble and ens_scores is not None) else None,
+            "valid": best["valid_metrics"],
+            "test": r,
+            "baseline_test": base,
+            "delta_test": {m: round(r[m] - base[m], 4) for m in
+                           ("GAUC", "nDCG@5", "primary")},
+            "delta_test_primary_in_baseline_seed_sigmas":
+                round((r["primary"] - base["primary"]) / BASELINE_SEED_STD, 2),
+        }
+        os.makedirs(os.path.join(_ROOT, "results"), exist_ok=True)
+        with open(os.path.join(_ROOT, "results", "final_results.json"), "w") as fh:
+            json.dump(results, fh, indent=2)
+        print("\n=== FINAL (one-time) HIDDEN-TEST EVALUATION ===")
+        print(json.dumps(results, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -5,6 +5,19 @@ kuairand-starter-kit/KuaiRand-Pure.tar.gz
 # generated submission files
 submission*.csv
 
+# secrets — never commit API keys
+.env
+
+# derived data cache (rebuilt automatically on first train_lib use)
+runtime/cache/
+
+# per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
+logs/runs/
+logs/archive_*/
+
+# local build/spec notes, not part of the deliverable
+claude_code_build_prompt.md
+
 # python
 __pycache__/
 *.pyc

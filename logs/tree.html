@@ -1,0 +1,62 @@
+<!doctype html><meta charset="utf-8">
+<title>Agent search tree — KuaiRand-Pure</title>
+<style>
+ body{font:14px/1.45 -apple-system,Segoe UI,sans-serif;background:#0f1115;color:#e6e6e6;padding:24px}
+ h1{font-size:18px}
+ .node{border-left:3px solid #444;background:#171a21;padding:8px 12px;margin:6px 0;border-radius:6px}
+ .node.ok{border-color:#3b82f6} .node.best{border-color:#22c55e;background:#16241a}
+ .node.err{border-color:#ef4444;background:#241618}
+ .hdr{font-weight:600} .act{color:#9ca3af;font-weight:400}
+ .ch{color:#93c5fd;font-family:ui-monospace,monospace;font-size:11px;margin:4px 0}
+ .hyp{color:#d1d5db;font-size:12px} .why{color:#9ca3af;font-size:11px;margin-top:4px;font-style:italic}
+</style>
+<h1>Autonomous agent search tree — KuaiRand-Pure (8 iterations,
+best node 6 @ 0.6035)</h1>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#0 <span class="act">draft</span> primary <b>0.5986</b> (GAUC 0.6628, nDCG@5 0.5343)</div>
+<div class="ch">{"loss": "listwise_softmax_plus_pointwise", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"}</div>
+<div class="hyp">Switching the objective from pointwise logloss to a ranking-aligned hybrid listwise loss should improve within-user ordering directly, while preserving some pointwise calibration for stability. This targets the biggest mismatch in the baseline: training on independent labels while being judged on per-user ranking (GAUC, nDCG@5). I keep all other axes at baseline to isolate the effect of the highest-priority unexplored direction and avoid confounding from model/history changes.</div>
+<div class="why">policy: only 0 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#1 <span class="act">draft</span> primary <b>0.5985</b> (GAUC 0.6627, nDCG@5 0.5344)</div>
+<div class="ch">{"loss": "listwise_softmax_plus_pointwise", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"}</div>
+<div class="hyp">Add user history as mean-pooled past positive items while keeping the strongest already-tried ranking-aligned hybrid loss. Within-user ranking depends on matching the current candidate to user-specific preference structure; a pooled positive-history vector creates exactly such user-item interactions inside the FM without relying on useless user-only bias terms. This should help both GAUC and nDCG@5 more directly than changing lower-priority axes, and is a clean next step because the prior hybrid-loss-only attempt underperformed baseline, suggesting the bigger missing signal is personalization </div>
+<div class="why">policy: only 1 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#2 <span class="act">draft</span> primary <b>0.5992</b> (GAUC 0.6642, nDCG@5 0.5343)</div>
+<div class="ch">{"loss": "listwise_softmax", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"}</div>
+<div class="hyp">Pure listwise softmax may outperform the previously tried hybrid because the target metrics are strictly within-user ranking metrics, and the hybrid likely retained pointwise calibration pressure that hurts top-of-list ordering. Since the hybrid underperformed the baseline, this draft isolates whether removing the pointwise term lets the model focus entirely on ordering each user's impressions, potentially lifting nDCG@5 and GAUC without changing architecture or adding noisy signals.</div>
+<div class="why">policy: only 2 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#3 <span class="act">draft</span> primary <b>0.6015</b> (GAUC 0.6672, nDCG@5 0.5357)</div>
+<div class="ch">{"loss": "bpr_pairwise", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "two_stage_finetune", "data_extras": "none"}</div>
+<div class="hyp">Pairwise BPR is the remaining top-priority ranking-aligned loss not yet tried, and it matches GAUC especially directly because both depend on ordering positives above negatives within each user. Since prior listwise variants underperformed the FM baseline, the next clean test is to isolate loss alignment with minimal confounding changes: keep the simple FM and no history, but add two-stage fine-tuning so embeddings first learn stable pointwise signals and then are refined for within-user ranking. I expect this to help more than changing model capacity, and it could recover some nDCG@5 by sharp</div>
+<div class="why">policy: only 3 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#4 <span class="act">draft</span> primary <b>0.6021</b> (GAUC 0.6684, nDCG@5 0.5358)</div>
+<div class="ch">{"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "two_stage_finetune", "data_extras": "none"}</div>
+<div class="hyp">Keep the strongest tried ranking-aligned core (BPR with two-stage fine-tuning) and add a user-history signal via mean-pooled past positive items. BPR already nearly matches the baseline, suggesting the loss is the right direction; the missing signal is likely user-specific item affinity. Mean-pooled positive history should help within-user ordering by letting candidate-item embeddings interact with a summary of each user's long-view preferences, while changing only one major axis beyond the current best.</div>
+<div class="why">policy: only 4 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:0px">
+<div class="hdr">#5 <span class="act">draft</span> primary <b>0.6015</b> (GAUC 0.6672, nDCG@5 0.5357)</div>
+<div class="ch">{"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "two_stage_finetune", "data_extras": "none"}</div>
+<div class="hyp">The best current run already suggests ranking-aligned BPR plus positive-history pooling is slightly above baseline. The most targeted fresh change is to keep that strong core and swap mean_pool_positives for recency_weighted_pool, because short-video preferences drift quickly and validation/test occur later in time than much of train. Recency weighting should make the history vector better match current interests, improving candidate-history interactions within a user without changing too many axes at once.</div>
+<div class="why">policy: only 5 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node best" style="margin-left:0px">
+<div class="hdr">#6 <span class="act">draft</span> primary <b>0.6035</b> (GAUC 0.6700, nDCG@5 0.5371)</div>
+<div class="ch">{"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "none", "training": "two_stage_finetune", "data_extras": "none"}</div>
+<div class="hyp">The strongest tried setup is BPR pairwise + mean-pooled positive history, already slightly above baseline. A focused fresh change is to keep that core and add lightweight auxiliary engagement tasks (click/like/forward). These labels exist on every impression and can regularize shared user/item embeddings toward broader preference structure, which should especially help history-to-item matching when long_view is sparse/noisy. This changes one main axis beyond the current best while preserving the best-performing ranking-aligned loss and history design, so it has a plausible chance to lift GAUC </div>
+<div class="why">policy: only 6 attempts exist (&lt; draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes</div>
+</div>
+<div class="node ok" style="margin-left:28px">
+<div class="hdr">#7 <span class="act">improve</span> primary <b>0.6033</b> (GAUC 0.6696, nDCG@5 0.5370)</div>
+<div class="ch">{"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "none"}</div>
+<div class="hyp">Add temporal interaction features on top of the current best BPR+history+multitask setup by switching temporal from none to hour_plus_dow. In within-user ranking, raw user terms do not help, but time-of-day/day-of-week can help through interactions with item/video/author and history vectors, capturing that the same user may prefer different short-video types at different times. Because the current model already extracts user-specific preference via positive-history pooling and regularizes embeddings via click/like/forward auxiliaries, adding a small amount of temporal context is a low-risk way</div>
+<div class="why">policy: extending global best node 6 (valid primary 0.6035); its neighborhood is not exhausted</div>
+</div>

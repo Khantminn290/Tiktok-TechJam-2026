@@ -1,0 +1,21 @@
+{
+  "_comment": "Provider + model defaults. Environment variables ALWAYS win over this file. API keys are NEVER stored here — they live only in .env (gitignored). See .env.example.",
+
+  "provider": "openai",
+
+  "openai": {
+    "model": "gpt-5.4",
+    "test_model": "gpt-5.4-mini",
+    "base_url": null
+  },
+
+  "anthropic": {
+    "model": "claude-opus-5",
+    "test_model": "claude-haiku-4-5"
+  },
+
+  "max_output_tokens": 32000,
+  "draft_count": 7,
+  "crossover_enabled": true,
+  "ensemble_top_k": 3
+}

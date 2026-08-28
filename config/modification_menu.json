@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "source": "Authored from kuairand-starter-kit/README.md '从哪里开始改' (tested dead-ends + ranked unexplored directions) and the challenge problem statement.",
+  "axes": {
+    "loss": {
+      "priority": 1,
+      "description": "Training objective. Baseline is pointwise logloss but the metrics (GAUC/nDCG@5) are within-user ranking metrics — organizers rank aligning the loss with the metric as the single most promising unexplored direction.",
+      "options": {
+        "pointwise_logloss": {"description": "Baseline: per-impression binary cross-entropy on long_view."},
+        "bpr_pairwise": {"description": "BPR: sample (positive, negative) impression pairs within the same user, maximize P(s_pos > s_neg)."},
+        "listwise_softmax": {"description": "Per-user softmax over that user's train impressions, cross-entropy toward the positives (ListNet-style)."},
+        "listwise_softmax_plus_pointwise": {"description": "Weighted hybrid: listwise softmax + pointwise logloss. Keeps calibrated head while aligning with ranking."}
+      }
+    },
+    "user_history": {
+      "priority": 2,
+      "description": "Behavior-sequence features. Baseline uses zero history; each user has hundreds of train interactions. Second-ranked unexplored direction (DIN/SIM family). NOTE: purely user-side features only work through interaction with item-side features — first-order user terms are constant within a user and cannot change within-user ranking.",
+      "options": {
+        "none": {"description": "Baseline: no history."},
+        "mean_pool_positives": {"description": "Mean-pool embeddings of the user's past positive (long_view) items from the train period as an extra field that interacts with the candidate item."},
+        "recency_weighted_pool": {"description": "Like mean_pool_positives but exponentially decayed toward recent interactions."},
+        "din_attention": {"description": "DIN-style attention: weight history items by similarity to the candidate item before pooling. Needs an MLP-based model to consume the pooled vector.", "requires": {"model": ["deepfm_mlp", "dcn_lite"]}}
+      }
+    },
+    "multitask": {
+      "priority": 3,
+      "description": "Multi-feedback auxiliary tasks. Log has is_click, is_like, is_follow, is_comment, is_forward, play_time_ms on EVERY impression (no sample-selection bias for long_view). Third-ranked direction.",
+      "options": {
+        "none": {"description": "Single task: long_view only."},
+        "aux_click": {"description": "Shared embeddings, auxiliary head on is_click, weighted joint loss."},
+        "aux_click_like_forward": {"description": "Auxiliary heads on is_click, is_like, is_forward."},
+        "censored_watch_time": {"description": "CWM-inspired: auxiliary censored-regression head on play_time (a completed play truncates true watch time, so use a one-sided loss). Fourth-ranked direction.", "requires": {"loss": ["pointwise_logloss", "listwise_softmax_plus_pointwise"]}}
+      }
+    },
+    "model": {
+      "priority": 4,
+      "description": "Scoring model. Tested dead-end: raising FM capacity (k=8/16/32) does NOT help, so model swaps rank below loss/history/multitask. Torch 2.3 (CPU) is available.",
+      "options": {
+        "fm_numpy": {"description": "Baseline: numpy Factorization Machine."},
+        "deepfm_mlp": {"description": "DeepFM: FM interaction + MLP over concatenated field embeddings (torch, CPU)."},
+        "dcn_lite": {"description": "Small Deep & Cross network (torch, CPU)."}
+      }
+    },
+    "temporal": {
+      "priority": 5,
+      "description": "Time features and train→eval distribution shift (hourmin, date). Sixth-ranked direction. Remember: a time feature only matters through interaction with item-side features.",
+      "options": {
+        "none": {"description": "Baseline: no time features."},
+        "hour_bucket": {"description": "Hour-of-day bucket from hourmin as an extra categorical field."},
+        "hour_plus_dow": {"description": "Hour bucket plus day-of-week from date."}
+      }
+    },
+    "training": {
+      "priority": 6,
+      "description": "Optimization schedule. Tested dead-end: capacity k=8/16/32 barely moves the score — prefer schedule changes that serve the loss axis over raw capacity.",
+      "options": {
+        "default": {"description": "Baseline: k=16, lr=1e-3, batch 8192, max 40 epochs, patience 4."},
+        "k32": {"description": "k=32 (tested ~neutral; only useful combined with new signal sources)."},
+        "lower_lr_longer": {"description": "lr=5e-4, more epochs, patience 6."},
+        "two_stage_finetune": {"description": "Stage 1 pointwise warmup, stage 2 fine-tune with the selected ranking loss at lower lr."}
+      }
+    },
+    "data_extras": {
+      "priority": 7,
+      "description": "Extra data sources beyond the two standard logs. Leakage-sensitive: locked options are mechanically unselectable without a human-set override flag.",
+      "options": {
+        "none": {"description": "Standard logs only."},
+        "video_stats_features": {"description": "video_features_statistic_pure.csv aggregate counters (show_cnt, play_cnt, ...). LOCKED: statistics are aggregated over a window that overlaps the validation/test dates — using them as features risks target leakage from the evaluation period.", "locked": true},
+        "random_log_test_period": {"description": "Rows of log_random_4_22_to_5_08_pure.csv with date in the test window (20220429–20220508). LOCKED: direct test-period exposure.", "locked": true},
+        "random_log_valid_unbiased_check": {"description": "Rows of the random-exposure log restricted to the VALIDATION window (20220422–20220428), used as an extra unbiased evaluation diagnostic only — never as training data. Allowed (organizers suggest it)."}
+      }
+    }
+  },
+  "notes": {
+    "tested_dead_ends": [
+      "Adding static features (all 13 CWM fields + user-side coarse buckets): primary 0.5940 vs 0.5950 — no gain.",
+      "Raising FM embedding dim k=8/16/32: 0.5895/0.5902/0.5887 — no gain.",
+      "Pure user-side first-order terms contribute exactly 0 to within-user ranking."
+    ],
+    "hidden_test_discipline": "Generated solutions may WRITE test-split scores to disk (scores_test.npy) but must never read test labels or compute test metrics; only the harness scores test once at the very end."
+  }
+}

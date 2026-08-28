@@ -1,0 +1,8 @@
+{
+  "llm_model": "claude-opus-5",
+  "max_iterations": 50,
+  "wall_clock_limit_h": 6.0,
+  "exec_timeout_s": 1200,
+  "seed": 0,
+  "allow_locked_options": false
+}
