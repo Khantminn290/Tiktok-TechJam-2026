@@ -169,3 +169,46 @@ def build_prompt(action: str, target: Node | None, reason: str,
             "Keep the original intent (same menu_choices unless the choices "
             "themselves caused the failure). State the root cause in the hypothesis.")
     return "\n\n".join(parts)
+
+
+def build_merge_prompt(a: Node, b: Node, reason: str, menu) -> str:
+    """Coordinator merge prompt (Phase 3 item 3 Part B): two SIBLING candidates
+    from the same parallel round, both of which already beat the running best.
+
+    Unlike "improve"/"crossover" (which withhold an older parent's code to
+    encourage a fresh combination rather than a copy), BOTH candidates here
+    get their full code: neither is a "boring, already-explored parent" --
+    both are fresh, comparably-strong ideas, and a diff of either against
+    their shared ancestor would force the model to mentally reconstruct two
+    full scripts before it could even start reasoning about combining them.
+    """
+    parts = [STATIC_CONTEXT]
+    with open(_API_MD) as fh:
+        parts.append("## train_lib API available to your script\n" + fh.read())
+    parts.append("## Modification menu (pick exactly one option per axis)\n"
+                 + menu.render_for_prompt())
+    parts.append(
+        "## Coordinator merge task\n"
+        f"Two independent workers were given the SAME task this round ({reason}), "
+        f"and each produced a DIFFERENT candidate that beat the running best. Your "
+        f"job is to write ONE new script that combines their distinct, complementary "
+        f"ideas into something that should score HIGHER than either alone -- not to "
+        f"pick one, and not to average their outputs. If the two ideas fundamentally "
+        f"conflict (e.g. both change the same axis incompatibly), say so in the "
+        f"hypothesis, pick whichever you expect to dominate on that axis, and still "
+        f"combine whatever from the other candidate doesn't conflict with it.\n\n"
+        f"### Candidate A -- node {a.iteration_id} "
+        f"(valid primary {a.metrics['primary']:.4f})\n"
+        f"menu_choices: {json.dumps(a.menu_choices)}\n"
+        f"hypothesis was: {a.hypothesis}\n"
+        f"### Its full code\n```python\n{_read_code(a)}\n```\n\n"
+        f"### Candidate B -- node {b.iteration_id} "
+        f"(valid primary {b.metrics['primary']:.4f})\n"
+        f"menu_choices: {json.dumps(b.menu_choices)}\n"
+        f"hypothesis was: {b.hypothesis}\n"
+        f"### Its full code\n```python\n{_read_code(b)}\n```\n\n"
+        "## Instructions\nReturn the complete merged script. In the hypothesis, name "
+        "exactly which element you took from A, which from B, and why they should "
+        "compose rather than conflict. Your rationale.grounded_in should cite what "
+        "A's and B's own grounding already established, not invent a new citation.")
+    return "\n\n".join(parts)

@@ -97,6 +97,12 @@ def main():
                          "happens after a run has already finished and costs no LLM "
                          "spend, only training time (default: config/agent_config.json "
                          "wall_clock_limit_h).")
+    ap.add_argument("--parallel-k", type=int, default=None,
+                    help="opt-in parallel exploration: each iteration dispatches K "
+                         "worker proposals simultaneously in isolated git worktrees "
+                         "(agent/worktree.py), merging via a coordinator LLM call when "
+                         "2+ beat the running best in the same round. Sequential "
+                         "(K=1, today's behavior) remains the default when omitted.")
     a = ap.parse_args()
 
     if a.smoke:
@@ -160,6 +166,7 @@ def main():
         max_spend_usd=a.max_spend_usd,
         draft_count=a.draft_count,
         test_model=a.smoke,
+        parallel_k=a.parallel_k,
     )
     summary = loop.run()
 

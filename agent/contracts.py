@@ -50,6 +50,16 @@ class Node:
     # axis/option description, a baseline_scores.json number, a named paper),
     # enforced by agent/llm.py's schema check, not left to the model's discretion.
     rationale: dict = field(default_factory=dict)
+    # Phase 3 item 3 (parallel exploration): "" for sequential-mode nodes.
+    # Shared by every node (workers + merge attempt, if any) produced by the
+    # SAME parallel round, purely so a reader can group them in the journal.
+    round_id: str = ""
+    # non-empty ONLY on a "merge" action node: the round's worker node-ids it
+    # was synthesized from. journal.jsonl is append-only, so a worker node
+    # that gets superseded by a winning merge is never rewritten -- this field
+    # on the (later-added) merge node is how the relationship is recoverable
+    # by reading forward, instead of mutating history.
+    merged_from: list = field(default_factory=list)
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), ensure_ascii=False)
@@ -98,6 +108,32 @@ class ExperimentTree:
                   + "; ".join(f"line {n}: {m}" for n, m in skipped), flush=True)
         for n in self.nodes:
             self._maybe_update_best(n, persist_artifacts=False)
+        self._apply_standing_override()
+
+    def _apply_standing_override(self) -> None:
+        """If agent.reseed.apply_best_override previously overrode
+        best_metrics.json, the LIVE tree's own best-tracking -- recomputed from
+        the journal's single-seed scores on every reload, independent of that
+        artifact file -- must respect it too. Without this, a resumed run's own
+        decide_action()/iterate_parallel() would silently go back to treating
+        the superseded single-seed pick as best, contradicting the override
+        that agent.report/agent.make_submission already show. One-time
+        correction to the starting point only: the very next node that
+        organically beats it resumes normal strict-> tracking from there.
+        """
+        path = os.path.join(self.log_dir, "best_metrics.json")
+        if not os.path.exists(path):
+            return
+        try:
+            with open(path) as fh:
+                bm = json.load(fh)
+        except (json.JSONDecodeError, OSError):
+            return
+        if not bm.get("reseed_verified"):
+            return
+        node = self.get(bm.get("iteration_id"))
+        if node is not None:
+            self.best_node_id = node.iteration_id
 
     def add(self, node: Node) -> None:
         """Append node to journal immediately, then update best-pointers."""

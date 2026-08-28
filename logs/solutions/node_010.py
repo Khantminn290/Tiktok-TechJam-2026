@@ -1,0 +1,116 @@
+import argparse
+import json
+import os
+import shutil
+import sys
+import tempfile
+import traceback
+
+import numpy as np
+import train_lib
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--menu-choices", required=True, help="JSON dict of menu choices")
+    p.add_argument("--output-dir", required=True, help="Directory to write outputs")
+    p.add_argument("--seed", type=int, default=0)
+    return p.parse_args()
+
+
+def _load_json(path):
+    with open(path, "r") as fh:
+        return json.load(fh)
+
+
+def _choose_seeds(base_seed):
+    # Small deterministic ensemble to stay within runtime budget.
+    # Spread seeds apart so internal RNG streams differ materially.
+    return [int(base_seed + off) for off in (0, 17, 43)]
+
+
+def main():
+    args = parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
+    tmp_root = None
+    try:
+        menu_choices = json.loads(args.menu_choices)
+        if not isinstance(menu_choices, dict):
+            raise ValueError("--menu-choices must decode to a JSON object")
+
+        seeds = _choose_seeds(args.seed)
+        tmp_root = tempfile.mkdtemp(prefix="kuairand_ens_", dir=args.output_dir)
+
+        valid_scores_list = []
+        test_scores_list = []
+        run_metrics = []
+
+        for i, seed in enumerate(seeds):
+            run_dir = os.path.join(tmp_root, f"run_{i}_seed_{seed}")
+            os.makedirs(run_dir, exist_ok=True)
+            metrics = train_lib.run(menu_choices, run_dir, seed=seed)
+            if not isinstance(metrics, dict):
+                raise RuntimeError(f"train_lib.run did not return a metrics dict for seed {seed}")
+
+            metrics_path = os.path.join(run_dir, "metrics.json")
+            scores_valid_path = os.path.join(run_dir, "scores_valid.npy")
+            scores_test_path = os.path.join(run_dir, "scores_test.npy")
+            if not os.path.exists(metrics_path):
+                raise FileNotFoundError(f"Missing metrics.json for seed {seed}")
+            if not os.path.exists(scores_valid_path):
+                raise FileNotFoundError(f"Missing scores_valid.npy for seed {seed}")
+            if not os.path.exists(scores_test_path):
+                raise FileNotFoundError(f"Missing scores_test.npy for seed {seed}")
+
+            run_metrics.append(_load_json(metrics_path))
+            valid_scores_list.append(np.load(scores_valid_path))
+            test_scores_list.append(np.load(scores_test_path))
+
+        if len(valid_scores_list) == 0:
+            raise RuntimeError("No runs completed successfully")
+
+        first_valid_shape = valid_scores_list[0].shape
+        first_test_shape = test_scores_list[0].shape
+        for idx, arr in enumerate(valid_scores_list):
+            if arr.shape != first_valid_shape:
+                raise ValueError(f"scores_valid shape mismatch at run {idx}: {arr.shape} vs {first_valid_shape}")
+        for idx, arr in enumerate(test_scores_list):
+            if arr.shape != first_test_shape:
+                raise ValueError(f"scores_test shape mismatch at run {idx}: {arr.shape} vs {first_test_shape}")
+
+        ens_valid = np.mean(np.stack(valid_scores_list, axis=0), axis=0)
+        ens_test = np.mean(np.stack(test_scores_list, axis=0), axis=0)
+
+        splits, _ = train_lib.load_cache()
+        valid_labels = splits["valid"]["long_view"]
+        valid_user_ids = splits["valid"]["user_raw"]
+        ens_metrics = train_lib.evaluate(valid_user_ids, valid_labels, ens_valid)
+
+        with open(os.path.join(args.output_dir, "metrics.json"), "w") as fh:
+            json.dump({k: float(v) for k, v in ens_metrics.items()}, fh)
+        np.save(os.path.join(args.output_dir, "scores_valid.npy"), ens_valid)
+        np.save(os.path.join(args.output_dir, "scores_test.npy"), ens_test)
+
+        with open(os.path.join(args.output_dir, "ensemble_runs.json"), "w") as fh:
+            json.dump(
+                {
+                    "seeds": [int(s) for s in seeds],
+                    "member_metrics": [
+                        {k: float(v) for k, v in m.items()} for m in run_metrics
+                    ],
+                    "ensemble_metrics": {k: float(v) for k, v in ens_metrics.items()},
+                },
+                fh,
+            )
+
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        return 1
+    finally:
+        if tmp_root is not None:
+            shutil.rmtree(tmp_root, ignore_errors=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -15,13 +15,13 @@ import os
 import time
 
 from .contracts import ExperimentTree, Node, error_headline, now
-from .executor import run_solution, save_diff
+from .executor import run_parallel_round, run_solution, save_diff
 from .experience import append_entry
 from .llm import LLMClient, LLMError
 from .menu import Menu
 from .policy import MIN_DRAFTS, decide_action
 from .pricing import SpendTracker
-from .prompts import build_prompt
+from .prompts import build_merge_prompt, build_prompt
 
 EPSILON = 0.002
 N_CONVERGE = 3
@@ -36,7 +36,7 @@ class AgentLoop:
                  inject_error_at: int | None = None,
                  allow_locked_options: bool = False,
                  max_spend_usd: float = 2.0, draft_count: int | None = None,
-                 test_model: bool = False):
+                 test_model: bool = False, parallel_k: int | None = None):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
@@ -65,6 +65,11 @@ class AgentLoop:
         self.consecutive_llm_failures = 0
         self.last_llm_error = ""
         self.max_consecutive_llm_failures = 3
+        # Opt-in parallel exploration (Phase 3 item 3 Part B). None/1 = today's
+        # exact sequential behavior via iterate(), untouched. >=2 = K worker
+        # proposals per round via iterate_parallel(). Default stays sequential.
+        self.parallel_k = parallel_k if (parallel_k and parallel_k >= 2) else None
+        self._round_counter = 0
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -248,6 +253,225 @@ class AgentLoop:
         title = (node.hypothesis or f"{node.action} node {node.iteration_id}")[:100]
         append_entry(node.iteration_id, outcome, title, body)
 
+    # ---------- parallel round (opt-in; sequential iterate() above is default) ----------
+    def iterate_parallel(self) -> list[Node]:
+        """K independent proposals for ONE decided action, dispatched
+        concurrently (agent.executor.run_parallel_round, Part A's sandbox), then
+        merged if >=2 beat the running best. decide_action() runs ONCE per
+        round -- policy.py is untouched; the diversity across the K proposals
+        comes from independent LLM completions of the SAME prompt, not from K
+        different decided actions.
+        """
+        self._round_counter += 1
+        round_id = f"round_{self._round_counter}"
+        action, target, reason = decide_action(self.tree, draft_count=self.draft_count)
+        if action == "debug" and target is not None and not (
+                target.code_path and os.path.exists(target.code_path)):
+            failed_id = target.iteration_id
+            action, target = "draft", None
+            reason = (f"node {failed_id} failed before any code was written "
+                      f"(LLM-stage failure), so there is nothing to debug; "
+                      f"drafting a fresh combination instead")
+        print(f"[{round_id}] action={action}"
+              f"{'' if target is None else f' target={target.iteration_id}'} "
+              f"({self.parallel_k} workers) — {reason}", flush=True)
+
+        best_before = self.tree.best()   # ALL K workers compare against this SAME
+                                         # snapshot -- they're siblings generated
+                                         # from one pre-round state, not a chain
+        prompt = build_prompt(action, target, reason, self.tree, self.menu)
+
+        # ---- K independent LLM calls for the SAME decided action ----
+        proposals = []
+        saw_success = False
+        for _w in range(self.parallel_k):
+            try:
+                obj, usage, llm_events = self.llm.structured_call(
+                    prompt, validate_choices=self.menu.validate_choices)
+                proposals.append({"ok": True, "obj": obj, "usage": usage,
+                                  "events": llm_events})
+                saw_success = True
+            except LLMError as e:
+                proposals.append({"ok": False, "error": str(e), "usage": {},
+                                  "events": [{"type": "llm_failure",
+                                             "error": str(e)[:1000]}]})
+        if saw_success:
+            self.consecutive_llm_failures = 0
+        else:
+            self.consecutive_llm_failures += 1
+            self.last_llm_error = next(p["error"] for p in proposals if not p["ok"])
+
+        # ---- journal LLM-stage failures immediately (nothing to execute) ----
+        round_nodes: list[Node] = []
+        exec_jobs = []
+        for w, p in enumerate(proposals):
+            if p["ok"]:
+                continue
+            it = self.tree.next_id()
+            node = Node(iteration_id=it,
+                       parent_id=None if target is None else target.iteration_id,
+                       action=action, menu_choices={}, hypothesis="", status="error",
+                       metrics=None, error_trace=f"LLM stage failed: {p['error']}",
+                       tokens_used=0, wall_clock_seconds=0.0, timestamp=now(),
+                       code_path="", decide_reason=reason, events=p["events"],
+                       seed=self.seed, round_id=round_id)
+            self.tree.add(node)
+            round_nodes.append(node)
+            print(f"[{round_id}] worker {w}: LLM stage failed (journaled as node {it})",
+                 flush=True)
+
+        # Allocate ids by hand, sequentially: next_id() reads off self.tree.nodes,
+        # which doesn't change until add() runs, and none of these K nodes are
+        # added until after run_parallel_round() -- calling next_id() again for
+        # each one here would hand every successful worker the SAME id.
+        next_it = self.tree.next_id()
+        for w, p in enumerate(proposals):
+            if not p["ok"]:
+                continue
+            it = next_it
+            next_it += 1
+            code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
+            run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
+            code = p["obj"]["code"]
+            if self.inject_error_at is not None and it == self.inject_error_at:
+                code += "\nraise RuntimeError('injected failure (harness robustness test)')\n"
+                p["events"].append({"type": "injected_error_for_testing",
+                                   "note": "harness appended a raise to exercise the debug path"})
+            exec_jobs.append({"slot": w, "code": code, "code_path": code_path,
+                             "menu_choices": p["obj"]["menu_choices"],
+                             "run_dir": run_dir, "seed": self.seed,
+                             "_iteration_id": it, "_proposal": p})
+
+        # ---- dispatch the successful proposals concurrently, ONE shared lock ----
+        results = run_parallel_round(
+            [{"slot": j["slot"], "code": j["code"], "code_path": j["code_path"],
+              "menu_choices": j["menu_choices"], "run_dir": j["run_dir"],
+              "seed": j["seed"]} for j in exec_jobs],
+            timeout_s=self.exec_timeout_s) if exec_jobs else []
+
+        for j, res in zip(exec_jobs, results):
+            it, p, obj = j["_iteration_id"], j["_proposal"], j["_proposal"]["obj"]
+            events = list(p["events"])
+            if not res.ok:
+                events.append({"type": "execution_error",
+                              "error_head": (res.error_trace or "")[:300]})
+            diff_info = {"diff_path": "", "diff_sha256": ""}
+            if os.path.exists(j["code_path"]):
+                parent_code_path = target.code_path if target is not None else None
+                diff_info = save_diff(j["code_path"], parent_code_path, self.diffs_dir, it)
+            self._collect_resources(j["run_dir"])
+            cost = self.spend.record(p["usage"])
+            events.append({"type": "spend", "iteration_usd": round(cost, 6),
+                          "run_total_usd": round(self.spend.total_usd, 6),
+                          "provider": self.llm.provider, "model": self.llm.model,
+                          "round_id": round_id, "worker": j["slot"]})
+            node = Node(iteration_id=it,
+                       parent_id=None if target is None else target.iteration_id,
+                       action=action, menu_choices=obj["menu_choices"],
+                       hypothesis=obj["hypothesis"],
+                       status="success" if res.ok else "error", metrics=res.metrics,
+                       error_trace=res.error_trace, tokens_used=sum(p["usage"].values()),
+                       wall_clock_seconds=res.wall_clock_seconds, timestamp=now(),
+                       code_path=j["code_path"], expected_effect=obj["expected_effect"],
+                       decide_reason=reason, token_breakdown=p["usage"], events=events,
+                       diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"],
+                       seed=self.seed, rationale=obj.get("rationale", {}),
+                       round_id=round_id)
+            self.tree.add(node)
+            self._record_experience(node, best_before)
+            round_nodes.append(node)
+            outcome_s = (f"SUCCESS primary {res.metrics['primary']:.4f}" if res.ok
+                        else f"ERROR {error_headline(res.error_trace)}")
+            print(f"[{round_id}] worker {j['slot']} -> node {it}: {outcome_s}", flush=True)
+
+        # ---- merge: only when >=2 candidates beat the PRE-round best ----
+        beat_best = [n for n in round_nodes if n.status == "success" and
+                    (best_before is None
+                     or n.metrics["primary"] > best_before.metrics["primary"])]
+        if len(beat_best) >= 2:
+            top2 = sorted(beat_best, key=lambda n: -n.metrics["primary"])[:2]
+            merge_node = self._attempt_merge(round_id, reason, top2)
+            round_nodes.append(merge_node)
+            best_individual = top2[0]
+            if merge_node.status == "success" and \
+                    merge_node.metrics["primary"] > best_individual.metrics["primary"]:
+                print(f"[{round_id}] MERGE ACCEPTED: node {merge_node.iteration_id} "
+                     f"(primary {merge_node.metrics['primary']:.4f}) beats best "
+                     f"individual node {best_individual.iteration_id} "
+                     f"({best_individual.metrics['primary']:.4f})", flush=True)
+            else:
+                why = ("merge execution failed" if merge_node.status != "success"
+                      else "merge did not strictly beat the best individual candidate")
+                print(f"[{round_id}] merge REJECTED ({why}); round falls back to "
+                     f"best individual node {best_individual.iteration_id}", flush=True)
+
+        self._print_spend(self._round_counter)
+        return round_nodes
+
+    def _attempt_merge(self, round_id: str, reason: str, top2: list[Node]) -> Node:
+        """Coordinator LLM call over the round's top-2 candidates (both already
+        beat the pre-round best). Executed via the plain SEQUENTIAL run_solution()
+        -- by this point all K workers have already finished, so there is no
+        concurrency left to manage for this one extra call.
+
+        No special-casing for "the merge crashed": it's journaled like any other
+        candidate, and ExperimentTree's existing best-tracking (a new node only
+        becomes best if it STRICTLY exceeds the current best) already enforces
+        "accept only if it strictly beats the best individual" for free, as long
+        as the caller adds the round's individual nodes before this one.
+        """
+        merge_prompt = build_merge_prompt(top2[0], top2[1], reason, self.menu)
+        it = self.tree.next_id()
+        merged_from = [n.iteration_id for n in top2]
+        try:
+            obj, usage, llm_events = self.llm.structured_call(
+                merge_prompt, validate_choices=self.menu.validate_choices)
+        except LLMError as e:
+            node = Node(iteration_id=it, parent_id=top2[0].iteration_id, action="merge",
+                       menu_choices={}, hypothesis="", status="error", metrics=None,
+                       error_trace=f"merge LLM stage failed: {e}", tokens_used=0,
+                       wall_clock_seconds=0.0, timestamp=now(), code_path="",
+                       decide_reason=f"merge of nodes {merged_from}",
+                       events=[{"type": "llm_failure", "error": str(e)[:1000]}],
+                       seed=self.seed, round_id=round_id, merged_from=merged_from)
+            self.tree.add(node)
+            return node
+
+        code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
+        run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
+        res = run_solution(obj["code"], code_path, obj["menu_choices"], run_dir,
+                          timeout_s=self.exec_timeout_s, seed=self.seed)
+        events = list(llm_events)
+        if not res.ok:
+            events.append({"type": "execution_error",
+                          "error_head": (res.error_trace or "")[:300]})
+        diff_info = (save_diff(code_path, top2[0].code_path, self.diffs_dir, it)
+                    if os.path.exists(code_path) else {"diff_path": "", "diff_sha256": ""})
+        self._collect_resources(run_dir)
+        cost = self.spend.record(usage)
+        events.append({"type": "spend", "iteration_usd": round(cost, 6),
+                      "run_total_usd": round(self.spend.total_usd, 6),
+                      "provider": self.llm.provider, "model": self.llm.model})
+        events.append({"type": "merge_attempt", "merged_from": merged_from})
+
+        node = Node(iteration_id=it, parent_id=top2[0].iteration_id, action="merge",
+                   menu_choices=obj["menu_choices"], hypothesis=obj["hypothesis"],
+                   status="success" if res.ok else "error", metrics=res.metrics,
+                   error_trace=res.error_trace, tokens_used=sum(usage.values()),
+                   wall_clock_seconds=res.wall_clock_seconds, timestamp=now(),
+                   code_path=code_path, expected_effect=obj["expected_effect"],
+                   decide_reason=f"merge of nodes {merged_from}", token_breakdown=usage,
+                   events=events, diff_path=diff_info["diff_path"],
+                   diff_sha256=diff_info["diff_sha256"], seed=self.seed,
+                   rationale=obj.get("rationale", {}), round_id=round_id,
+                   merged_from=merged_from)
+        self.tree.add(node)
+        # compared against the best INDIVIDUAL (top2[0]), not the pre-round best --
+        # this is what "did the merge itself succeed" means, distinct from
+        # "did a worker beat the running best" (already recorded per-worker above)
+        self._record_experience(node, top2[0])
+        return node
+
     def _print_spend(self, it: int) -> None:
         pct = (100.0 * self.spend.total_usd / self.spend.ceiling_usd
                if self.spend.ceiling_usd else 0.0)
@@ -264,10 +488,14 @@ class AgentLoop:
               f"draft_count={self.draft_count}, "
               f"spend_ceiling=${self.spend.ceiling_usd:.2f} "
               f"({self.spend.rates.describe(self.llm.provider, self.llm.model)}), "
-              f"ε={EPSILON}, N={N_CONVERGE}")
+              f"ε={EPSILON}, N={N_CONVERGE}"
+              + (f", PARALLEL MODE k={self.parallel_k}" if self.parallel_k else ""))
         stop = self.stop_reason()
         while stop is None:
-            self.iterate()
+            if self.parallel_k:
+                self.iterate_parallel()
+            else:
+                self.iterate()
             stop = self.stop_reason()
         return self.finish(stop)
 

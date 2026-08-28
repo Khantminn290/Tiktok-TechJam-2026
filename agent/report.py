@@ -193,6 +193,11 @@ def render() -> str:
         grounded = (n.get("rationale") or {}).get("grounded_in")
         if grounded:
             lines.append(f"       grounded in: {grounded[:160]}")
+        if n.get("round_id"):
+            tag = n["round_id"]
+            if n.get("merged_from"):
+                tag += f", merged_from={n['merged_from']}"
+            lines.append(f"       [parallel: {tag}]")
     return "\n".join(lines)
 
 

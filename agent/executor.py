@@ -183,6 +183,14 @@ def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
     sequential caller (agent.loop) uses none of these and behaves exactly as
     before.
     """
+    # code_path/run_dir get passed as argv to a subprocess whose cwd may be a
+    # worktree, not this process's cwd -- a RELATIVE path would then resolve
+    # against the WRONG directory (found the hard way: a relative code_path
+    # written correctly from here still produced "can't open file" inside a
+    # worker's worktree, because the subprocess resolved it against cwd=
+    # worktree_root instead). Absolute paths make this caller-independent.
+    code_path = os.path.abspath(code_path)
+    run_dir = os.path.abspath(run_dir)
     os.makedirs(os.path.dirname(code_path), exist_ok=True)
     os.makedirs(run_dir, exist_ok=True)
     with open(code_path, "w") as fh:

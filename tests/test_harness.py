@@ -1012,6 +1012,107 @@ def test_run_parallel_round():
             worktree.remove_worktree(996)
 
 
+def test_merge_acceptance_via_tree_ordering():
+    """Phase 3 item 3 Part B's central design claim: 'accept the merge only if
+    it strictly beats the best individual' requires NO new gating code -- it
+    falls out of ExperimentTree's existing best-tracking as long as the
+    round's individual nodes are added before the merge node. Verified here
+    directly against ExperimentTree/Node, with no LLM call and no training --
+    the full orchestration (agent.loop.iterate_parallel/_attempt_merge) is
+    exercised for real in the end-to-end parallel-round run instead.
+    """
+    print("\n[merge acceptance: falls out of tree.add() ordering, no new gate]")
+    with tempfile.TemporaryDirectory() as td:
+        # Case 1: merge beats both individuals -> merge becomes best
+        t = ExperimentTree(td)
+        t.add(_node(0, "success", 0.60))                          # pre-round best
+        worker_a = _node(1, "success", 0.62, action="draft")
+        worker_a.round_id = "round_1"
+        worker_b = _node(2, "success", 0.63, action="draft")
+        worker_b.round_id = "round_1"
+        t.add(worker_a)
+        t.add(worker_b)
+        check("best individual (worker_b) is provisionally best after workers added",
+              t.best().iteration_id == 2)
+        merge_wins = _node(3, "success", 0.65, action="merge", parent=2)
+        merge_wins.round_id, merge_wins.merged_from = "round_1", [1, 2]
+        t.add(merge_wins)
+        check("merge that strictly beats best individual becomes the tree's best",
+              t.best().iteration_id == 3)
+
+        # Case 2: merge does NOT beat the best individual -> falls back, no gate needed
+        t2 = ExperimentTree(os.path.join(td, "case2"))
+        t2.add(_node(0, "success", 0.60))
+        w_a = _node(1, "success", 0.64, action="draft")
+        w_b = _node(2, "success", 0.61, action="draft")
+        t2.add(w_a)
+        t2.add(w_b)
+        merge_loses = _node(3, "success", 0.62, action="merge", parent=1)  # beats w_b, not w_a
+        merge_loses.merged_from = [1, 2]
+        t2.add(merge_loses)
+        check("merge scoring between the two individuals still loses to the best one",
+              t2.best().iteration_id == 1)
+
+        # Case 3: merge CRASHES -> same fallback, no special-case needed
+        t3 = ExperimentTree(os.path.join(td, "case3"))
+        t3.add(_node(0, "success", 0.60))
+        w_a = _node(1, "success", 0.64, action="draft")
+        w_b = _node(2, "success", 0.66, action="draft")
+        t3.add(w_a)
+        t3.add(w_b)
+        merge_crashed = _node(3, "error", None, action="merge", parent=2)
+        merge_crashed.merged_from = [1, 2]
+        t3.add(merge_crashed)
+        check("a crashed merge (no score) leaves the best individual as best",
+              t3.best().iteration_id == 2)
+
+        # merged_from survives the journal round-trip (append-only file, reloaded)
+        t3_reloaded = ExperimentTree(os.path.join(td, "case3"))
+        reloaded_merge = t3_reloaded.get(3)
+        check("merged_from and round_id round-trip through the journal",
+              reloaded_merge.merged_from == [1, 2])
+
+
+def test_standing_override_survives_reload():
+    """Real bug caught while preparing Part B's real end-to-end test:
+    ExperimentTree recomputes best_node_id purely from the journal's raw
+    single-seed scores on every reload, entirely independent of
+    best_metrics.json -- so a fresh ExperimentTree() (exactly what a resumed
+    run, or a brand-new AgentLoop for a parallel round, constructs) would
+    silently revert to the single-seed pick a reseed override had already
+    superseded. decide_action()/iterate_parallel() consult tree.best()
+    directly, so this isn't cosmetic -- it would make the live search target
+    the wrong node.
+    """
+    print("\n[standing override: survives a fresh ExperimentTree reload]")
+    with tempfile.TemporaryDirectory() as td:
+        t = ExperimentTree(td)
+        t.add(_node(6, "success", 0.6035))   # single-seed "best" per the raw journal
+        t.add(_node(7, "success", 0.6033))   # reseed-verified true winner (lower single-seed)
+        check("without an override file, a fresh reload uses the raw single-seed max",
+              ExperimentTree(td).best_node_id == 6)
+
+        with open(os.path.join(td, "best_metrics.json"), "w") as fh:
+            json.dump({"iteration_id": 7, "reseed_verified": True}, fh)
+        check("WITH a reseed_verified override, a fresh reload respects it",
+              ExperimentTree(td).best_node_id == 7)
+
+        # a NON-reseed-verified best_metrics.json (the normal, un-overridden case)
+        # must NOT change anything -- this only activates for actual overrides
+        with open(os.path.join(td, "best_metrics.json"), "w") as fh:
+            json.dump({"iteration_id": 7}, fh)   # no reseed_verified key
+        check("a plain (non-override) best_metrics.json changes nothing",
+              ExperimentTree(td).best_node_id == 6)
+
+        # subsequent organic progress still supersedes the override normally
+        with open(os.path.join(td, "best_metrics.json"), "w") as fh:
+            json.dump({"iteration_id": 7, "reseed_verified": True}, fh)
+        t2 = ExperimentTree(td)
+        t2.add(_node(8, "success", 0.70))
+        check("a new node that organically beats the override still wins",
+              t2.best_node_id == 8)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1019,7 +1120,9 @@ if __name__ == "__main__":
               test_diff_artifacts, test_data_boundary, test_restricted_access,
               test_final_eval_lock, test_reseed, test_experience,
               test_rationale_schema, test_best_override, test_worktree_lifecycle,
-              test_worker_sandbox_hardlinking, test_run_parallel_round):
+              test_worker_sandbox_hardlinking, test_run_parallel_round,
+              test_merge_acceptance_via_tree_ordering,
+              test_standing_override_survives_reload):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

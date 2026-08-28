@@ -1,0 +1,96 @@
+import argparse
+import json
+import os
+import sys
+import traceback
+from typing import Dict, List
+
+import numpy as np
+
+import train_lib
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--menu-choices", required=True, help="JSON dict of menu choices")
+    p.add_argument("--output-dir", required=True, help="Directory to write outputs")
+    p.add_argument("--seed", type=int, default=0)
+    return p.parse_args()
+
+
+def _load_metrics(path: str) -> Dict[str, float]:
+    with open(path, "r") as fh:
+        obj = json.load(fh)
+    return {k: float(v) for k, v in obj.items()}
+
+
+def main():
+    args = parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
+    try:
+        menu_choices = json.loads(args.menu_choices)
+        if not isinstance(menu_choices, dict):
+            raise ValueError("--menu-choices must decode to a JSON object")
+
+        # Small low-cost ensemble to reduce seed variance.
+        ensemble_seeds: List[int] = [int(args.seed), int(args.seed) + 1, int(args.seed) + 2]
+        valid_scores_list = []
+        test_scores_list = []
+        member_metrics = []
+
+        for i, seed in enumerate(ensemble_seeds):
+            member_dir = os.path.join(args.output_dir, f"member_{i}")
+            os.makedirs(member_dir, exist_ok=True)
+            metrics = train_lib.run(menu_choices, member_dir, seed=seed)
+            if not isinstance(metrics, dict):
+                raise RuntimeError("train_lib.run did not return a metrics dict")
+
+            metrics_path = os.path.join(member_dir, "metrics.json")
+            valid_path = os.path.join(member_dir, "scores_valid.npy")
+            test_path = os.path.join(member_dir, "scores_test.npy")
+            if not os.path.exists(metrics_path):
+                raise FileNotFoundError(f"Missing metrics file from member run: {metrics_path}")
+            if not os.path.exists(valid_path):
+                raise FileNotFoundError(f"Missing valid scores from member run: {valid_path}")
+            if not os.path.exists(test_path):
+                raise FileNotFoundError(f"Missing test scores from member run: {test_path}")
+
+            member_metrics.append(_load_metrics(metrics_path))
+            valid_scores_list.append(np.load(valid_path))
+            test_scores_list.append(np.load(test_path))
+
+        valid_shapes = {arr.shape for arr in valid_scores_list}
+        test_shapes = {arr.shape for arr in test_scores_list}
+        if len(valid_shapes) != 1:
+            raise RuntimeError(f"Ensemble members produced mismatched valid score shapes: {valid_shapes}")
+        if len(test_shapes) != 1:
+            raise RuntimeError(f"Ensemble members produced mismatched test score shapes: {test_shapes}")
+
+        scores_valid = np.mean(np.stack(valid_scores_list, axis=0), axis=0)
+        scores_test = np.mean(np.stack(test_scores_list, axis=0), axis=0)
+
+        splits, _ = train_lib.load_cache()
+        labels_valid = splits["valid"]["long_view"]
+        user_ids_valid = splits["valid"]["user_raw"]
+        metrics = train_lib.evaluate(user_ids_valid, labels_valid, scores_valid)
+        metrics = {k: float(v) for k, v in metrics.items()}
+
+        with open(os.path.join(args.output_dir, "metrics.json"), "w") as fh:
+            json.dump(metrics, fh)
+        np.save(os.path.join(args.output_dir, "scores_valid.npy"), scores_valid)
+        np.save(os.path.join(args.output_dir, "scores_test.npy"), scores_test)
+
+        with open(os.path.join(args.output_dir, "ensemble_members.json"), "w") as fh:
+            json.dump({
+                "seeds": ensemble_seeds,
+                "member_metrics": member_metrics,
+                "ensemble_metrics": metrics,
+            }, fh)
+    except Exception:
+        traceback.print_exc(file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
