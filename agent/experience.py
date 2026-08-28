@@ -42,7 +42,7 @@ HEADER = (
 )
 
 _ENTRY_PREFIX = "### "
-VALID_OUTCOMES = ("HELPED", "DEAD_END", "CRASHED", "NEUTRAL")
+VALID_OUTCOMES = ("HELPED", "DEAD_END", "CRASHED", "NEUTRAL", "CORRECTION")
 
 # Zero-width split, right before any line starting with "### ". Deliberately
 # NOT a plain string.split() on "\n### ": that consumes the newline into the

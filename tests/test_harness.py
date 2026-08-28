@@ -850,7 +850,8 @@ def test_best_override():
                  "n_samples": 5, "original_single_seed_primary": 0.6033},
             ],
         }
-        apply_best_override(td, summary)
+        exp_path = os.path.join(td, "experience.md")  # NOT the real agent/experience.md
+        apply_best_override(td, summary, experience_path=exp_path)
 
         with open(os.path.join(logs_dir, "best_metrics.json")) as fh:
             bm = json.load(fh)
@@ -865,11 +866,33 @@ def test_best_override():
             check("best_solution.py is copied from the NEW winner's code",
                   fh.read() == "# node 7 code\n")
 
+        # durable, append-only provenance -- distinct from best_metrics.json,
+        # which only holds the CURRENT state and would lose this on a 2nd override
+        override_log = os.path.join(logs_dir, "best_override_log.jsonl")
+        check("a durable override-log entry is written", os.path.exists(override_log))
+        with open(override_log) as fh:
+            entries = [json.loads(ln) for ln in fh if ln.strip()]
+        check("override-log entry names old and new best nodes",
+              entries[0]["old_best_node"] == 6 and entries[0]["new_best_node"] == 7)
+        check("override-log entry records the mean/std that triggered the switch",
+              entries[0]["new_best_reseed_mean_primary"] == 0.6037
+              and entries[0]["new_best_reseed_std_primary"] == 0.0004)
+
+        check("a prompt-visible experience.md entry is also written",
+              os.path.exists(exp_path))
+        from agent import experience as exp
+        rendered = exp.render_for_prompt(exp_path)
+        check("experience entry names both nodes and is tagged CORRECTION",
+              "[CORRECTION]" in rendered and "6" in rendered and "7" in rendered)
+
         # idempotent / no-op when nothing changed
-        apply_best_override(td, {**summary, "best_changed": False})
+        apply_best_override(td, {**summary, "best_changed": False}, experience_path=exp_path)
         with open(os.path.join(logs_dir, "best_metrics.json")) as fh:
             check("a not-changed summary is a no-op",
                   json.load(fh)["iteration_id"] == 7)
+        with open(override_log) as fh:
+            check("a not-changed summary does not add a spurious override-log entry",
+                  sum(1 for ln in fh if ln.strip()) == 1)
 
 
 if __name__ == "__main__":

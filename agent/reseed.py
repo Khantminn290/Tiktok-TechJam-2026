@@ -42,6 +42,7 @@ if _ROOT not in sys.path:
 
 from agent.contracts import ExperimentTree  # noqa: E402
 from agent.executor import run_solution  # noqa: E402
+from agent.experience import EXPERIENCE_PATH, append_entry  # noqa: E402
 
 BASELINE_VALID_PRIMARY = 0.6016
 BASELINE_SEED_STD = 0.0008        # the official FM baseline's own 5-seed std
@@ -212,11 +213,19 @@ def run_reseed(root: str, top_n: int, n_seeds: int = 5,
     return summary
 
 
-def apply_best_override(root: str, summary: dict) -> None:
+def apply_best_override(root: str, summary: dict,
+                        experience_path: str = EXPERIENCE_PATH) -> None:
     """Point logs/best_solution.py / best_metrics.json at the mean-verified
     winner, if reseeding found one that differs from the single-seed pick the
     live run recorded. Idempotent: safe to call again against an already-saved
     reseed_results.json without re-running any training.
+
+    Also records the switch itself, durably: best_metrics.json only holds the
+    CURRENT state, so a second override later would silently erase all trace
+    of this one. logs/best_override_log.jsonl is append-only (same pattern as
+    logs/final_eval_override_attempts.jsonl from Phase 1) and is the permanent
+    record; an agent/experience.md entry additionally makes the correction
+    prompt-visible if this journal is ever resumed rather than started fresh.
     """
     if not summary.get("best_changed"):
         return
@@ -224,6 +233,19 @@ def apply_best_override(root: str, summary: dict) -> None:
     old_id = summary["original_best_node"]
     by_id = {n["iteration_id"]: n for n in summary["nodes"]}
     winner, old = by_id[new_id], by_id.get(old_id)
+    old_single = old["original_single_seed_primary"] if old else None
+    old_mean = old["mean_primary"] if old else None
+
+    if old is not None:
+        reason = (f"node {new_id} mean {winner['mean_primary']:.4f} over "
+                 f"{winner['n_samples']} seeds beat node {old_id}'s mean "
+                 f"({old_mean:.4f}) under the same reseed pass -- node {old_id}'s "
+                 f"single-seed pick of {old_single:.4f} did not hold up as the "
+                 f"true best.")
+    else:
+        reason = (f"node {new_id} mean {winner['mean_primary']:.4f} beat the "
+                 f"recorded single-seed best (node {old_id}).")
+
     tree = ExperimentTree(os.path.join(root, "logs"))
     tree.override_best_artifacts(new_id, extra={
         "reseed_verified": True,
@@ -231,16 +253,35 @@ def apply_best_override(root: str, summary: dict) -> None:
         "reseed_std_primary": winner["std_primary"],
         "reseed_n_samples": winner["n_samples"],
         "superseded_single_seed_best_node": old_id,
-        "superseded_single_seed_best_primary":
-            old["original_single_seed_primary"] if old else None,
-        "override_reason": (
-            f"node {new_id} mean {winner['mean_primary']:.4f} over "
-            f"{winner['n_samples']} seeds beat node {old_id}'s mean "
-            f"({old['mean_primary']:.4f}) under the same reseed pass -- node "
-            f"{old_id}'s single-seed pick of {old['original_single_seed_primary']:.4f} "
-            f"did not hold up as the true best." if old else
-            f"node {new_id} mean {winner['mean_primary']:.4f} beat the recorded "
-            f"single-seed best (node {old_id})."),
+        "superseded_single_seed_best_primary": old_single,
+        "override_reason": reason,
     })
+
+    log_path = os.path.join(root, "logs", "best_override_log.jsonl")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "a") as fh:
+        fh.write(json.dumps({
+            "timestamp": time.time(),
+            "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "old_best_node": old_id,
+            "old_best_single_seed_primary": old_single,
+            "old_best_reseed_mean_primary": old_mean,
+            "new_best_node": new_id,
+            "new_best_single_seed_primary": winner["original_single_seed_primary"],
+            "new_best_reseed_mean_primary": winner["mean_primary"],
+            "new_best_reseed_std_primary": winner["std_primary"],
+            "n_seeds": winner["n_samples"],
+            "reason": reason,
+        }) + "\n")
+
+    old_single_s = f"{old_single:.4f}" if old_single is not None else "unrecorded"
+    append_entry(new_id, "CORRECTION", f"best node corrected: {old_id} -> {new_id}",
+                f"A {winner['n_samples']}-seed reseed found node {old_id}'s single-seed "
+                f"score ({old_single_s}) was seed-lucky; node {new_id}'s true mean "
+                f"({winner['mean_primary']:.4f}) is actually higher. {reason} Don't "
+                f"treat a single high score as decisive without checking its variance.",
+                path=experience_path)
+
     print(f"updated logs/best_metrics.json + logs/best_solution.py to point at "
          f"node {new_id} (reseed-verified, was node {old_id})")
+    print(f"wrote {log_path}")

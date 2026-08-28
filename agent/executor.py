@@ -51,6 +51,7 @@ PROTECTED_PATHS = [
     os.path.join(ROOT, "config"),
     os.path.join(ROOT, "results", "final_evaluation.lock"),
     os.path.join(ROOT, "agent", "experience.md"),
+    os.path.join(ROOT, "logs", "best_override_log.jsonl"),
 ]
 
 SEED_SOLUTION_PATH = os.path.join(RUNTIME_DIR, "seed_solution.py")
