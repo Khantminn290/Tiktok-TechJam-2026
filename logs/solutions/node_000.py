@@ -7,29 +7,34 @@ import traceback
 import train_lib
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument("--menu-choices", required=True, help="JSON dict of menu choices")
-    p.add_argument("--output-dir", required=True, help="Directory to write metrics.json and score npy files")
-    p.add_argument("--seed", type=int, default=0)
-    return p.parse_args()
-
-
 def main():
-    args = parse_args()
-    os.makedirs(args.output_dir, exist_ok=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--menu-choices", type=str, required=True)
+    parser.add_argument("--output-dir", type=str, required=True)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+
     try:
         menu_choices = json.loads(args.menu_choices)
-        if not isinstance(menu_choices, dict):
-            raise ValueError("--menu-choices must decode to a JSON object")
+        os.makedirs(args.output_dir, exist_ok=True)
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-        if metrics is None:
-            metrics_path = os.path.join(args.output_dir, "metrics.json")
-            if not os.path.exists(metrics_path):
-                raise RuntimeError("train_lib.run returned None and did not write metrics.json")
+
+        metrics_path = os.path.join(args.output_dir, "metrics.json")
+        if not os.path.exists(metrics_path):
+            with open(metrics_path, "w") as f:
+                json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+        required = [
+            os.path.join(args.output_dir, "metrics.json"),
+            os.path.join(args.output_dir, "scores_valid.npy"),
+            os.path.join(args.output_dir, "scores_test.npy"),
+        ]
+        missing = [p for p in required if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError("Missing required output files: " + ", ".join(missing))
+
         return 0
-    except Exception as e:
-        sys.stderr.write("ERROR: " + str(e) + "\n")
+    except Exception:
         traceback.print_exc(file=sys.stderr)
         return 1
 

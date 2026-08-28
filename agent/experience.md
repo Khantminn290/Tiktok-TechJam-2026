@@ -11,3 +11,21 @@ menu_choices={"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "mu
 
 ### [CRASHED] iter 10 -- Keep the current strongest recipe fixed but make training more robust by averaging scores from sever
 menu_choices={"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "none"}. TIMEOUT: training run exceeded 1200s and was killed.
+### [HELPED] iter 0 -- Switching the baseline FM from pointwise logloss to a ranking-aligned hybrid listwise objective shou
+menu_choices={"loss": "listwise_softmax_plus_pointwise", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} raised valid primary to 0.5986 (previous best n/a).
+
+### [NEUTRAL] iter 1 -- Adding train-period positive-history pooling to the current strongest ranking-aligned FM should impr
+menu_choices={"loss": "listwise_softmax_plus_pointwise", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} scored 0.5985, no clear change vs the running best.
+
+### [HELPED] iter 2 -- Try pure pairwise BPR on the baseline numpy FM, keeping all other axes at baseline. GAUC and nDCG@5
+menu_choices={"loss": "bpr_pairwise", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} raised valid primary to 0.6032 (previous best 0.5986).
+
+### [HELPED] iter 3 -- Starting from the current best BPR FM, add recency-weighted positive-history pooling so each candida
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} raised valid primary to 0.6034 (previous best 0.6032).
+
+### [HELPED] iter 4 -- Starting from the current best BPR + recency-weighted history FM, add the strongest untried high-pri
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} raised valid primary to 0.6038 (previous best 0.6034).
+
+### [HELPED] iter 5 -- Add hour-of-day and day-of-week interaction fields to the current best BPR + recency-weighted-histor
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"} raised valid primary to 0.6039 (previous best 0.6038).
+
