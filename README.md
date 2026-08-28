@@ -152,12 +152,13 @@ own measured findings:
 | Priority | Axis | What it changes |
 |---|---|---|
 | 1 | `loss` | pointwise → BPR pairwise / listwise softmax / hybrid |
-| 2 | `user_history` | behaviour-sequence pooling, DIN-style attention |
-| 3 | `multitask` | auxiliary heads on click / like / forward, censored watch-time |
-| 4 | `model` | FM → DeepFM / DCN |
-| 5 | `temporal` | hour-of-day, day-of-week |
-| 6 | `training` | schedules, two-stage fine-tuning |
-| 7 | `data_extras` | extra data sources — **two options here are locked** |
+| 2 | `score_prior` | train-only Bayesian item/author propensity blend |
+| 3 | `user_history` | behaviour-sequence pooling, DIN-style attention |
+| 4 | `multitask` | auxiliary heads on click / like / forward, censored watch-time |
+| 5 | `model` | FM → DeepFM / DCN |
+| 6 | `temporal` | hour-of-day, day-of-week |
+| 7 | `training` | schedules, two-stage fine-tuning |
+| 8 | `data_extras` | extra data sources — **two options here are locked** |
 
 `config/modification_menu.md` records the reasoning and the two approaches the
 organisers already measured as dead ends (more static features; larger embedding

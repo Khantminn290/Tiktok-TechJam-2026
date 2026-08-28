@@ -7,22 +7,28 @@ straight from the organizers' measured results in `kuairand-starter-kit/README.m
 
 ## Why these axes, in this order
 
+The current menu also includes **score_prior** at priority 2: a train-only,
+empirical-Bayes blend of smoothed video and author long-view logits. Its recency
+variant exponentially downweights older training rows to address temporal drift.
+It is model-agnostic, cheap, and uses no validation or test labels. The original
+organizer-derived priorities below remain the provenance for the other axes.
+
 1. **loss** — the baseline trains pointwise logloss but is scored on within-user ranking
    metrics (GAUC / nDCG@5). Aligning the objective with the metric (BPR pairwise, listwise
    softmax) is the organizers' #1 unexplored recommendation.
-2. **user_history** — the baseline uses zero behavior-sequence information despite hundreds
+3. **user_history** — the baseline uses zero behavior-sequence information despite hundreds
    of train interactions per user (DIN/SIM territory). #2 recommendation.
    Constraint: purely user-side terms are constant within a user and provably cannot change
    within-user ranking — history only helps through interaction with the candidate item.
-3. **multitask** — 12 feedback signals exist on *every* impression (`is_click`, `is_like`,
+4. **multitask** — 12 feedback signals exist on *every* impression (`is_click`, `is_like`,
    `play_time_ms`, …), so auxiliary tasks have no sample-selection bias here. #3.
-4. **model** — DeepFM / DCN. Deliberately ranked *below* 1–3 because the organizers measured
+5. **model** — DeepFM / DCN. Deliberately ranked below the signal/objective improvements because the organizers measured
    that raw capacity (k = 8/16/32) does not move the score; a new architecture only pays off
    when it consumes new signal (e.g. DIN attention needs an MLP).
-5. **temporal** — hour / day-of-week and train→eval drift. Same user-side caveat applies.
-6. **training** — schedules that serve the loss axis (two-stage finetune); capacity knobs
+6. **temporal** — hour / day-of-week and train→eval drift. Same user-side caveat applies.
+7. **training** — schedules that serve the loss axis (two-stage finetune); capacity knobs
    are kept only for combination experiments.
-7. **data_extras** — extra files beyond the two standard logs. **Leakage-sensitive; see
+8. **data_extras** — extra files beyond the two standard logs. **Leakage-sensitive; see
    safety gate.**
 
 ## Measured dead-ends (do not respend iterations here)

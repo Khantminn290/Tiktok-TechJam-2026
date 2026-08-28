@@ -5,6 +5,9 @@ kuairand-starter-kit/KuaiRand-Pure.tar.gz
 # generated submission files
 submission*.csv
 
+# local benchmark score arrays (metrics/resource summaries remain committable)
+results/**/scores_*.npy
+
 # secrets — never commit API keys
 .env
 

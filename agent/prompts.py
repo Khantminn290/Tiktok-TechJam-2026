@@ -31,7 +31,7 @@ TASK (fixed, do not reinterpret):
 YOUR OUTPUT — exactly ONE JSON object, nothing else (no prose before or after):
 {
   "hypothesis": "<what you try and WHY it should raise valid GAUC/nDCG@5 — judged text>",
-  "menu_choices": {"loss": "...", "user_history": "...", "multitask": "...",
+  "menu_choices": {"loss": "...", "score_prior": "...", "user_history": "...", "multitask": "...",
                     "model": "...", "temporal": "...", "training": "...",
                     "data_extras": "..."},
   "code": "<the COMPLETE runnable python solution script — full file, not a diff>",
@@ -99,8 +99,8 @@ def build_prompt(action: str, target: Node | None, reason: str,
     if action == "draft":
         parts.append(
             "## Instructions\nPropose a FRESH combination not attempted yet. "
-            "Bias toward the highest-priority unexplored axes (loss function and "
-            "user_history are the organizers' top recommendations). One clear "
+            "Bias toward the highest-priority unexplored axes (loss, score_prior, "
+            "and user_history). One clear "
             "hypothesis per draft — do not change every axis at once.")
     elif action == "improve":
         parts.append(
