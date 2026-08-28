@@ -421,10 +421,217 @@ def test_numpy2_json_serialization():
           'meta["field_dims"]["user"]' in api)
 
 
+def test_diff_artifacts():
+    """The literal 'code diff applied' deliverable: unified diff + sha256 per node."""
+    print("\n[diff artifacts]")
+    import hashlib
+    from agent.executor import save_diff
+
+    with tempfile.TemporaryDirectory() as td:
+        parent = os.path.join(td, "parent.py")
+        child = os.path.join(td, "child.py")
+        diffs_dir = os.path.join(td, "diffs")
+        with open(parent, "w") as fh:
+            fh.write("a = 1\nb = 2\n")
+        with open(child, "w") as fh:
+            fh.write("a = 1\nb = 3\n")
+
+        info = save_diff(child, parent, diffs_dir, 7)
+        diff_file = os.path.join(diffs_dir, "node_007.diff")
+        check("diff file written", os.path.exists(diff_file))
+        content = open(diff_file).read()
+        check("diff shows the actual change", "-b = 2" in content and "+b = 3" in content)
+        check("returned sha256 matches the written file",
+              info["diff_sha256"] == hashlib.sha256(content.encode()).hexdigest())
+
+        info2 = save_diff(child, None, diffs_dir, 8)
+        content2 = open(os.path.join(diffs_dir, "node_008.diff")).read()
+        check("parentless draft diffs against runtime/seed_solution.py",
+              "seed_solution.py" in content2)
+        check("that diff is also hashed", len(info2["diff_sha256"]) == 64)
+
+
+def test_data_boundary():
+    """Item 4, half A: the sandboxed test split must not carry outcome columns."""
+    print("\n[data boundary: test-split label redaction]")
+    import data_boundary  # loaded onto sys.path as a side effect of agent.executor
+
+    fake_test_npz = {
+        "user": [0, 1], "video": [3, 4], "author": [5, 6],
+        "long_view": [1.0, 0.0], "is_click": [1.0, 0.0], "is_like": [0.0, 0.0],
+        "is_forward": [0.0, 0.0], "play_time_ms": [500.0, 0.0],
+        "user_raw": ["u0", "u1"],
+    }
+    redacted = data_boundary.redact_test_columns(fake_test_npz)
+    for col in data_boundary.TEST_LABEL_COLUMNS:
+        check(f"'{col}' stripped from the redacted test split", col not in redacted)
+    check("non-label feature columns survive redaction",
+          {"user", "video", "author", "user_raw"} <= set(redacted))
+    check("known outcome columns are exactly what's declared",
+          set(data_boundary.TEST_LABEL_COLUMNS) ==
+          {"long_view", "is_click", "is_like", "is_forward", "play_time_ms"})
+
+
+def test_restricted_access():
+    """Item 4, half B + item 5: a technical (not instruction-following) boundary.
+
+    Enforcement is OS permission bits, so it must hold regardless of which path
+    string reaches the blocked location -- that's the property being tested,
+    not just that *a* convention was followed.
+    """
+    print("\n[restricted_access: OS-level lockdown around the subprocess]")
+    from agent import executor
+    from agent.executor import restricted_access
+
+    # Root bypasses chmod-based restrictions unconditionally, which would make
+    # every check below pass for the wrong reason (nothing was ever blocked).
+    # Simulate root deterministically -- via monkeypatch, not by requiring an
+    # actual root shell -- and confirm the guard refuses to proceed instead of
+    # silently no-op'ing the entire boundary.
+    if hasattr(os, "geteuid"):
+        real_geteuid = os.geteuid
+        os.geteuid = lambda: 0
+        try:
+            executor.assert_not_root()
+            check("assert_not_root refuses to proceed when euid==0", False)
+        except RuntimeError:
+            check("assert_not_root refuses to proceed when euid==0", True)
+        try:
+            with restricted_access(unreadable_paths=[]):
+                pass
+            check("restricted_access itself refuses to proceed under root", False)
+        except RuntimeError:
+            check("restricted_access itself refuses to proceed under root", True)
+        finally:
+            os.geteuid = real_geteuid
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        check("skipped remaining checks (this test process is ACTUALLY root, "
+              "not simulated -- chmod-based checks below would be meaningless)", True)
+        return
+
+    with tempfile.TemporaryDirectory() as td:
+        secret_dir = os.path.join(td, "secret")
+        os.makedirs(secret_dir)
+        secret_file = os.path.join(secret_dir, "labels.txt")
+        with open(secret_file, "w") as fh:
+            fh.write("do not read me\n")
+        protected_file = os.path.join(td, "journal.jsonl")
+        with open(protected_file, "w") as fh:
+            fh.write("{}\n")
+
+        with restricted_access(unreadable_paths=[secret_dir]):
+            try:
+                open(secret_file).read()
+                check("an unreadable dir blocks access via a direct path", False)
+            except OSError:
+                check("an unreadable dir blocks access via a direct path", True)
+        check("permissions restored after the block",
+              open(secret_file).read() == "do not read me\n")
+
+        with restricted_access(read_only_paths=[protected_file]):
+            check("a read-only file is still readable",
+                  open(protected_file).read() == "{}\n")
+            try:
+                open(protected_file, "a").write("x")
+                check("a read-only file refuses writes", False)
+            except OSError:
+                check("a read-only file refuses writes", True)
+        with open(protected_file, "a") as fh:
+            fh.write("y\n")
+        check("write access restored after the block", True)
+
+        # Regression: directory mode alone (e.g. 0o555) blocks creating/deleting
+        # entries but NOT writes to a file that already exists inside it -- an
+        # existing file's own mode bits govern that. A protected *directory*
+        # must therefore lock every file already inside it too.
+        protected_dir = os.path.join(td, "config")
+        os.makedirs(protected_dir)
+        existing = os.path.join(protected_dir, "agent_config.json")
+        with open(existing, "w") as fh:
+            fh.write("{}")
+        with restricted_access(read_only_paths=[protected_dir]):
+            check("a pre-existing file inside a protected dir is still readable",
+                  open(existing).read() == "{}")
+            try:
+                open(existing, "a").write("TAMPERED")
+                check("a pre-existing file inside a protected dir refuses writes", False)
+            except OSError:
+                check("a pre-existing file inside a protected dir refuses writes", True)
+            try:
+                with open(os.path.join(protected_dir, "new.json"), "w") as fh:
+                    fh.write("{}")
+                check("a protected dir refuses new files", False)
+            except OSError:
+                check("a protected dir refuses new files", True)
+        with open(existing, "a") as fh:
+            fh.write("y")
+        check("write access restored for the file inside the dir", True)
+
+        try:
+            with restricted_access(unreadable_paths=[secret_dir]):
+                raise RuntimeError("boom")
+        except RuntimeError:
+            pass
+        check("permissions restored even when the wrapped code raises",
+              open(secret_file).read() == "do not read me\n")
+
+
+def test_final_eval_lock():
+    """Item 3: the one-time hidden-test evaluation is enforced, not just documented."""
+    print("\n[final_evaluation.lock: one-time-eval guard]")
+    from agent.make_submission import (_sha256_file, check_final_eval_guard,
+                                       write_final_eval_lock)
+
+    with tempfile.TemporaryDirectory() as td:
+        lock_path = os.path.join(td, "results", "final_evaluation.lock")
+        override_log = os.path.join(td, "logs", "final_eval_override_attempts.jsonl")
+        sub_path = os.path.join(td, "submission_test.csv")
+        with open(sub_path, "w") as fh:
+            fh.write("row_id,user_id,video_id,score\n0,0,1,0.5\n")
+
+        try:
+            check_final_eval_guard(admin_override=False, lock_path=lock_path,
+                                   override_log_path=override_log)
+            check("first run (no lock yet) is allowed", True)
+        except SystemExit:
+            check("first run (no lock yet) is allowed", False)
+
+        write_final_eval_lock(sub_path, {"GAUC": 0.6, "nDCG@5": 0.5, "primary": 0.55},
+                              lock_path=lock_path)
+        check("lock file written", os.path.exists(lock_path))
+        with open(lock_path) as fh:
+            lock = json.load(fh)
+        check("lock records the submission's real sha256",
+              lock["submission_sha256"] == _sha256_file(sub_path))
+
+        try:
+            check_final_eval_guard(admin_override=False, lock_path=lock_path,
+                                   override_log_path=override_log)
+            check("second run without --admin-override is refused", False)
+        except SystemExit:
+            check("second run without --admin-override is refused", True)
+
+        try:
+            check_final_eval_guard(admin_override=True, lock_path=lock_path,
+                                   override_log_path=override_log)
+            check("--admin-override forces a second run through", True)
+        except SystemExit:
+            check("--admin-override forces a second run through", False)
+
+        with open(override_log) as fh:
+            attempts = [json.loads(ln) for ln in fh if ln.strip()]
+        check("every override attempt is logged (refused + forced)", len(attempts) == 2)
+        check("refused attempt logged as not allowed", attempts[0]["allowed"] is False)
+        check("forced attempt logged as allowed", attempts[1]["allowed"] is True)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
-              test_audit_regressions, test_numpy2_json_serialization):
+              test_audit_regressions, test_numpy2_json_serialization,
+              test_diff_artifacts, test_data_boundary, test_restricted_access,
+              test_final_eval_lock):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -93,6 +93,11 @@ def main():
         sys.exit(f"preflight failed: dataset not found at {data_dir}\n"
                  f"  download it first (see README Quickstart).")
     try:
+        from agent.executor import assert_not_root
+        assert_not_root()
+    except RuntimeError as e:
+        sys.exit(f"preflight failed: {e}")
+    try:
         info = preflight(test=a.smoke, verify_key=not a.no_verify_key)
     except LLMError as e:
         sys.exit(f"preflight failed: {e}")

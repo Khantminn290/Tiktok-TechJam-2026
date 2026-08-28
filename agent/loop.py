@@ -15,7 +15,7 @@ import os
 import time
 
 from .contracts import ExperimentTree, Node, error_headline, now
-from .executor import run_solution
+from .executor import run_solution, save_diff
 from .llm import LLMClient, LLMError
 from .menu import Menu
 from .policy import MIN_DRAFTS, decide_action
@@ -40,8 +40,10 @@ class AgentLoop:
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
         self.runs_dir = os.path.join(self.log_dir, "runs")
+        self.diffs_dir = os.path.join(self.log_dir, "diffs")
         os.makedirs(self.solutions_dir, exist_ok=True)
         os.makedirs(self.runs_dir, exist_ok=True)
+        os.makedirs(self.diffs_dir, exist_ok=True)
         self.menu = Menu(os.path.join(root, "config", "modification_menu.json"),
                          allow_locked_options=allow_locked_options)
         self.llm = LLMClient(model=llm_model, test=test_model)
@@ -170,6 +172,10 @@ class AgentLoop:
         if not res.ok:
             events.append({"type": "execution_error",
                            "error_head": (res.error_trace or "")[:300]})
+        diff_info = {"diff_path": "", "diff_sha256": ""}
+        if os.path.exists(code_path):
+            parent_code_path = target.code_path if target is not None else None
+            diff_info = save_diff(code_path, parent_code_path, self.diffs_dir, it)
         self._collect_resources(run_dir)
         cost = self.spend.record(usage)
         events.append({"type": "spend", "iteration_usd": round(cost, 6),
@@ -191,7 +197,8 @@ class AgentLoop:
                     tokens_used=sum(usage.values()),
                     wall_clock_seconds=res.wall_clock_seconds, timestamp=now(),
                     code_path=code_path, expected_effect=obj["expected_effect"],
-                    decide_reason=reason, token_breakdown=usage, events=events)
+                    decide_reason=reason, token_breakdown=usage, events=events,
+                    diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"])
         self.tree.add(node)
         if res.ok:
             best = self.tree.best()

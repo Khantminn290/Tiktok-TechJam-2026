@@ -16,9 +16,11 @@ results/final_results.json. Do not run it during development.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -33,6 +35,65 @@ from submit import read_submission, write_submission  # noqa: E402
 BASELINE_VALID = {"GAUC": 0.6674, "nDCG@5": 0.5357, "primary": 0.6016}
 BASELINE_TEST = {"GAUC": 0.6610, "nDCG@5": 0.5282, "primary": 0.5946}
 BASELINE_SEED_STD = 0.0008
+
+DEFAULT_LOCK_PATH = os.path.join(_ROOT, "results", "final_evaluation.lock")
+DEFAULT_OVERRIDE_LOG = os.path.join(_ROOT, "logs", "final_eval_override_attempts.jsonl")
+
+
+def _sha256_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        h.update(fh.read())
+    return h.hexdigest()
+
+
+def _log_override_attempt(lock_existed: bool, allowed: bool,
+                          override_log_path: str = DEFAULT_OVERRIDE_LOG) -> None:
+    os.makedirs(os.path.dirname(override_log_path), exist_ok=True)
+    with open(override_log_path, "a") as fh:
+        fh.write(json.dumps({
+            "timestamp": time.time(),
+            "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "lock_existed": lock_existed,
+            "allowed": allowed,
+        }) + "\n")
+
+
+def check_final_eval_guard(admin_override: bool, lock_path: str = DEFAULT_LOCK_PATH,
+                           override_log_path: str = DEFAULT_OVERRIDE_LOG) -> None:
+    """Refuse a second --final-test-eval unless a human explicitly overrides it.
+
+    The organizers score a ONE-TIME hidden-test evaluation. A lock file makes
+    that true by construction: a second attempt fails loudly (sys.exit) unless
+    --admin-override is passed, and either way the attempt is logged, so the
+    override log can't be flattered by the thing it's supposed to catch.
+    """
+    lock_existed = os.path.exists(lock_path)
+    if lock_existed and not admin_override:
+        _log_override_attempt(lock_existed=True, allowed=False,
+                              override_log_path=override_log_path)
+        sys.exit(
+            f"REFUSED: {lock_path} already exists -- the one-time hidden-test "
+            f"evaluation has already run. Pass --admin-override to force a "
+            f"second evaluation (this gets logged to {override_log_path}).")
+    if admin_override:
+        _log_override_attempt(lock_existed=lock_existed, allowed=True,
+                              override_log_path=override_log_path)
+        print(f"! --admin-override used (lock already existed: {lock_existed}) "
+             f"-- logged to {override_log_path}")
+
+
+def write_final_eval_lock(submission_path: str, test_metrics: dict,
+                          lock_path: str = DEFAULT_LOCK_PATH) -> None:
+    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
+    with open(lock_path, "w") as fh:
+        json.dump({
+            "submission_path": os.path.relpath(submission_path, _ROOT),
+            "submission_sha256": _sha256_file(submission_path),
+            "timestamp": time.time(),
+            "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "metrics": test_metrics,
+        }, fh, indent=2)
 
 
 def _rank_normalize(x: np.ndarray) -> np.ndarray:
@@ -111,9 +172,13 @@ def main():
     ap.add_argument("--top-k", type=int, default=None,
                     help="K for --ensemble (default: config/llm_config.json "
                          "ensemble_top_k, or 3)")
+    ap.add_argument("--admin-override", action="store_true",
+                    help="force a second --final-test-eval past the "
+                         "results/final_evaluation.lock guard. Logged either way.")
     a = ap.parse_args()
     if a.final_test_eval:
         a.split = "test"
+        check_final_eval_guard(a.admin_override)
 
     k = a.top_k
     if k is None:
@@ -205,8 +270,10 @@ def main():
         os.makedirs(os.path.join(_ROOT, "results"), exist_ok=True)
         with open(os.path.join(_ROOT, "results", "final_results.json"), "w") as fh:
             json.dump(results, fh, indent=2)
+        write_final_eval_lock(out, r)
         print("\n=== FINAL (one-time) HIDDEN-TEST EVALUATION ===")
         print(json.dumps(results, indent=2))
+        print(f"\nwrote {DEFAULT_LOCK_PATH} -- a second run now needs --admin-override")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ submission*.csv
 
 # derived data cache (rebuilt automatically on first train_lib use)
 runtime/cache/
+runtime/cache_sandbox/
 
 # per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
 logs/runs/

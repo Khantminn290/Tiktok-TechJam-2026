@@ -35,6 +35,11 @@ class Node:
     decide_reason: str = ""           # why decide_action picked this action/target
     token_breakdown: dict = field(default_factory=dict)
     events: list = field(default_factory=list)  # error/recovery events, validation retries…
+    # the literal "code diff applied" deliverable -- unified diff of this node's
+    # script against its parent's (or runtime/seed_solution.py for a parentless
+    # draft), plus its hash so the artifact can be verified against the journal.
+    diff_path: str = ""
+    diff_sha256: str = ""
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), ensure_ascii=False)

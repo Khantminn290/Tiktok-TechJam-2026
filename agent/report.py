@@ -80,6 +80,22 @@ def render() -> str:
                      f"cache reads {tb.get('cache_read_input_tokens', 0):,d}, "
                      f"output {tb.get('output_tokens', 0):,d}")
     lines.append(f"total training wall-clock: {train_s/60:.1f} min")
+
+    baseline_metrics_path = os.path.join(LOGS, "baseline", "metrics.json")
+    if os.path.exists(baseline_metrics_path):
+        with open(baseline_metrics_path) as fh:
+            b = json.load(fh)
+        lines.append(f"baseline reproduction artifact: {baseline_metrics_path} "
+                     f"(captured {b.get('timestamp_iso', '?')}, seed={b.get('seed')})")
+        bv, bt = b.get("metrics", {}).get("valid"), b.get("metrics", {}).get("test")
+        if bv and bt:
+            lines.append(f"  reproduced: valid primary {bv['primary']:.4f}, "
+                         f"test primary {bt['primary']:.4f}")
+    else:
+        lines.append("baseline reproduction artifact: NOT CAPTURED -- run "
+                     "`python3 -m agent.baseline_repro` to generate logs/baseline/ "
+                     "(required deliverable)")
+
     lines.append(f"manual interventions: {len(interventions)}")
     for iv in interventions:
         lines.append(f"  - {iv.get('time_iso', '?')}: {iv['reason']}")
