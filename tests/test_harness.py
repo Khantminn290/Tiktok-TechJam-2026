@@ -895,13 +895,131 @@ def test_best_override():
                   sum(1 for ln in fh if ln.strip()) == 1)
 
 
+def test_worktree_lifecycle():
+    """Phase 3 item 3 Part A: per-worker git worktrees. Uses a dedicated,
+    clearly-out-of-range test slot (999) so it can never collide with a real
+    worker slot, and always cleans up after itself.
+    """
+    print("\n[worktree lifecycle: isolated per-worker checkouts]")
+    from agent import worktree
+
+    check("git worktree is available in this environment", worktree.is_available())
+    TEST_SLOT = 999
+    try:
+        path = worktree.ensure_worktree(TEST_SLOT)
+        check("worktree directory was created", os.path.isdir(path))
+        check("tracked code is checked out", os.path.isdir(os.path.join(path, "runtime")))
+        check("gitignored real dataset is NOT checked out (structural absence)",
+              not os.path.exists(os.path.join(path, "kuairand-starter-kit",
+                                              "KuaiRand-Pure")))
+        again = worktree.ensure_worktree(TEST_SLOT)
+        check("calling ensure_worktree again reuses the same worktree, doesn't rebuild",
+              again == path)
+    finally:
+        worktree.remove_worktree(TEST_SLOT)
+    check("remove_worktree deletes the directory", not os.path.isdir(path))
+    import subprocess as sp
+    listing = sp.run(["git", "worktree", "list"], cwd=worktree.ROOT,
+                     capture_output=True, text=True)
+    check("git no longer tracks the removed worktree",
+          f"worker_{TEST_SLOT}" not in listing.stdout)
+
+
+def test_worker_sandbox_hardlinking():
+    """Phase 3 item 3 Part A: per-worker sandbox data is hardlinked from the
+    one canonical copy, not re-copied -- verifying the "near-zero marginal
+    disk cost for N workers" property directly, not just that files exist.
+    """
+    print("\n[worker sandbox: hardlinked, not re-copied]")
+    from agent import worktree
+    from agent.executor import REAL_DATA_DIR
+    from runtime.data_boundary import SANDBOX_CACHE_DIR, build_worker_sandbox
+
+    TEST_SLOT = 998
+    try:
+        wt_path = worktree.ensure_worktree(TEST_SLOT)
+        cache_dir, data_dir = build_worker_sandbox(REAL_DATA_DIR, wt_path)
+        check("worker sandbox cache dir created", os.path.isdir(cache_dir))
+        check("worker test.npz exists", os.path.exists(os.path.join(cache_dir, "test.npz")))
+
+        canonical = os.path.join(SANDBOX_CACHE_DIR, "test.npz")
+        worker_copy = os.path.join(cache_dir, "test.npz")
+        check("worker's test.npz is HARDLINKED to the canonical copy (same inode, "
+             "zero extra disk) -- not a byte-for-byte re-copy",
+             os.stat(canonical).st_ino == os.stat(worker_copy).st_ino)
+
+        import numpy as np
+        z = np.load(worker_copy, allow_pickle=True)
+        for col in ("long_view", "is_click", "is_like", "is_forward", "play_time_ms"):
+            check(f"worker sandbox test split still has no '{col}' column",
+                  col not in z.files)
+
+        # idempotent: calling again for the same slot doesn't error or duplicate work
+        cache_dir2, _ = build_worker_sandbox(REAL_DATA_DIR, wt_path)
+        check("calling build_worker_sandbox again is a no-op (same path, still linked)",
+              cache_dir2 == cache_dir
+              and os.stat(canonical).st_ino == os.stat(worker_copy).st_ino)
+    finally:
+        worktree.remove_worktree(TEST_SLOT)
+
+
+def test_run_parallel_round():
+    """Phase 3 item 3 Part A: the concurrent dispatch primitive itself --
+    correct per-job results in request order, one job's failure doesn't sink
+    the round, and the real directories are readable again once the whole
+    round (not just the first job) has finished. Uses trivial/fast scripts
+    (same style as test_executor), not real training -- the adversarial
+    multi-vector concurrent hostile-script test was run and reported
+    separately (that one takes several real seconds and is a manual
+    verification step, same pattern as Phase 1's hostile-script checks).
+    """
+    print("\n[run_parallel_round: concurrent dispatch primitive]")
+    from agent.executor import (REAL_CACHE_DIR, REAL_DATA_DIR,
+                                run_parallel_round)
+
+    with tempfile.TemporaryDirectory() as td:
+        ok_code = ("import argparse,os,json\n"
+                  "p=argparse.ArgumentParser();p.add_argument('--menu-choices');"
+                  "p.add_argument('--output-dir');p.add_argument('--seed');a=p.parse_args()\n"
+                  "os.makedirs(a.output_dir,exist_ok=True)\n"
+                  "import numpy as np\n"
+                  "json.dump({'GAUC':0.6,'nDCG@5':0.6,'primary':0.6},"
+                  "open(os.path.join(a.output_dir,'metrics.json'),'w'))\n"
+                  "np.save(os.path.join(a.output_dir,'scores_valid.npy'), np.zeros(124909))\n"
+                  "np.save(os.path.join(a.output_dir,'scores_test.npy'), np.zeros(170588))\n")
+        bad_code = "raise ValueError('deliberate failure for job isolation check')\n"
+
+        jobs = [
+            {"slot": 997, "code": ok_code, "code_path": os.path.join(td, "s0.py"),
+             "menu_choices": {}, "run_dir": os.path.join(td, "r0"), "seed": 0},
+            {"slot": 996, "code": bad_code, "code_path": os.path.join(td, "s1.py"),
+             "menu_choices": {}, "run_dir": os.path.join(td, "r1"), "seed": 0},
+        ]
+        try:
+            results = run_parallel_round(jobs, timeout_s=60)
+            check("run_parallel_round returns one result per job", len(results) == 2)
+            check("results preserve request order (not completion order)",
+                  results[0].ok is True and results[1].ok is False)
+            check("a failing job's error is captured, not raised out of the round",
+                  "ValueError" in (results[1].error_trace or ""))
+            check("real data dir readable again after the round finished",
+                  os.access(REAL_DATA_DIR, os.R_OK | os.X_OK))
+            check("real cache dir readable again after the round finished",
+                  os.access(REAL_CACHE_DIR, os.R_OK | os.X_OK))
+        finally:
+            from agent import worktree
+            worktree.remove_worktree(997)
+            worktree.remove_worktree(996)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
               test_audit_regressions, test_numpy2_json_serialization,
               test_diff_artifacts, test_data_boundary, test_restricted_access,
               test_final_eval_lock, test_reseed, test_experience,
-              test_rationale_schema, test_best_override):
+              test_rationale_schema, test_best_override, test_worktree_lifecycle,
+              test_worker_sandbox_hardlinking, test_run_parallel_round):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

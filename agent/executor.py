@@ -172,7 +172,17 @@ def save_diff(new_code_path: str, parent_code_path, diffs_dir: str,
 
 
 def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
-                 timeout_s: int = 1200, seed: int = 0) -> ExecResult:
+                 timeout_s: int = 1200, seed: int = 0, cwd: str | None = None,
+                 sandbox_paths: tuple[str, str] | None = None,
+                 lock_real_dirs: bool = True) -> ExecResult:
+    """cwd/sandbox_paths/lock_real_dirs exist for run_parallel_round(): a worker
+    running inside its own worktree passes its own (worktree cwd, already-
+    hardlinked sandbox paths) and lock_real_dirs=False, because the COORDINATOR
+    holds one shared lock for the whole concurrent round -- see the module
+    docstring for why per-subprocess locking breaks under concurrency. The
+    sequential caller (agent.loop) uses none of these and behaves exactly as
+    before.
+    """
     os.makedirs(os.path.dirname(code_path), exist_ok=True)
     os.makedirs(run_dir, exist_ok=True)
     with open(code_path, "w") as fh:
@@ -182,18 +192,28 @@ def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
            "--menu-choices", json.dumps(menu_choices),
            "--output-dir", run_dir, "--seed", str(seed)]
 
-    # Build the sandboxed data view BEFORE locking the real paths down (this
-    # step needs to read the real cache/data itself).
-    sandbox_cache_dir = data_boundary.ensure_sandbox_cache(REAL_DATA_DIR, REAL_CACHE_DIR)
-    sandbox_data_dir = data_boundary.sandbox_raw_data_view(REAL_DATA_DIR)
+    if sandbox_paths is not None:
+        sandbox_cache_dir, sandbox_data_dir = sandbox_paths
+    else:
+        # Build the sandboxed data view BEFORE locking the real paths down
+        # (this step needs to read the real cache/data itself).
+        sandbox_cache_dir = data_boundary.ensure_sandbox_cache(REAL_DATA_DIR, REAL_CACHE_DIR)
+        sandbox_data_dir = data_boundary.sandbox_raw_data_view(REAL_DATA_DIR)
     env = _env(sandbox_cache_dir, sandbox_data_dir)
+    run_cwd = cwd or ROOT
+
+    def _launch():
+        return subprocess.run(cmd, capture_output=True, text=True,
+                              timeout=timeout_s, env=env, cwd=run_cwd)
 
     t0 = time.time()
     try:
-        with restricted_access(unreadable_paths=[REAL_DATA_DIR, REAL_CACHE_DIR],
-                               read_only_paths=PROTECTED_PATHS):
-            proc = subprocess.run(cmd, capture_output=True, text=True,
-                                  timeout=timeout_s, env=env, cwd=ROOT)
+        if lock_real_dirs:
+            with restricted_access(unreadable_paths=[REAL_DATA_DIR, REAL_CACHE_DIR],
+                                   read_only_paths=PROTECTED_PATHS):
+                proc = _launch()
+        else:
+            proc = _launch()
     except subprocess.TimeoutExpired as e:
         wall = time.time() - t0
         tail = ((e.stdout or b"").decode(errors="replace")
@@ -255,3 +275,49 @@ def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
     return ExecResult(True, metrics={k: float(metrics[k])
                                      for k in ("GAUC", "nDCG@5", "primary")},
                       wall_clock_seconds=wall, run_dir=run_dir)
+
+
+def run_parallel_round(jobs: list[dict], timeout_s: int = 1200) -> list[ExecResult]:
+    """Runs len(jobs) subprocesses CONCURRENTLY, each inside its own git
+    worktree with its own hardlinked sandbox (runtime.data_boundary), under
+    ONE shared real-data lock for the whole round.
+
+    This is the concurrency fix, not a convenience wrapper: the sequential
+    run_solution() takes/releases the lock once per call, which is correct
+    only when calls never overlap. Two overlapping calls on the same shared
+    directory can either unlock it mid-run (the OTHER worker's subprocess is
+    still executing when this one restores real permissions) or permanently
+    relock it after both finish (whichever call entered second captured
+    "already locked" as its own "original" state, and restores to that).
+    Locking once, here, for the whole batch removes the shared mutable
+    resource from the per-worker code path entirely.
+
+    Each job: {"slot": int, "code": str, "code_path": str,
+              "menu_choices": dict, "run_dir": str, "seed": int}.
+    Returns results in the SAME order as `jobs` (not completion order).
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from . import worktree
+
+    prepared = []
+    for job in jobs:
+        wt_root = worktree.ensure_worktree(job["slot"])
+        cache_dir, data_dir = data_boundary.build_worker_sandbox(REAL_DATA_DIR, wt_root)
+        prepared.append((job, wt_root, cache_dir, data_dir))
+
+    def _run_one(job, wt_root, cache_dir, data_dir):
+        return run_solution(job["code"], job["code_path"], job["menu_choices"],
+                           job["run_dir"], timeout_s=timeout_s,
+                           seed=job.get("seed", 0), cwd=wt_root,
+                           sandbox_paths=(cache_dir, data_dir), lock_real_dirs=False)
+
+    results: list = [None] * len(jobs)
+    with restricted_access(unreadable_paths=[REAL_DATA_DIR, REAL_CACHE_DIR],
+                           read_only_paths=PROTECTED_PATHS):
+        with ThreadPoolExecutor(max_workers=max(1, len(prepared))) as ex:
+            future_to_i = {ex.submit(_run_one, *spec): i
+                          for i, spec in enumerate(prepared)}
+            for fut in as_completed(future_to_i):
+                results[future_to_i[fut]] = fut.result()
+    return results

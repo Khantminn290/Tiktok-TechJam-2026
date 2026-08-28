@@ -12,6 +12,11 @@ submission*.csv
 runtime/cache/
 runtime/cache_sandbox/
 
+# per-worker git worktrees for parallel exploration (agent/worktree.py) --
+# each is its own full checkout, managed by `git worktree`, torn down/rebuilt
+# as needed; never a place that holds anything to commit
+.worktrees/
+
 # per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
 logs/runs/
 logs/archive_*/

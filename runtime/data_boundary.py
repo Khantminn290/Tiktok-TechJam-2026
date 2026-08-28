@@ -8,7 +8,7 @@ say. This module only builds the safe *copies*; the actual enforcement (making
 the real paths unreadable for the duration of the subprocess, regardless of
 which path string reaches them) lives in agent/executor.py.
 
-Two artifacts are produced, both derived and regenerated from the real cache/
+Three artifacts are produced, all derived and regenerated from the real cache/
 data whenever they're stale (mtime-compared), so nothing here is hand-maintained:
 
   ensure_sandbox_cache()   -- a copy of runtime/cache/ where test.npz has the
@@ -23,6 +23,18 @@ data whenever they're stale (mtime-compared), so nothing here is hand-maintained
                               log truncated to the validation date window --
                               test-window rows are physically absent, not
                               filtered by convention.
+  build_worker_sandbox()  -- a PER-WORKER-SLOT copy of the above two, for
+                              concurrent execution (see agent/executor.py
+                              run_parallel_round). The redacted content is
+                              worker-invariant -- same source, same
+                              deterministic redaction -- so files are
+                              HARDLINKED from the one canonical sandbox built
+                              by the two functions above, not re-copied: zero
+                              extra disk, near-instant setup regardless of how
+                              many worker slots exist. Falls back to a real
+                              copy only if hardlinking isn't possible (e.g. the
+                              worker's git worktree ends up on a different
+                              filesystem/volume -- os.link raises OSError).
 """
 from __future__ import annotations
 
@@ -116,3 +128,40 @@ def sandbox_raw_data_view(real_data_dir: str,
     with open(marker, "w") as fh:
         fh.write("built\n")
     return view_dir
+
+
+def _link_or_copy(src: str, dst: str) -> None:
+    if os.path.exists(dst):
+        return   # already set up for this worker slot -- reused across rounds
+    try:
+        os.link(src, dst)
+    except OSError:
+        shutil.copyfile(src, dst)
+
+
+def build_worker_sandbox(real_data_dir: str, worktree_root: str,
+                         real_cache_dir: str = REAL_CACHE_DIR,
+                         canonical_sandbox_dir: str = SANDBOX_CACHE_DIR) -> tuple[str, str]:
+    """Populate a per-worker (cache_dir, data_dir) pair inside worktree_root,
+    hardlinked from the one canonical redacted sandbox. Safe to call from
+    multiple workers concurrently: this never touches real_data_dir/
+    real_cache_dir once the canonical sandbox exists (build/refresh happens
+    here, before any round-level lock is taken -- see run_parallel_round),
+    and each worker only ever writes into its OWN worktree's directory.
+    """
+    ensure_sandbox_cache(real_data_dir, real_cache_dir, canonical_sandbox_dir)
+    sandbox_raw_data_view(real_data_dir, canonical_sandbox_dir)
+
+    worker_cache_dir = os.path.join(worktree_root, "runtime", "cache_sandbox_worker")
+    worker_data_dir = os.path.join(worker_cache_dir, "raw_data_view")
+    os.makedirs(worker_data_dir, exist_ok=True)
+
+    for name in ("meta.json", "vocabs.json", "train.npz", "valid.npz", "test.npz"):
+        _link_or_copy(os.path.join(canonical_sandbox_dir, name),
+                      os.path.join(worker_cache_dir, name))
+
+    src_view = os.path.join(canonical_sandbox_dir, "raw_data_view")
+    for name in os.listdir(src_view):
+        _link_or_copy(os.path.join(src_view, name), os.path.join(worker_data_dir, name))
+
+    return worker_cache_dir, worker_data_dir
