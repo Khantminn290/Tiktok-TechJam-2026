@@ -16,6 +16,7 @@ import time
 
 from .contracts import ExperimentTree, Node, error_headline, now
 from .executor import run_solution, save_diff
+from .experience import append_entry
 from .llm import LLMClient, LLMError
 from .menu import Menu
 from .policy import MIN_DRAFTS, decide_action
@@ -188,6 +189,7 @@ class AgentLoop:
                            "parent_a": target.iteration_id,
                            "parent_b": None if partner is None else partner.iteration_id})
 
+        best_before = self.tree.best()   # captured before add() can change it
         node = Node(iteration_id=it,
                     parent_id=None if target is None else target.iteration_id,
                     action=action, menu_choices=obj["menu_choices"],
@@ -198,8 +200,10 @@ class AgentLoop:
                     wall_clock_seconds=res.wall_clock_seconds, timestamp=now(),
                     code_path=code_path, expected_effect=obj["expected_effect"],
                     decide_reason=reason, token_breakdown=usage, events=events,
-                    diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"])
+                    diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"],
+                    seed=self.seed, rationale=obj.get("rationale", {}))
         self.tree.add(node)
+        self._record_experience(node, best_before)
         if res.ok:
             best = self.tree.best()
             print(f"[iter {it}] SUCCESS primary {res.metrics['primary']:.4f} "
@@ -211,6 +215,38 @@ class AgentLoop:
                   f"{error_headline(res.error_trace)}")
         self._print_spend(it)
         return node
+
+    def _record_experience(self, node: Node, best_before: Node | None) -> None:
+        """One curated lesson per iteration, into agent/experience.md -- distinct
+        from the full node already in the journal. Classifies by comparing this
+        node's outcome to the running best captured just before it was added, so
+        a future hypothesis prompt sees "this config crashed" / "this beat the
+        best" / "this was a dead end" without re-reading the whole journal.
+        """
+        if not node.menu_choices:   # LLM-stage failure -- nothing config-specific
+            return
+        choices_s = json.dumps(node.menu_choices)
+        if node.status != "success":
+            outcome = "CRASHED"
+            body = f"menu_choices={choices_s}. {error_headline(node.error_trace, 200)}"
+        else:
+            primary = node.metrics["primary"]
+            if best_before is None or primary > best_before.metrics["primary"] + 1e-9:
+                outcome = "HELPED"
+                prev = f"{best_before.metrics['primary']:.4f}" if best_before else "n/a"
+                body = (f"menu_choices={choices_s} raised valid primary to "
+                       f"{primary:.4f} (previous best {prev}).")
+            elif primary < best_before.metrics["primary"] - 1e-4:
+                outcome = "DEAD_END"
+                body = (f"menu_choices={choices_s} scored {primary:.4f}, below the "
+                       f"then-current best {best_before.metrics['primary']:.4f} -- "
+                       f"not worth repeating as-is.")
+            else:
+                outcome = "NEUTRAL"
+                body = (f"menu_choices={choices_s} scored {primary:.4f}, no clear "
+                       f"change vs the running best.")
+        title = (node.hypothesis or f"{node.action} node {node.iteration_id}")[:100]
+        append_entry(node.iteration_id, outcome, title, body)
 
     def _print_spend(self, it: int) -> None:
         pct = (100.0 * self.spend.total_usd / self.spend.ceiling_usd

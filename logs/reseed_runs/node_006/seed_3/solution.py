@@ -25,7 +25,7 @@ def main():
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
         if not isinstance(metrics, dict):
             raise RuntimeError("train_lib.run did not return a metrics dict")
-    except Exception:
+    except Exception as e:
         traceback.print_exc(file=sys.stderr)
         return 1
     return 0

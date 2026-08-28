@@ -27,20 +27,31 @@ ENV_PATH = os.path.join(_ROOT, ".env")
 
 PROVIDERS = ("openai", "anthropic")
 
-# The response contract every downstream consumer depends on. Unchanged.
+# The response contract every downstream consumer depends on.
 RESPONSE_SCHEMA = {
     "hypothesis": str,       # what to try and why (judged text — be specific)
     "menu_choices": dict,    # one option id per menu axis
     "code": str,             # FULL solution script (not a diff)
     "expected_effect": str,  # predicted effect on valid GAUC/nDCG@5
+    "rationale": dict,       # {idea, why_expected_to_help, grounded_in} — problem insight
 }
+
+# grounded_in must name something concrete; reject generic non-answers for free
+# (no retry cost for the model, no verification of TRUTH — just laziness).
+_GENERIC_GROUNDING_PHRASES = (
+    "general ml intuition", "general intuition", "common sense", "common ml practice",
+    "it seemed reasonable", "standard practice", "general knowledge", "just a guess",
+)
 
 SYSTEM_PROMPT = (
     "You are the modeling brain of an autonomous ML research agent. "
     "Respond with exactly ONE JSON object and nothing else — no prose before or "
     "after it, no markdown fences. Required keys: hypothesis (string), "
     "menu_choices (object), code (string containing the COMPLETE runnable python "
-    "script), expected_effect (string)."
+    "script), expected_effect (string), rationale (object with idea, "
+    "why_expected_to_help, grounded_in — grounded_in must name a SPECIFIC menu axis/"
+    "option description, a baseline_scores.json/organizer-measured number, or a named "
+    "paper/method, not a generic appeal to 'ML intuition')."
 )
 
 
@@ -320,6 +331,18 @@ class LLMClient:
                              f"got {type(obj[key]).__name__}")
         if isinstance(obj.get("code"), str) and len(obj["code"].strip()) < 50:
             probs.append("'code' must be a complete runnable script, not a stub")
+        if isinstance(obj.get("rationale"), dict):
+            r = obj["rationale"]
+            for sub in ("idea", "why_expected_to_help", "grounded_in"):
+                v = r.get(sub)
+                if not isinstance(v, str) or len(v.strip()) < 15:
+                    probs.append(f"rationale.{sub} must be a specific, non-trivial "
+                                 f"string (>=15 chars)")
+            grounded = str(r.get("grounded_in", "")).strip().lower()
+            if grounded and any(p in grounded for p in _GENERIC_GROUNDING_PHRASES):
+                probs.append("rationale.grounded_in is a generic non-answer -- name a "
+                             "SPECIFIC menu axis/option description, a "
+                             "baseline_scores.json number, or a named paper/method")
         return probs
 
     # ---------- structured call (contract unchanged) ----------

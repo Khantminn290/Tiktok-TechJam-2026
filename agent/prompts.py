@@ -11,6 +11,7 @@ import json
 import os
 
 from .contracts import ExperimentTree, Node, error_headline
+from .experience import render_for_prompt as render_experience
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _API_MD = os.path.join(os.path.dirname(_HERE), "runtime", "API.md")
@@ -35,7 +36,16 @@ YOUR OUTPUT — exactly ONE JSON object, nothing else (no prose before or after)
                     "model": "...", "temporal": "...", "training": "...",
                     "data_extras": "..."},
   "code": "<the COMPLETE runnable python solution script — full file, not a diff>",
-  "expected_effect": "<your quantitative expectation, e.g. '+0.003 primary from ...'>"
+  "expected_effect": "<your quantitative expectation, e.g. '+0.003 primary from ...'>",
+  "rationale": {
+    "idea": "<one sentence: what this iteration changes, concretely>",
+    "why_expected_to_help": "<the mechanism — why THIS change should move GAUC/nDCG@5>",
+    "grounded_in": "<REQUIRED, specific: quote/name the menu axis+option description you
+      are building on (e.g. 'loss axis: organizers rank ranking-aligned loss as the top
+      unexplored direction'), a number from the Modification menu's tested_dead_ends /
+      baseline_scores.json, or a named paper/method (e.g. 'BPR', 'DIN', 'CWM'). A generic
+      'general ML intuition' answer will be rejected and cost you a retry.>"
+  }
 }
 
 SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
@@ -82,6 +92,12 @@ def build_prompt(action: str, target: Node | None, reason: str,
 
     parts.append("## Modification menu (pick exactly one option per axis)\n"
                  + menu.render_for_prompt())
+
+    parts.append(
+        "## Experience memory (curated lessons from past iterations -- read this "
+        "before proposing something that already crashed or was a measured dead "
+        "end; it is NOT the same as the full History section below)\n"
+        + render_experience())
 
     parts.append(f"## Current action (decided by the search policy)\n"
                  f"action: {action}\nreason: {reason}")

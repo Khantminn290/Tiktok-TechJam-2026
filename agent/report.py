@@ -34,6 +34,22 @@ def render() -> str:
     lines = []
     succ = [n for n in nodes if n["status"] == "success" and n.get("metrics")]
     best = max(succ, key=lambda n: n["metrics"]["primary"], default=None)
+    best_override = None
+    best_meta_path = os.path.join(LOGS, "best_metrics.json")
+    if os.path.exists(best_meta_path):
+        with open(best_meta_path) as fh:
+            bm = json.load(fh)
+        canonical = next((n for n in succ if n["iteration_id"] == bm.get("iteration_id")),
+                         None)
+        if canonical is not None:
+            # best_metrics.json is the canonical "current best" pointer -- normally
+            # in sync with the live single-seed max computed above, but agent.reseed
+            # can override it when a multi-seed mean disagrees with that single
+            # sample. Prefer it so this headline never contradicts the RESEED
+            # section printed further down.
+            best = canonical
+            if bm.get("reseed_verified"):
+                best_override = bm
     tok = sum(n.get("tokens_used", 0) for n in nodes)
     tb = {}
     for n in nodes:
@@ -61,7 +77,17 @@ def render() -> str:
         lines.append(f"best: node {best['iteration_id']} — valid primary "
                      f"{m['primary']:.4f} (GAUC {m['GAUC']:.4f}, "
                      f"nDCG@5 {m['nDCG@5']:.4f})")
-        d = m["primary"] - BASELINE_VALID
+        if best_override:
+            lines.append(f"  reseed-verified: mean {best_override['reseed_mean_primary']:.4f} "
+                         f"+/- {best_override['reseed_std_primary']:.4f} over "
+                         f"{best_override['reseed_n_samples']} seeds -- supersedes the "
+                         f"single-seed pick node "
+                         f"{best_override['superseded_single_seed_best_node']} "
+                         f"({best_override['superseded_single_seed_best_primary']:.4f}); "
+                         f"see RESEED section below")
+        headline_primary = (best_override["reseed_mean_primary"] if best_override
+                           else m["primary"])
+        d = headline_primary - BASELINE_VALID
         sig = d / BASELINE_SEED_STD
         verdict = ("within seed noise" if abs(sig) < 2
                    else "beyond seed noise" if abs(sig) < 3
@@ -69,7 +95,8 @@ def render() -> str:
         lines.append(f"delta over official baseline (valid primary "
                      f"{BASELINE_VALID}): {d:+.4f}  "
                      f"= {sig:+.1f}x the baseline's own seed std "
-                     f"({BASELINE_SEED_STD}) - {verdict}")
+                     f"({BASELINE_SEED_STD}) - {verdict}"
+                     + (" [using reseed mean, not single-seed]" if best_override else ""))
         lines.append(f"best menu choices: {json.dumps(best['menu_choices'])}")
     lines.append(f"total LLM tokens (input+output, all types summed): {tok:,d}")
     if tb:
@@ -95,6 +122,40 @@ def render() -> str:
         lines.append("baseline reproduction artifact: NOT CAPTURED -- run "
                      "`python3 -m agent.baseline_repro` to generate logs/baseline/ "
                      "(required deliverable)")
+
+    reseed_path = os.path.join(LOGS, "reseed_results.json")
+    if os.path.exists(reseed_path):
+        with open(reseed_path) as fh:
+            rs = json.load(fh)
+        lines.append("-" * 78)
+        lines.append(f"RESEED (statistical rigor): top {rs.get('top_n_requested')} "
+                     f"node(s) x {rs.get('n_seeds_requested')} seed(s), captured "
+                     f"{rs.get('timestamp_iso', '?')}")
+        if rs.get("stopped_early"):
+            lines.append(f"  ! stopped early: {rs.get('stop_reason')}")
+        for r in rs.get("nodes", []):
+            m, sd, n = r.get("mean_primary"), r.get("std_primary"), r.get("n_samples")
+            single = r.get("original_single_seed_primary")
+            tag = " [seed assumed]" if r.get("original_seed_assumed") else ""
+            if m is None:
+                lines.append(f"  node {r['iteration_id']}: no successful reseed runs{tag}")
+                continue
+            sd_s = f" +/- {sd:.4f}" if sd is not None else " (single sample, no std)"
+            lines.append(f"  node {r['iteration_id']}: mean {m:.4f}{sd_s} "
+                         f"over {n}/{r.get('n_requested')} seeds{tag} "
+                         f"(single-seed result was {single:.4f})")
+        best_orig = rs.get("original_best_node")
+        best_mean = rs.get("best_by_mean_node")
+        if rs.get("best_changed"):
+            lines.append(f"  BEST NODE CHANGES under reseeding: node {best_orig} "
+                         f"(single-seed) -> node {best_mean} (mean over seeds)")
+        elif best_mean is not None:
+            lines.append(f"  best node unchanged under reseeding: node {best_mean}")
+        if "best_by_mean_delta_in_baseline_seed_sigmas" in rs:
+            lines.append(f"  best-by-mean delta over baseline: "
+                         f"{rs['best_by_mean_delta_over_baseline']:+.4f} = "
+                         f"{rs['best_by_mean_delta_in_baseline_seed_sigmas']:+.1f}x "
+                         f"baseline seed std")
 
     lines.append(f"manual interventions: {len(interventions)}")
     for iv in interventions:
@@ -129,6 +190,9 @@ def render() -> str:
         hyp = (n.get("hypothesis") or "(llm-stage failure)").replace("\n", " ")
         lines.append(f"  [{n['iteration_id']:2d}] {n['action']:7s}{parent:5s} {sc}")
         lines.append(f"       {hyp[:140]}")
+        grounded = (n.get("rationale") or {}).get("grounded_in")
+        if grounded:
+            lines.append(f"       grounded in: {grounded[:160]}")
     return "\n".join(lines)
 
 

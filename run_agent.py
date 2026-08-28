@@ -3,6 +3,8 @@
     python3 run_agent.py --smoke                 # cheap 3-iteration plumbing check
     python3 run_agent.py --max-spend-usd 15      # a real run (set the ceiling yourself)
     python3 run_agent.py --inject-error-at 2     # robustness test: break iteration 2
+    python3 run_agent.py --reseed-top 3          # no LLM: reseed the top 3 nodes,
+                                                  # report mean/std (see agent/reseed.py)
 
 Provider, model and API key come from .env (see .env.example), falling back to
 config/llm_config.json for provider and model name only — never the key.
@@ -81,6 +83,20 @@ def main():
                     help="archive any existing logs/ into logs/archive_<ts>/ and start "
                          "iteration 0 from scratch (default: resume the journal, which "
                          "is how a crashed run continues where it left off)")
+    ap.add_argument("--reseed-top", type=int, default=None,
+                    help="statistical rigor mode: re-run the top-N journal nodes "
+                         "across --reseed-seeds different seeds and report mean/std "
+                         "(no LLM calls; see agent/reseed.py). Runs instead of a "
+                         "normal agent loop.")
+    ap.add_argument("--reseed-seeds", type=int, default=5,
+                    help="seeds per node for --reseed-top (default 5, min 2)")
+    ap.add_argument("--reseed-wall-clock-limit-h", type=float,
+                    default=cfg.get("wall_clock_limit_h", 6.0),
+                    help="wall-clock ceiling for --reseed-top. This is its OWN "
+                         "allowance, separate from a normal run's budget -- reseeding "
+                         "happens after a run has already finished and costs no LLM "
+                         "spend, only training time (default: config/agent_config.json "
+                         "wall_clock_limit_h).")
     a = ap.parse_args()
 
     if a.smoke:
@@ -97,6 +113,17 @@ def main():
         assert_not_root()
     except RuntimeError as e:
         sys.exit(f"preflight failed: {e}")
+
+    if a.reseed_top is not None:
+        # No LLM involved -- re-executes already-generated scripts at different
+        # seeds -- so the LLM preflight/auth probe and AgentLoop below are
+        # entirely skipped for this mode.
+        from agent.reseed import run_reseed
+        run_reseed(root=_ROOT, top_n=a.reseed_top, n_seeds=a.reseed_seeds,
+                  wall_clock_limit_h=a.reseed_wall_clock_limit_h,
+                  exec_timeout_s=a.exec_timeout)
+        return
+
     try:
         info = preflight(test=a.smoke, verify_key=not a.no_verify_key)
     except LLMError as e:

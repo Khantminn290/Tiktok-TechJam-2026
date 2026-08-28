@@ -1,0 +1,5 @@
+{
+  "device": "cpu",
+  "train_seconds": 29.395,
+  "gpu_seconds": 0.0
+}

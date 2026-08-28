@@ -40,6 +40,16 @@ class Node:
     # draft), plus its hash so the artifact can be verified against the journal.
     diff_path: str = ""
     diff_sha256: str = ""
+    # the --seed this node was actually trained with (None on journal entries
+    # written before this field existed -- agent/reseed.py assumes 0, the
+    # project's documented default, for those and says so explicitly).
+    seed: Optional[int] = None
+    # {"idea", "why_expected_to_help", "grounded_in"} -- the problem-insight
+    # deliverable for judging. Distinct from `hypothesis` (which is prose the
+    # model writes freely): `grounded_in` must name something concrete (a menu
+    # axis/option description, a baseline_scores.json number, a named paper),
+    # enforced by agent/llm.py's schema check, not left to the model's discretion.
+    rationale: dict = field(default_factory=dict)
 
     def to_json(self) -> str:
         return json.dumps(dataclasses.asdict(self), ensure_ascii=False)
@@ -105,19 +115,37 @@ class ExperimentTree:
             if persist_artifacts:
                 self._write_best_artifacts(node)
 
-    def _write_best_artifacts(self, node: Node):
+    def _write_best_artifacts(self, node: Node, extra: Optional[dict] = None):
         """logs/best_solution.py + logs/best_metrics.json, updated when best changes."""
         if node.code_path and os.path.exists(node.code_path):
             shutil.copyfile(node.code_path, os.path.join(self.log_dir, "best_solution.py"))
+        payload = {
+            "iteration_id": node.iteration_id,
+            "menu_choices": node.menu_choices,
+            "hypothesis": node.hypothesis,
+            "valid_metrics": node.metrics,
+            "code_path": node.code_path,
+            "timestamp": node.timestamp,
+        }
+        if extra:
+            payload.update(extra)
         with open(os.path.join(self.log_dir, "best_metrics.json"), "w") as fh:
-            json.dump({
-                "iteration_id": node.iteration_id,
-                "menu_choices": node.menu_choices,
-                "hypothesis": node.hypothesis,
-                "valid_metrics": node.metrics,
-                "code_path": node.code_path,
-                "timestamp": node.timestamp,
-            }, fh, indent=2, ensure_ascii=False)
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+
+    def override_best_artifacts(self, iteration_id: int, extra: Optional[dict] = None) -> None:
+        """Force logs/best_solution.py / best_metrics.json to point at a specific
+        node, overriding the single-seed 'best' the live loop tracked while
+        running. Used by agent.reseed when a multi-seed mean disagrees with the
+        single-seed pick that produced these files during the original run --
+        reseeding exists precisely to catch that, so when it does, the canonical
+        artifacts everything else reads (agent.report, agent.make_submission)
+        must reflect it, not the one lucky/unlucky sample the live loop saw.
+        """
+        node = self.get(iteration_id)
+        if node is None:
+            raise ValueError(f"no such node in this tree: {iteration_id}")
+        self.best_node_id = iteration_id
+        self._write_best_artifacts(node, extra=extra)
 
     # ---------- queries ----------
     def get(self, iteration_id: Optional[int]) -> Optional[Node]:

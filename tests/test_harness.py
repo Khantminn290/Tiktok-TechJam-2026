@@ -626,12 +626,259 @@ def test_final_eval_lock():
         check("forced attempt logged as allowed", attempts[1]["allowed"] is True)
 
 
+def test_reseed():
+    """Phase 2: top-N reseeding for statistical rigor. No training happens in
+    this test -- every synthetic node's code_path points at a file that
+    doesn't exist (exercising the skip path), and the ceiling-refusal case
+    exits before the training loop is ever entered.
+    """
+    print("\n[reseed: top-N re-seeding for statistical rigor]")
+    from agent.reseed import estimate_wall_clock_s, load_top_n_nodes, run_reseed
+
+    with tempfile.TemporaryDirectory() as td:
+        logs_dir = os.path.join(td, "logs")
+        os.makedirs(logs_dir)
+        journal_path = os.path.join(logs_dir, "journal.jsonl")
+        records = [
+            {"iteration_id": 0, "status": "success", "action": "draft",
+             "metrics": {"primary": 0.60, "GAUC": 0.6, "nDCG@5": 0.6},
+             "code_path": os.path.join(td, "missing_node_000.py"),
+             "menu_choices": {"loss": "pointwise_logloss"},
+             "wall_clock_seconds": 20.0, "seed": 0},
+            {"iteration_id": 1, "status": "success", "action": "draft",
+             "metrics": {"primary": 0.62, "GAUC": 0.6, "nDCG@5": 0.6},
+             "code_path": os.path.join(td, "missing_node_001.py"),
+             "menu_choices": {"loss": "bpr_pairwise"},
+             "wall_clock_seconds": 500.0},   # no "seed" key -> legacy/assumed
+            {"iteration_id": 2, "status": "success", "action": "draft",
+             "metrics": {"primary": 0.55, "GAUC": 0.55, "nDCG@5": 0.55},
+             "code_path": os.path.join(td, "missing_node_002.py"),
+             "menu_choices": {"loss": "listwise_softmax"},
+             "wall_clock_seconds": 10.0, "seed": 0},
+            {"iteration_id": 3, "status": "error", "metrics": None,
+             "code_path": "", "wall_clock_seconds": 0.0},
+        ]
+        with open(journal_path, "w") as fh:
+            for r in records:
+                fh.write(json.dumps(r) + "\n")
+
+        top2 = load_top_n_nodes(journal_path, 2)
+        check("top-N sorted by validation primary, descending",
+              [n["iteration_id"] for n in top2] == [1, 0])
+        check("error/unscored nodes excluded from selection",
+              all(n["status"] == "success" for n in top2))
+
+        est = estimate_wall_clock_s(top2, n_seeds=5)
+        # node 1: no recorded seed -> assumed 0, in [0,5) -> 4 fresh * 500s = 2000
+        # node 0: seed 0, in [0,5) -> 4 fresh * 20s = 80
+        check("estimate reuses the original-seed sample (K-1 fresh runs/node)",
+              est == 2000.0 + 80.0)
+
+        try:
+            run_reseed(root=td, top_n=2, n_seeds=1, wall_clock_limit_h=6.0)
+            check("--reseed-seeds < 2 is rejected (can't compute a std)", False)
+        except SystemExit:
+            check("--reseed-seeds < 2 is rejected (can't compute a std)", True)
+
+        try:
+            run_reseed(root=td, top_n=2, n_seeds=5, wall_clock_limit_h=0.001)
+            check("refuses to start when the wall-clock estimate exceeds the ceiling", False)
+        except SystemExit:
+            check("refuses to start when the wall-clock estimate exceeds the ceiling", True)
+        check("nothing written when refused up front (no training was risked)",
+              not os.path.exists(os.path.join(logs_dir, "reseed_results.json")))
+
+        summary = run_reseed(root=td, top_n=2, n_seeds=5, wall_clock_limit_h=6.0)
+        check("proceeds and writes output when the estimate fits the ceiling",
+              os.path.exists(os.path.join(logs_dir, "reseed_results.json")))
+        check("nodes with a missing code_path are skipped, not crashed on",
+              summary["nodes"] == [])
+
+        empty_root = os.path.join(td, "empty")
+        os.makedirs(os.path.join(empty_root, "logs"))
+        try:
+            run_reseed(root=empty_root, top_n=2, n_seeds=5, wall_clock_limit_h=6.0)
+            check("no journal at all -> refuses cleanly", False)
+        except SystemExit:
+            check("no journal at all -> refuses cleanly", True)
+
+
+def test_experience():
+    """Phase 3 item 1: curated experience memory, auto-compacted to a char
+    budget by dropping whole OLDEST entries, never truncating mid-entry.
+    """
+    print("\n[experience memory: curated lessons, compacted]")
+    from agent import experience as exp
+
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "experience.md")
+
+        check("no file yet -> placeholder, not an error",
+              exp.render_for_prompt(path) == "(no prior experience recorded yet)")
+
+        exp.append_entry(0, "helped", "bpr_pairwise beat pointwise",
+                         "Switching loss to bpr_pairwise raised valid primary "
+                         "by ~0.003 over the pointwise baseline.", path=path)
+        rendered = exp.render_for_prompt(path)
+        check("entry appears with its outcome tag uppercased",
+              "[HELPED]" in rendered and "iter 0" in rendered)
+        check("entry body is present, not truncated",
+              "bpr_pairwise" in rendered and "0.003" in rendered)
+
+        # Force compaction: a budget sized off a REAL entry's length (not a
+        # short placeholder) so it can hold the header plus ~2 real entries --
+        # tight enough to force drops, loose enough that something must survive.
+        probe_entry_len = len(exp.format_entry(0, "dead_end", "idea 0 failed",
+                                               "Tried variant 0; no improvement "
+                                               "over baseline."))
+        tight_budget = len(exp.HEADER) + probe_entry_len * 2 + 20
+        for i in range(1, 6):
+            exp.append_entry(i, "dead_end", f"idea {i} failed",
+                             f"Tried variant {i}; no improvement over baseline.",
+                             path=path, char_budget=tight_budget)
+        with open(path) as fh:
+            final_text = fh.read()
+        check("compaction keeps the file within its character budget",
+              len(final_text) <= tight_budget + len(exp.HEADER))
+        check("compaction drops the OLDEST entries first (iter 0 is gone)",
+              "iter 0" not in final_text)
+        check("the most recent entry survives compaction",
+              "iter 5" in final_text)
+        _, remaining = exp._split_entries(final_text)
+        check("every surviving entry is whole, not cut mid-sentence",
+              all(e.rstrip().endswith(".") or e.rstrip().endswith(")")
+                  for e in remaining))
+
+        # A pathological single entry larger than the whole budget must not
+        # corrupt the file -- it survives whole (nothing sane to cut), rather
+        # than being sliced into invalid partial markdown.
+        huge_body = "x" * (tight_budget * 3)
+        exp.append_entry(99, "crashed", "huge", huge_body, path=path,
+                         char_budget=tight_budget)
+        with open(path) as fh:
+            after_huge = fh.read()
+        check("an oversized single entry is kept whole, not sliced mid-body",
+              huge_body in after_huge)
+
+
+def test_rationale_schema():
+    """Phase 3 item 2: per-idea rationale is schema-enforced, not just requested
+    in prose -- a generic non-answer for grounded_in must fail validation
+    (forcing a repair retry) rather than being silently accepted.
+    """
+    print("\n[rationale schema: problem-insight enforcement]")
+    from agent.llm import LLMClient
+
+    def base_obj(rationale):
+        return {"hypothesis": "try X because Y", "menu_choices": {"loss": "bpr_pairwise"},
+                "code": "x" * 60, "expected_effect": "+0.003", "rationale": rationale}
+
+    good = base_obj({
+        "idea": "Switch loss to bpr_pairwise",
+        "why_expected_to_help": "GAUC/nDCG are ranking metrics; pointwise logloss "
+                               "doesn't directly optimize ranking.",
+        "grounded_in": "loss axis: organizers rank ranking-aligned loss as the top "
+                      "unexplored direction",
+    })
+    check("a well-formed rationale passes schema validation",
+          LLMClient._schema_problems(good) == [])
+
+    check("missing rationale key is rejected",
+          any("rationale" in p for p in
+              LLMClient._schema_problems({k: v for k, v in good.items()
+                                         if k != "rationale"})))
+
+    missing_sub = base_obj({"idea": "x", "why_expected_to_help": "y"})  # no grounded_in
+    check("missing rationale sub-key is rejected",
+          any("grounded_in" in p for p in LLMClient._schema_problems(missing_sub)))
+
+    too_short = base_obj({"idea": "x", "why_expected_to_help": "y", "grounded_in": "z"})
+    check("too-short rationale sub-values are rejected",
+          len(LLMClient._schema_problems(too_short)) > 0)
+
+    for phrase in ("general ML intuition", "It seemed reasonable to try",
+                  "Standard practice in the field"):
+        generic = base_obj({"idea": "switch the loss function to something else",
+                           "why_expected_to_help": "it might improve the score somehow",
+                           "grounded_in": phrase})
+        check(f"generic grounding rejected: {phrase!r}",
+              any("generic" in p for p in LLMClient._schema_problems(generic)))
+
+    named_paper = base_obj({
+        "idea": "Add DIN-style attention over user history",
+        "why_expected_to_help": "weights history items by similarity to the candidate",
+        "grounded_in": "DIN (Deep Interest Network) attention pooling",
+    })
+    check("a named paper/method is accepted as grounding",
+          LLMClient._schema_problems(named_paper) == [])
+
+
+def test_best_override():
+    """A multi-seed reseed mean can disagree with the single-seed pick the live
+    loop recorded; the canonical best_metrics.json/best_solution.py must then
+    point at the reseed-verified winner, not the single lucky/unlucky sample.
+    """
+    print("\n[best-node override: reseed-verified winner supersedes single-seed pick]")
+    from agent.reseed import apply_best_override
+
+    with tempfile.TemporaryDirectory() as td:
+        logs_dir = os.path.join(td, "logs")
+        sol_dir = os.path.join(logs_dir, "solutions")
+        os.makedirs(sol_dir)
+        for iid, content in ((6, "# node 6 code\n"), (7, "# node 7 code\n")):
+            with open(os.path.join(sol_dir, f"node_{iid:03d}.py"), "w") as fh:
+                fh.write(content)
+
+        t = ExperimentTree(logs_dir)
+        n6 = _node(6, "success", 0.6035, choices={"loss": "bpr_pairwise"})
+        n6.code_path = os.path.join(sol_dir, "node_006.py")
+        n7 = _node(7, "success", 0.6033, choices={"loss": "bpr_pairwise"})
+        n7.code_path = os.path.join(sol_dir, "node_007.py")
+        t.add(n6)   # code_path baked into the journal BEFORE apply_best_override
+        t.add(n7)   # reloads the tree from disk, not from this in-memory object
+        check("before override: best_metrics.json points at the single-seed winner",
+              json.load(open(os.path.join(logs_dir, "best_metrics.json")))["iteration_id"] == 6)
+
+        summary = {
+            "best_changed": True,
+            "original_best_node": 6,
+            "best_by_mean_node": 7,
+            "nodes": [
+                {"iteration_id": 6, "mean_primary": 0.6032, "std_primary": 0.0003,
+                 "n_samples": 5, "original_single_seed_primary": 0.6035},
+                {"iteration_id": 7, "mean_primary": 0.6037, "std_primary": 0.0004,
+                 "n_samples": 5, "original_single_seed_primary": 0.6033},
+            ],
+        }
+        apply_best_override(td, summary)
+
+        with open(os.path.join(logs_dir, "best_metrics.json")) as fh:
+            bm = json.load(fh)
+        check("after override: best_metrics.json points at the mean-verified winner",
+              bm["iteration_id"] == 7)
+        check("override records the reseed provenance",
+              bm.get("reseed_verified") is True and bm["reseed_mean_primary"] == 0.6037)
+        check("override records what it superseded",
+              bm["superseded_single_seed_best_node"] == 6
+              and bm["superseded_single_seed_best_primary"] == 0.6035)
+        with open(os.path.join(logs_dir, "best_solution.py")) as fh:
+            check("best_solution.py is copied from the NEW winner's code",
+                  fh.read() == "# node 7 code\n")
+
+        # idempotent / no-op when nothing changed
+        apply_best_override(td, {**summary, "best_changed": False})
+        with open(os.path.join(logs_dir, "best_metrics.json")) as fh:
+            check("a not-changed summary is a no-op",
+                  json.load(fh)["iteration_id"] == 7)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
               test_audit_regressions, test_numpy2_json_serialization,
               test_diff_artifacts, test_data_boundary, test_restricted_access,
-              test_final_eval_lock):
+              test_final_eval_lock, test_reseed, test_experience,
+              test_rationale_schema, test_best_override):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
