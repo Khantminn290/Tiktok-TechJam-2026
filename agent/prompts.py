@@ -146,9 +146,15 @@ def build_prompt(action: str, target: Node | None, reason: str,
     if action == "draft":
         parts.append(
             "## Instructions\nPropose a FRESH combination not attempted yet. "
-            "Bias toward the highest-priority unexplored axes (loss function and "
-            "user_history are the organizers' top recommendations). One clear "
-            "hypothesis per draft — do not change every axis at once.")
+            "The organizers' own top-ranked directions are the loss function and "
+            "user_history, and those are good priors — but priority order is a "
+            "prior, not a restriction, and an axis nothing has actually TRIED yet "
+            "is worth more than another small variation on an axis already "
+            "explored. Check the History below for which axes have real measured "
+            "results and which are still untouched; the model/architecture axis in "
+            "particular is open and untested (the measured dead-end there is about "
+            "embedding capacity, NOT about architecture — see its axis description). "
+            "One clear hypothesis per draft — do not change every axis at once.")
     elif action == "improve":
         parts.append(
             f"## Target node {target.iteration_id} (the ONE node you are improving)\n"
