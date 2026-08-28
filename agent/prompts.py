@@ -55,7 +55,6 @@ SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
   into --output-dir, exits 0. On failure: non-zero exit, readable stderr.
 - Score with the official evaluate (import from train_lib) — NEVER reimplement metrics.
 - NEVER read test labels or compute test metrics. Early stopping uses valid only.
-- Runtime must stay under 20 minutes (numpy FM baseline ≈ 1 min).
 - The simplest valid script is seed_solution.py: parse args, call
   train_lib.run(menu_choices, output_dir, seed). Use custom code (train_lib Path B)
   only when your hypothesis needs something the menu-driven path can't express;
@@ -83,9 +82,41 @@ def _read_code(n: Node) -> str:
         return "<code file missing>"
 
 
+def _compute_budget_section(exec_timeout_s: int) -> str:
+    """Dynamic, not a hardcoded '20 minutes' string: reflects whatever
+    --exec-timeout the run was actually started with, and names the specific
+    failure mode a real run hit -- three independent workers all proposed
+    reimplementing multi-seed ensembling inside one script and all three timed
+    out, because nothing told them exec_timeout_s is a hard, no-partial-credit
+    ceiling OR that agent.reseed already measures seed-variance properly,
+    after the search, for free.
+    """
+    mins = exec_timeout_s / 60
+    return (
+        f"## Compute budget (hard constraint, not a suggestion)\n"
+        f"Your script is KILLED if it runs longer than {exec_timeout_s}s "
+        f"(~{mins:.0f} min) wall-clock, with NO partial credit -- a timeout is "
+        f"scored exactly like a crash, not like a partial success. A single "
+        f"training pass on the menu-driven path (Path A) typically takes well "
+        f"under this (numpy FM: tens of seconds to a few minutes; torch models "
+        f"are capped at 12 epochs). If your idea needs MULTIPLE full training "
+        f"passes inside one script, you must budget explicitly: estimate one "
+        f"pass's cost from the most similar past node's wall-clock time (see "
+        f"History below) and confirm N passes still fits under {exec_timeout_s}s "
+        f"BEFORE writing the script -- do not find out by timing out.\n\n"
+        f"Do NOT propose multi-seed averaging/ensembling as your idea: that is "
+        f"already measured, correctly and for free, by the harness's own "
+        f"`--reseed-top` mechanism AFTER the search converges, run once against "
+        f"the best few nodes -- not by any single iteration re-implementing it "
+        f"under a fraction of that time budget. A node should train ONE "
+        f"configuration ONCE. If your hypothesis is specifically about "
+        f"robustness to seed variance, a single iteration cannot validate that "
+        f"anyway -- propose a different, single-pass idea instead.")
+
+
 def build_prompt(action: str, target: Node | None, reason: str,
-                 tree: ExperimentTree, menu) -> str:
-    parts = [STATIC_CONTEXT]
+                 tree: ExperimentTree, menu, exec_timeout_s: int = 1200) -> str:
+    parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
 
     with open(_API_MD) as fh:
         parts.append("## train_lib API available to your script\n" + fh.read())
@@ -171,7 +202,8 @@ def build_prompt(action: str, target: Node | None, reason: str,
     return "\n\n".join(parts)
 
 
-def build_merge_prompt(a: Node, b: Node, reason: str, menu) -> str:
+def build_merge_prompt(a: Node, b: Node, reason: str, menu,
+                       exec_timeout_s: int = 1200) -> str:
     """Coordinator merge prompt (Phase 3 item 3 Part B): two SIBLING candidates
     from the same parallel round, both of which already beat the running best.
 
@@ -182,7 +214,7 @@ def build_merge_prompt(a: Node, b: Node, reason: str, menu) -> str:
     their shared ancestor would force the model to mentally reconstruct two
     full scripts before it could even start reasoning about combining them.
     """
-    parts = [STATIC_CONTEXT]
+    parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
     with open(_API_MD) as fh:
         parts.append("## train_lib API available to your script\n" + fh.read())
     parts.append("## Modification menu (pick exactly one option per axis)\n"

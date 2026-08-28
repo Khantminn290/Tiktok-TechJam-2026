@@ -142,7 +142,8 @@ class AgentLoop:
         code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
         run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
         events = []
-        prompt = build_prompt(action, target, reason, self.tree, self.menu)
+        prompt = build_prompt(action, target, reason, self.tree, self.menu,
+                             exec_timeout_s=self.exec_timeout_s)
 
         try:
             obj, usage, llm_events = self.llm.structured_call(
@@ -279,7 +280,8 @@ class AgentLoop:
         best_before = self.tree.best()   # ALL K workers compare against this SAME
                                          # snapshot -- they're siblings generated
                                          # from one pre-round state, not a chain
-        prompt = build_prompt(action, target, reason, self.tree, self.menu)
+        prompt = build_prompt(action, target, reason, self.tree, self.menu,
+                             exec_timeout_s=self.exec_timeout_s)
 
         # ---- K independent LLM calls for the SAME decided action ----
         proposals = []
@@ -420,7 +422,8 @@ class AgentLoop:
         "accept only if it strictly beats the best individual" for free, as long
         as the caller adds the round's individual nodes before this one.
         """
-        merge_prompt = build_merge_prompt(top2[0], top2[1], reason, self.menu)
+        merge_prompt = build_merge_prompt(top2[0], top2[1], reason, self.menu,
+                                         exec_timeout_s=self.exec_timeout_s)
         it = self.tree.next_id()
         merged_from = [n.iteration_id for n in top2]
         try:

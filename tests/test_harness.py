@@ -1113,6 +1113,50 @@ def test_standing_override_survives_reload():
               t2.best_node_id == 8)
 
 
+def test_compute_budget_prompt_section():
+    """Fix for the real bug the K=3 test found: all 3 workers reimplemented
+    multi-seed ensembling and all 3 timed out, because nothing told them
+    exec_timeout_s is a hard, no-partial-credit ceiling or that agent.reseed
+    already measures seed-variance for free. Verifies the prompt is DYNAMIC
+    (reflects whatever timeout the run was actually configured with, not a
+    stale hardcoded '20 minutes' string) and explicitly steers away from
+    in-script ensembling.
+    """
+    print("\n[compute budget: dynamic timeout + reseed steering in the prompt]")
+    from agent.menu import Menu
+    from agent.prompts import build_merge_prompt, build_prompt
+
+    menu = Menu(os.path.join(_ROOT, "config", "modification_menu.json"))
+    tree = ExperimentTree(tempfile.mkdtemp())
+
+    for timeout in (300, 1200, 2400):
+        prompt = build_prompt("draft", None, "test", tree, menu,
+                             exec_timeout_s=timeout)
+        check(f"prompt states the ACTUAL configured timeout ({timeout}s), not "
+             f"a hardcoded value", f"{timeout}s" in prompt)
+    check("no more stale hardcoded '20 minutes' text",
+          "under 20 minutes" not in build_prompt("draft", None, "test", tree, menu))
+    check("prompt explicitly says a timeout gets NO partial credit",
+          "NO partial credit" in build_prompt("draft", None, "test", tree, menu,
+                                              exec_timeout_s=1200))
+    check("prompt explicitly points at --reseed-top instead of in-script ensembling",
+          "--reseed-top" in build_prompt("draft", None, "test", tree, menu))
+    check("prompt tells the model NOT to propose multi-seed ensembling itself",
+          "Do NOT propose multi-seed" in build_prompt("draft", None, "test", tree, menu))
+
+    # merge prompt gets the same treatment
+    a = _node(1, "success", 0.62)
+    b = _node(2, "success", 0.63)
+    for n in (a, b):
+        n.code_path = os.path.join(tempfile.gettempdir(), f"missing_{n.iteration_id}.py")
+        n.hypothesis = "x"
+    merge_prompt = build_merge_prompt(a, b, "test merge", menu, exec_timeout_s=900)
+    check("merge prompt also states the actual configured timeout",
+          "900s" in merge_prompt)
+    check("merge prompt also steers away from in-script ensembling",
+          "--reseed-top" in merge_prompt)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1122,7 +1166,8 @@ if __name__ == "__main__":
               test_rationale_schema, test_best_override, test_worktree_lifecycle,
               test_worker_sandbox_hardlinking, test_run_parallel_round,
               test_merge_acceptance_via_tree_ordering,
-              test_standing_override_survives_reload):
+              test_standing_override_survives_reload,
+              test_compute_budget_prompt_section):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
