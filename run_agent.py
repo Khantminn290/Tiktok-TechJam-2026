@@ -34,7 +34,8 @@ from agent.pricing import RateTable  # noqa: E402
 # search must not carry it off.
 SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json",
                         "ab_test",              # A/B evidence, not a search product
-                        "feature_registry.jsonl")  # accumulated feature research
+                        "feature_registry.jsonl",  # accumulated feature research
+                        "opus_research")           # the research journal itself
 
 
 def archive_logs(log_dir: str) -> None:

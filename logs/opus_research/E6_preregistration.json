@@ -1,0 +1,14 @@
+{
+  "experiment": "E6 -- 16-member ensemble of snapshot-averaged members",
+  "written_before_seeing_the_result": true,
+  "hypothesis": "Averaging the top-5 epoch checkpoints per member reduces the variance of the epoch-selection choice. E5 established on HELD-OUT validation halves that this rule generalises better than argmax (+0.00069, +0.87 sigma, t=5.54, 22/24). If that carries into the ensemble, a 16-member ensemble of snapshot-averaged members should beat the incumbent 16-member ensemble of single-best-checkpoint members.",
+  "control": "logs/final_ensemble, 16 members, single best checkpoint, rank-mean = 0.60541",
+  "treatment": "same 16 seeds, snapshot_ensemble=5 + snapshot_force, rank-mean",
+  "decision_rule_fixed_in_advance": {
+    "ADOPT": "delta >= +0.0004 (half the 0.0008 noise floor) on full validation",
+    "INCONCLUSIVE": "|delta| < 0.0004",
+    "REJECT": "delta <= -0.0004"
+  },
+  "important_caveat_stated_in_advance": "Full validation UNDERSTATES this change by construction. The incumbent's epoch was chosen by argmax on this same validation set, so the control is optimistically fitted to the set it is scored on. E5's held-out measurement is the less biased estimate of how the two rules compare on unseen data, i.e. on the hidden test.",
+  "no_selection": "k=16 is all seeds, fixed in advance; no subset search; the aggregation rule is rank-mean, unchanged from the incumbent."
+}

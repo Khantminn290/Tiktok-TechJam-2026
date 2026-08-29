@@ -1,0 +1,85 @@
+preflight OK — provider=openai model=gpt-5.4 (key from $OPENAI_API_KEY, verified)
+  rate card: $2.50/1M in, $15.00/1M out
+  spend ceiling: $3.00 | draft_count=7 | max_iterations=8
+archived previous run to /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/archive_20260830_060655
+kept submission artifacts in place: ab_test, ensemble_results.json, feature_registry.jsonl, final_ensemble
+agent run started: max_iterations=8, wall_clock_limit=6.0h, llm=openai:gpt-5.4, draft_count=7, spend_ceiling=$3.00 ($2.50/1M in, $15.00/1M out), ε=0.002, N=3
+[iter 0] action=draft — only 0 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=exploration (the space still has untried mechanisms worth probing)
+  [feature discovery] declined: No new feature currently clears the bar set by the evidence. The only user-by-key families
+  [planner] 3 candidates (1 path-B), selected: #0 path=A util=0.00129
+  [mechanism audit] warning: MECHANISM NOT EVIDENCED -- the hypothesis claims ensembling but the code shows no sign of it.
+[iter 0] SUCCESS primary 0.6033 (GAUC 0.6695 nDCG@5 0.5371) | best=0.6033 (node 0) | 205s train, 16901 tok
+[iter 0] spend $0.1016 / $3.00 ceiling (3%) | next est $0.0513 | openai:gpt-5.4
+[iter 1] action=draft — only 1 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=ablation (the current best contains components with no isolated evidence)
+  [feature discovery] declined: No new feature is justified by the evidence. The screened families that naturally satisfy 
+  [planner] 3 candidates (1 path-B), selected: #1 path=A util=0.00032
+[iter 1] SUCCESS primary 0.6050 (GAUC 0.6721 nDCG@5 0.5378) | best=0.6050 (node 1) | 71s train, 17724 tok
+[iter 1] spend $0.2097 / $3.00 ceiling (7%) | next est $0.0536 | openai:gpt-5.4
+[iter 2] action=draft — only 2 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [feature discovery] declined: No new feature is well-justified under the measured constraints. The remaining feasible us
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00004
+  [mechanism audit] warning: MECHANISM NOT EVIDENCED -- the hypothesis claims new_loss, ensembling but the code shows no sign of it.
+[iter 2] SUCCESS primary 0.6052 (GAUC 0.6724 nDCG@5 0.5381) | best=0.6052 (node 2) | 71s train, 18001 tok
+[iter 2] spend $0.3183 / $3.00 ceiling (11%) | next est $0.0555 | openai:gpt-5.4
+[iter 3] action=draft — only 3 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [feature discovery] declined: No new feature clears the current evidence bar. The only user-by-KEY axes that are observa
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00001
+  [mechanism audit] warning: MECHANISM NOT EVIDENCED -- the hypothesis claims new_loss but the code shows no sign of it.
+[iter 3] SUCCESS primary 0.6025 (GAUC 0.6688 nDCG@5 0.5363) | best=0.6052 (node 2) | 65s train, 19420 tok
+[iter 3] spend $0.4504 / $3.00 ceiling (15%) | next est $0.0805 | openai:gpt-5.4
+
+=== RUN FINISHED ===
+{
+  "stop_reason": "converged: running-best valid primary improved only 0.0019 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
+  "iterations_used": 4,
+  "iteration_cap": 8,
+  "best_node": 2,
+  "best_valid_metrics": {
+    "GAUC": 0.6723530200203526,
+    "nDCG@5": 0.5381187360794255,
+    "primary": 0.605235878049889
+  },
+  "delta_valid_primary_over_baseline": 0.0036,
+  "total_llm_tokens": {
+    "input_tokens": 122318,
+    "output_tokens": 9642,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "calls": 16,
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "input_plus_output": 131960
+  },
+  "total_training_wall_clock_s": 412.3,
+  "delta_in_baseline_seed_sigmas": 4.54,
+  "total_agent_wall_clock_s": 511.1,
+  "gpu_hours": 0.0,
+  "gpu_seconds_measured": 0.0,
+  "devices_used": [
+    "cpu"
+  ],
+  "spend": {
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "total_usd": 0.450425,
+    "ceiling_usd": 3.0,
+    "iterations_billed": 16,
+    "mean_usd_per_iteration": 0.028152,
+    "max_usd_per_iteration": 0.0805,
+    "rate_card": "$2.50/1M in, $15.00/1M out"
+  },
+  "draft_count": 7,
+  "manual_interventions": 0,
+  "convergence_rule": {
+    "epsilon": 0.002,
+    "N": 3,
+    "counted_iterations": "scored (successful) only"
+  }
+}
+
+best solution: /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/best_solution.py
+generate a submission with: python3 -m agent.make_submission
