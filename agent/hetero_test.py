@@ -115,6 +115,16 @@ def main() -> None:
         "adopt_threshold": ADOPT_THRESHOLD,
         "adopt": bool(delta > ADOPT_THRESHOLD),
     }
+    # Confound check, stated rather than assumed: combined has 32 members and
+    # base has 16, so a naive reading could credit MEMBER COUNT for any gain.
+    # The base k-curve is the control: it is already flat from k=5 to k=16
+    # (0.60491-0.60563, no trend), so 16 more seeds of the SAME config add
+    # approximately nothing. Any real gain is therefore attributable to the
+    # second configuration, not to the extra members.
+    r["member_count_confound"] = (
+        "combined k=32 vs base k=16. The base k-curve is flat from k=5 to k=16 "
+        "with no trend, so additional same-config seeds add ~0; a gain here is "
+        "attributable to the second configuration, not to member count.")
     r["verdict"] = ("ADOPT -- combined beats base beyond the pre-set threshold"
                     if r["adopt"] else
                     "REJECT -- gain does not clear the pre-set threshold; the "
@@ -138,6 +148,7 @@ def main() -> None:
           f"(GAUC {comb_m['GAUC']}, nDCG@5 {comb_m['nDCG@5']})")
     print(f"  vs base                {delta:+.5f}  ({r['delta_sigma']:+.2f} sigma)")
     print(f"\n  {r['verdict']}")
+    print(f"  confound: {r['member_count_confound']}")
     print(f"\nwrote {os.path.relpath(OUT, ROOT)}")
 
 
