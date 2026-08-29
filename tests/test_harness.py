@@ -1882,6 +1882,131 @@ def test_leakage_and_ensemble():
           "0.60504" in ens["heterogeneous_rejected"])
 
 
+def test_candidate_policy():
+    """Multi-candidate planning: the fix for the audit finding that Path B was
+    never GENERATED (not rejected). Selection must be deterministic, gated and
+    auditable."""
+    print("\n[candidate generation + deterministic policy]")
+    from agent import candidates as C
+
+    def mk(i, path="A", cat="exploration", hyp="", mech="x" * 40,
+           gain=0.002, choices=None, grounded="menu axis loss: bpr_pairwise"):
+        return C.Candidate({"hypothesis": hyp or f"idea {i}", "mechanism": mech,
+                            "implementation_path": path, "research_category": cat,
+                            "expected_gain": gain,
+                            "menu_choices": choices or {"loss": f"l{i}", "model": "m"},
+                            "rationale": {"grounded_in": grounded}}, i)
+
+    hist = [{"iteration_id": 0, "status": "success", "hypothesis": "add user historical long_view rate",
+             "menu_choices": {"loss": "bpr_pairwise", "model": "fm_numpy"},
+             "metrics": {"primary": 0.605}, "implementation_path": "A"}]
+
+    # Semantic duplicate detection (not just exact match). Calibration on real
+    # examples showed lexical similarity CANNOT separate "reworded duplicate"
+    # from "genuine extension" -- a legitimate follow-up scored HIGHER (0.75)
+    # than a true duplicate (0.375), because an extension contains its parent
+    # whole. So similarity drives a graded penalty, never a hard block; only an
+    # exact configuration repeat is gated.
+    dup = mk(1, hyp="calculate the user's previous long_view frequency",
+             choices={"loss": "x", "model": "y"})
+    novel = mk(6, hyp="use item popularity prior as a feature",
+               choices={"loss": "x", "model": "y"})
+    C.score_candidates([dup, novel], history=hist, dead_ends=[])
+    check("semantically equivalent proposals are detected, not just exact dupes",
+          dup.parts["max_similarity"] > 0.3 and dup.parts["similar_to_node"] == 0,
+          f"sim={dup.parts.get('max_similarity')}")
+    check("an unrelated proposal is NOT flagged as similar",
+          novel.parts["max_similarity"] < 0.2, f"sim={novel.parts['max_similarity']}")
+    check("a near-duplicate is penalised, not hard-blocked",
+          not dup.rejected and dup.parts["redundancy_factor"] < 1.0)
+    check("the near-duplicate scores strictly below an equivalent novel idea",
+          dup.utility < novel.utility, f"{dup.utility} vs {novel.utility}")
+
+    # The case that forced the redesign: an honest extension of a prior idea is
+    # lexically MORE similar than a reworded duplicate. It must still survive.
+    fu_hist = [{"iteration_id": 0, "status": "success",
+                "hypothesis": "add user history pooling",
+                "menu_choices": {"loss": "bpr_pairwise", "model": "fm_numpy"},
+                "metrics": {"primary": 0.605}, "implementation_path": "A"}]
+    fu = mk(7, hyp="add user history pooling with temporal decay",
+            choices={"loss": "x", "model": "y"})
+    C.score_candidates([fu], history=fu_hist, dead_ends=[])
+    check("a legitimate follow-up is NOT rejected despite very high similarity",
+          not fu.rejected and fu.utility > 0,
+          f"sim={fu.parts['max_similarity']} gates={fu.gates}")
+
+    # exact-config duplicate
+    ex = mk(2, choices={"loss": "bpr_pairwise", "model": "fm_numpy"}, hyp="totally different words here")
+    C.score_candidates([ex], history=hist, dead_ends=[])
+    check("exact configuration repeats are rejected",
+          any("exact configuration" in g for g in ex.gates))
+
+    # plausibility gate: novel+random rejected, novel+plausible kept
+    rnd = mk(3, mech="", grounded="", hyp="try something new")
+    good = mk(4, mech="pairs formed within a session compare items under the "
+                      "same user intent, which the menu cannot express",
+              grounded="measured: train lists average 43.5 impressions vs 5.6 at eval")
+    C.score_candidates([rnd, good], history=hist, dead_ends=[])
+    check("novel+random (no mechanism, no grounding) is REJECTED",
+          any("no stated mechanism" in g for g in rnd.gates))
+    check("novel+plausible survives", not good.rejected and good.utility > 0)
+
+    # dead-end overlap
+    de = mk(5, hyp="use lambdarank ndcg position discount weighting for pairs",
+            mech="weight pairs by delta ndcg at rank five positions" * 2)
+    C.score_candidates([de], history=hist,
+                       dead_ends=["LambdaRank |delta nDCG@5| pair weighting: MEASURED "
+                                  "HERE, decisively worse than bpr_pairwise"])
+    check("candidates overlapping a recorded dead end are rejected",
+          any("dead end" in g for g in de.gates))
+
+    # branch saturation
+    sat_hist = [{"iteration_id": i, "status": "success", "hypothesis": f"h{i}",
+                 "menu_choices": {"loss": "bpr_pairwise", "model": "fm_numpy"},
+                 "metrics": {"primary": 0.605}, "implementation_path": "A"}
+                for i in range(5)]
+    stats = C.branch_stats(sat_hist)
+    check("branch statistics are computed deterministically", len(stats) == 1)
+    check("a branch with collapsed recent returns is marked saturated",
+          ("bpr_pairwise", "fm_numpy") in C.saturated_branches(stats))
+
+    # Path B is scoreable, and costs more but is not banned
+    a = mk(6, path="A", choices={"loss": "za", "model": "m"})
+    b = mk(7, path="B", choices={})
+    b.raw["code_summary"] = "z" * 60
+    C.score_candidates([a, b], history=hist, dead_ends=[])
+    check("Path B candidates are SCORED, not silently dropped",
+          b.utility > 0 and not b.rejected)
+    check("Path B carries a higher cost than Path A", b.parts["cost"] > a.parts["cost"])
+
+    # never-tried branch keeps option value
+    fresh = mk(8, choices={"loss": "brand_new", "model": "brand_new"})
+    C.score_candidates([fresh], history=hist, dead_ends=[])
+    check("an untried branch retains option value (not zero-gain)",
+          fresh.parts["gain"] >= C.NOISE_FLOOR and not fresh.parts["branch_seen"])
+
+    # selection + trace
+    pool = [mk(9, gain=0.0005), mk(10, gain=0.004, choices={"loss": "q", "model": "m"})]
+    C.score_candidates(pool, history=hist, dead_ends=[])
+    w, ranked = C.select(pool)
+    check("selection picks the highest-utility surviving candidate",
+          w is not None and w.utility == max(c.utility for c in pool))
+    tr = C.render_trace(w, ranked, "exploration", None, 20)
+    check("decision trace records every candidate and why",
+          "SELECTED" in tr and "candidates generated" in tr and "parts=" in tr)
+    allg = [mk(11, mech="", grounded="")]
+    C.score_candidates(allg, history=hist, dead_ends=[])
+    w2, _ = C.select(allg)
+    check("if every candidate is gated, selection returns None (falls back)",
+          w2 is None)
+
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("planning uses ONE call for N candidates (token-efficient)",
+          "build_candidate_prompt" in lsrc and lsrc.count("json_call(p)") >= 1)
+    check("the full candidate set is journalled for offline replay",
+          '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1897,7 +2022,7 @@ if __name__ == "__main__":
               test_data_tools_and_proposals, test_stage_b_path_freedom,
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
-              test_leakage_and_ensemble):
+              test_leakage_and_ensemble, test_candidate_policy):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
