@@ -16,6 +16,24 @@ from .experience import render_for_prompt as render_experience
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _API_MD = os.path.join(os.path.dirname(_HERE), "runtime", "API.md")
 
+CANDIDATE_SECTION = (
+    "## Propose SEVERAL candidate experiments, not one\n"
+    "Return a JSON object with a `candidates` list of {n} entries. They are "
+    "scored deterministically by the harness and ONE is selected; you are "
+    "generating the option set, not the final answer, so genuinely different "
+    "ideas are worth more than {n} variations of the same one.\n"
+    "At least one candidate MUST use implementation_path 'B' (a mechanism the "
+    "menu cannot express) IF you can state a real mechanism for it. If you "
+    "honestly cannot, say so in that candidate's hypothesis and mark it path "
+    "'A' -- a fabricated Path B idea is worse than an honest Path A one, and "
+    "the scorer will reject an unfounded candidate anyway.\n"
+    "Each candidate needs: hypothesis, implementation_path, research_category, "
+    "mechanism (WHY this should move GAUC/nDCG@5 on THIS dataset), "
+    "expected_gain (a number, in primary-score units -- the seed noise floor "
+    "is 0.0008, so be honest about magnitude), falsification (what result "
+    "would disprove it), menu_choices (path A) or code_summary (path B).\n"
+    "Only the SELECTED candidate is implemented, so do not write code yet.")
+
 AXIS_PROPOSAL_SECTION = (
     "## Proposing a new axis\n"
     "If the data measurements or the dead-end history point at a category of "
@@ -316,6 +334,34 @@ def build_prompt(action: str, target: Node | None, reason: str,
             "## Instructions\nDiagnose the error and return a FIXED complete script. "
             "Keep the original intent (same menu_choices unless the choices "
             "themselves caused the failure). State the root cause in the hypothesis.")
+    return "\n\n".join(parts)
+
+
+def build_candidate_prompt(action, target, reason, tree, menu, *, n=4,
+                          exec_timeout_s=1200, data_block="", objective=None):
+    """Phase 1 of the two-phase planner: generate a scoreable OPTION SET.
+
+    Deliberately ONE call producing n candidates rather than n calls: the audit
+    found Path B was never generated (not rejected), and the cheapest way to
+    put it on the table is to ask for alternatives explicitly. Extra cost is
+    output tokens for one call, not n× the calls.
+    """
+    parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
+    if data_block:
+        parts.append(data_block)
+    parts.append("## Modification menu (compact index)\n" + menu.render_compact()
+                 + "\n\n" + menu.render_dead_ends())
+    parts.append(f"## Decided action\naction: {action}\nreason: {reason}")
+    if objective:
+        parts.append(f"## Research objective for this iteration: {objective}\n"
+                     f"Prefer candidates in this category; you may include one "
+                     f"outside it if you justify why the objective is wrong.")
+    hist = "\n".join(
+        f"- node {n_.iteration_id} [{n_.action}] "
+        f"{('%.4f' % n_.metrics['primary']) if n_.metrics else 'ERROR'} "
+        f"{json.dumps(n_.menu_choices)}" for n_ in tree.nodes[-8:])
+    parts.append("## Recent attempts\n" + (hist or "(none)"))
+    parts.append(CANDIDATE_SECTION.replace("{n}", str(n)))
     return "\n\n".join(parts)
 
 

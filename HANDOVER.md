@@ -4,7 +4,7 @@ You're picking up an autonomous ML research agent competing on **KuaiRand-Pure**
 (TikTok TechJam 2026, Track 2). This document is for a human starting cold. Ten
 minutes here and you'll know where things stand and what to do next.
 
-Branch: **`main`**.
+Branch: **`search-phase-complete`**. Not merged to `main` yet.
 
 ---
 

@@ -21,7 +21,8 @@ from .llm import LLMClient, LLMError
 from .menu import Menu
 from .policy import MIN_DRAFTS, decide_action
 from .pricing import SpendTracker
-from .prompts import build_merge_prompt, build_prompt
+from .prompts import build_candidate_prompt, build_merge_prompt, build_prompt
+from . import candidates as cand_mod
 from . import inspect as inspect_tools
 from . import propose_axis
 from . import failure as failure_mod
@@ -44,7 +45,8 @@ class AgentLoop:
                  test_model: bool = False, parallel_k: int | None = None,
                  min_branching_iterations: int = 0,
                  enable_data_tools: bool = False,
-                 enable_research_state: bool = False):
+                 enable_research_state: bool = False,
+                 n_candidates: int = 0):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
@@ -90,6 +92,9 @@ class AgentLoop:
         self.min_branching_iterations = int(min_branching_iterations or 0)
         self.enable_data_tools = bool(enable_data_tools)
         self.enable_research_state = bool(enable_research_state)
+        # 0/1 disables multi-candidate planning (old single-proposal behaviour)
+        self.n_candidates = int(n_candidates or 0)
+        self._current_objective = None
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -171,6 +176,57 @@ class AgentLoop:
         if dev:
             self.device_seen.add(str(dev))
 
+    def _plan_candidates(self, action, target, reason, events, extra, objective):
+        """Generate K candidates in ONE call, score them DETERMINISTICALLY,
+        select the winner, and journal the full decision trace.
+
+        Returns (winner_candidate | None, trace_text). Non-fatal: on any
+        failure we fall back to the single-proposal path.
+        """
+        if not self.n_candidates or self.n_candidates < 2:
+            return None, ""
+        import dataclasses
+        try:
+            p = build_candidate_prompt(action, target, reason, self.tree,
+                                       self.menu, n=self.n_candidates,
+                                       exec_timeout_s=self.exec_timeout_s,
+                                       data_block=extra, objective=objective)
+            obj, usage = self.llm.json_call(p)
+            self.spend.record(usage)
+            raw = obj.get("candidates") or []
+            if not isinstance(raw, list) or not raw:
+                return None, ""
+            cands = [cand_mod.Candidate(r, i) for i, r in enumerate(raw)]
+            hist = [dataclasses.asdict(n) for n in self.tree.nodes]
+            dead = (self.menu.raw.get("notes", {}) or {}).get("tested_dead_ends", [])
+            st = None
+            try:
+                st = ResearchState(self.root)
+            except Exception:
+                pass
+            left = max(0, self.max_iterations - len(self.tree.nodes))
+            cand_mod.score_candidates(cands, history=hist, dead_ends=dead,
+                                      state=st, budget_left=left,
+                                      objective=objective)
+            winner, ranked = cand_mod.select(cands)
+            trace = cand_mod.render_trace(winner, ranked, objective, st, left)
+            events.append({"type": "candidate_selection",
+                           "n_candidates": len(ranked),
+                           "n_path_b": sum(1 for c in ranked if c.path == "B"),
+                           "n_rejected": sum(1 for c in ranked if c.rejected),
+                           "selected": (winner.as_dict() if winner else None),
+                           "all": [c.as_dict() for c in ranked]})
+            nb = sum(1 for c in ranked if c.path == "B")
+            print(f"  [planner] {len(ranked)} candidates ({nb} path-B), "
+                  f"selected: "
+                  f"{('#%d path=%s util=%.5f' % (winner.index, winner.path, winner.utility)) if winner else 'NONE (all gated)'}",
+                  flush=True)
+            return winner, trace
+        except Exception as e:
+            events.append({"type": "candidate_planning_skipped",
+                           "error": f"{type(e).__name__}: {str(e)[:200]}"})
+            return None, ""
+
     def _research_block(self, events: list) -> str:
         """Stage C+D: compact research state + the explained category choice.
         Non-fatal -- if it cannot be built the iteration proceeds without it."""
@@ -183,6 +239,7 @@ class AgentLoop:
             d = decide_category(st, nodes, iteration_budget_left=left)
             events.append({"type": "research_category", "category": d["category"],
                            "scores": d["scores"], "reason": d["reason"]})
+            self._current_objective = d["category"]
             print(f"  [research policy] objective={d['category']} "
                   f"({d['reason']})", flush=True)
             return st.render() + "\n\n" + render_decision(d)
@@ -241,6 +298,21 @@ class AgentLoop:
         run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
         events = []
         extra = self._research_block(events) + "\n\n" + self._inspect_phase(events)
+        winner, trace = self._plan_candidates(action, target, reason, events,
+                                              extra, self._current_objective)
+        if trace:
+            extra = extra + "\n\n" + trace
+        if winner is not None:
+            extra += ("\n\n## IMPLEMENT THIS SELECTED CANDIDATE\n"
+                      f"path={winner.path} category={winner.category}\n"
+                      f"hypothesis: {winner.hypothesis}\n"
+                      f"mechanism: {winner.mechanism}\n"
+                      + (f"menu_choices: {json.dumps(winner.menu_choices)}\n"
+                         if winner.path == "A" else "")
+                      + "The option set has already been scored; implement THIS "
+                        "candidate faithfully rather than substituting another "
+                        "idea. Keep implementation_path and research_category "
+                        "consistent with it.")
         prompt = build_prompt(action, target, reason, self.tree, self.menu,
                              exec_timeout_s=self.exec_timeout_s,
                              data_block=extra)

@@ -1,20 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [DEAD_END] iter 6 -- Test whether the remaining untried explicit-signal branch inside the strongest FM recipe — adding th
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "random_log_valid_unbiased_check", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6046, below the then-current best 0.6050 -- not worth repeating as-is.
-
-### [DEAD_END] iter 7 -- Try the only still-plincipled broad additive signal family adjacent to the current best FM+BPR recip
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward_watch", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "random_log_valid_unbiased_check", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6048, below the then-current best 0.6050 -- not worth repeating as-is.
-
-### [DEAD_END] iter 8 -- Try the remaining untested broad-signal schedule variant on top of the current best recipe: keep BPR
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "random_log_valid_unbiased_check", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6010, below the then-current best 0.6050 -- not worth repeating as-is.
-
-### [NEUTRAL] iter 9 -- The current best node already matches the strongest measured pattern on this dataset: broad, uniform
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "random_log_valid_unbiased_check", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6050, no clear change vs the running best.
-
-### [HELPED] iter 0 -- The strongest measured recipe is broad-signal FM+BPR with recency-weighted positive history and hour
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6019 (previous best n/a).
-
 ### [HELPED] iter 1 -- The remaining broad, additive signal family that has not been directly tested in the current stronge
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6046 (previous best n/a).
 
@@ -44,4 +29,19 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [DEAD_END] iter 10 -- Confirmation should focus on the only still-promising observed-once branch: rerun the GRU4Rec sequen
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "random_log_valid_unbiased_check", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6033, below the then-current best 0.6050 -- not worth repeating as-is.
+
+### [HELPED] iter 0 -- Because validation ranking lists are short (mean 5.69 impressions/user) while train users have subst
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6034 (previous best n/a).
+
+### [HELPED] iter 0 -- Adding simple mean-pooled positive user history to the strongest broad-signal FM+BPR core should imp
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6034 (previous best n/a).
+
+### [DEAD_END] iter 1 -- A clean ablation of the incumbent's multitask choice by adding only the lightweight aux_click head o
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "aux_click", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6032, below the then-current best 0.6034 -- not worth repeating as-is.
+
+### [DEAD_END] iter 3 -- A clean loss ablation should reveal whether the incumbent's small lift over the FM baseline is actua
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6021, below the then-current best 0.6034 -- not worth repeating as-is.
+
+### [HELPED] iter 6 -- A clean ablation of the incumbent's training=default choice: keep the current best BPR+FM+mean-poole
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6037 (previous best 0.6034).
 
