@@ -46,6 +46,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 MIN_SEGMENT_USERS = 200      # below this, a segment difference is not readable
+NOISE_FLOOR = 0.0008         # the baseline's own 5-seed std
 
 
 def _cache_dir() -> str:
@@ -150,12 +151,20 @@ def feature_probe(u, y, model_scores, feature, name) -> dict:
     blends = {w: round(within_user_auc(u, y, w * rm + (1 - w) * rf) - base, 5)
               for w in (0.99, 0.95, 0.90)}
     best_gain = max(blends.values())
+    # Judged against the NOISE FLOOR, not against zero. `> 0` reported a
+    # +0.00003 blend gain (0.04 sigma) as "adds residual signal", which is the
+    # same mistake as trusting a single lucky run -- and here it would have
+    # sent the agent to implement a mechanism that carries nothing.
+    meaningful = best_gain >= NOISE_FLOOR / 2
     return {"feature": name,
             "standalone_wAUC": round(within_user_auc(u, y, f), 4),
             "model_wAUC": round(base, 4),
             "blend_delta": blends,
-            "adds_signal": bool(best_gain > 0),
-            "verdict": ("adds residual signal" if best_gain > 0 else
+            "best_gain_sigma": round(best_gain / NOISE_FLOOR, 2),
+            "adds_signal": bool(meaningful),
+            "verdict": ("adds residual signal" if meaningful else
+                        f"NO USABLE RESIDUAL ({best_gain / NOISE_FLOOR:+.2f} sigma "
+                        f"-- inside the noise floor)" if best_gain > 0 else
                         "REDUNDANT -- model already encodes it")}
 
 
