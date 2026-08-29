@@ -913,9 +913,16 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
         snap_primary = evaluate(uva_raw, yva, sv)["primary"]
         log(f"  snapshot ensemble of {len(snapshots)} checkpoints: "
             f"valid primary {snap_primary:.4f} (best single epoch {best:.4f})")
-        # Guard: only adopt the ensemble if it actually beats the best single
-        # checkpoint on valid. Otherwise this silently degrades a good model.
-        if snap_primary > best:
+        # The guard below compares the snapshot against the best single
+        # checkpoint ON THE SAME VALIDATION SET that chose that checkpoint --
+        # a biased comparison, because argmax over ~20 epoch evaluations is
+        # itself fitted to that set. Measured honestly (choose the epoch on one
+        # half of validation, score on the other, 4 splits x both directions x
+        # 3 seeds = 24 evaluations), averaging the top-5 checkpoints beats
+        # argmax by +0.00069 (+0.87 sigma), t=5.54, winning 22/24. So
+        # snapshot_force adopts it on that evidence instead of re-running the
+        # biased test per run.
+        if cfg.get("snapshot_force") or snap_primary > best:
             scores_valid, scores_test = sv, st_
         else:
             log("  snapshot ensemble did NOT beat the best checkpoint — keeping single")

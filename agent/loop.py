@@ -263,6 +263,11 @@ class AgentLoop:
             try:
                 from .frontier import from_root as _frontier
                 blocks.insert(1, _frontier(self.root).render(limit=22))
+                # Capabilities the menu cannot express -- embedding size, decay
+                # constants, the stopping rule. Each earned its place by
+                # changing a conclusion during the Opus research run.
+                from .pipeline_lab import render_for_prompt as _plab
+                blocks.insert(2, _plab())
             except Exception as e:
                 events.append({"type": "frontier_skipped",
                                "error": f"{type(e).__name__}: {str(e)[:160]}"})

@@ -2129,6 +2129,66 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_pipeline_lab():
+    """Capabilities distilled from the Opus research run. Each is asserted on
+    the property that made it useful, not on its existence."""
+    print("\n[pipeline research lab]")
+    import numpy as np
+    from agent import pipeline_lab as PL
+
+    # the audit must find the constant the research found BY HAND
+    hc = PL.hardcoded_constants()
+    names = {c["name"] for c in hc}
+    check("the audit finds the hardcoded history decay",
+          "tau_days" in names, f"{sorted(names)}")
+    tau = [c for c in hc if c["name"] == "tau_days"][0]
+    check("it reports the constant as now reachable, under its cfg alias",
+          tau["reachable_by_agent"] and tau["override_key"] == "hist_tau_days")
+    check("it still flags constants the agent CANNOT reach",
+          any(not c["reachable_by_agent"] for c in hc))
+    check("the override surface stays small (a menu by another name is no better)",
+          len(PL.SAFE_OVERRIDES) <= 14, f"{len(PL.SAFE_OVERRIDES)}")
+
+    # selection_rule_test must separate "higher here" from "generalises"
+    rng = np.random.default_rng(0)
+    n_users, per = 200, 6
+    u = np.repeat(np.arange(n_users), per)
+    truth = rng.normal(size=n_users * per)
+    y = (truth + rng.normal(scale=0.5, size=n_users * per) > 0.4).astype(float)
+    # epoch 3 is genuinely best; the others are noise around it
+    E = np.stack([[truth + rng.normal(scale=s, size=n_users * per)
+                   for s in (3.0, 2.0, 1.0, 0.4, 1.0, 2.0)] for _ in range(2)])
+    rules = {"argmax": lambda p, e: e[int(np.argmax(p))],
+             "avg_top3": lambda p, e: np.mean(e[np.argsort(-p)[:3]], axis=0)}
+    r = PL.selection_rule_test(E, u, y, rules, n_splits=2)
+    check("a selection-rule test evaluates on HELD-OUT users",
+          r["n_evaluations"] == 2 * 2 * E.shape[0])
+    check("it reports whether the rule GENERALISES, not just its score",
+          "generalises" in r["rules"]["avg_top3"])
+
+    # free_recombination must need no training and resample
+    M = np.stack([truth + rng.normal(scale=1.0, size=n_users * per)
+                  for _ in range(6)])
+    fr = PL.free_recombination(M, u, y,
+                               {"mean": lambda m: m.mean(axis=0),
+                                "median": lambda m: np.median(m, axis=0)},
+                               n_subsets=4, subset=4)
+    check("recombination resamples member subsets rather than judging once",
+          fr["n_subsets"] == 4 and fr["rules"]["median"]["n"] == 4)
+    check("it reports a beats_reference verdict against the noise floor",
+          "beats_reference" in fr["rules"]["median"])
+
+    # the lesson must reach the agent
+    pr = PL.render_for_prompt()
+    check("the capabilities and their provenance reach the prompt",
+          "selection_rule_test" in pr and "22/24" in pr)
+    check("the prompt carries the rule of thumb the research kept re-learning",
+          "same data that selected it is not evidence" in pr)
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the lab is wired into the planning prompt",
+          "from .pipeline_lab import render_for_prompt" in lsrc)
+
+
 def test_feature_discovery():
     """Autonomous feature research. The agent could previously only SELECT
     features from a human-authored menu; these assert it can now propose, probe
@@ -2845,7 +2905,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
-              test_feature_discovery,
+              test_pipeline_lab, test_feature_discovery,
               test_mechanism_audit, test_residual_screen_reporting,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
