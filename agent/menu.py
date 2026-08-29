@@ -117,14 +117,31 @@ class Menu:
                          + ", ".join(opts))
         return "\n".join(lines)
 
-    def render_dead_ends(self) -> str:
-        """The measured dead-ends, always sent in full regardless of menu
-        compression -- dropping them would let the agent re-derive known nulls."""
+    # Each dead end must survive into the prompt -- dropping one lets the agent
+    # re-derive a known null -- but they accumulate without bound. At 26 entries
+    # they reached 13.5k characters, comparable to the whole menu, crowding out
+    # the reasoning they exist to inform. The CLAIM is what stops a repeat; the
+    # supporting numbers live in config/modification_menu.json for anyone who
+    # needs them.
+    DEAD_END_HEAD = 240
+
+    def render_dead_ends(self, compact: bool = True) -> str:
+        """Measured dead ends. Compact keeps every entry but only its claim."""
         d = self.raw.get("notes", {}).get("tested_dead_ends", [])
         if not d:
             return ""
-        return ("### Measured dead ends (do NOT respend iterations here):\n"
-                + "\n".join(f"- {x}" for x in d))
+        items = []
+        for x in d:
+            x = " ".join(x.split())
+            if compact and len(x) > self.DEAD_END_HEAD:
+                cut = x.rfind(". ", 0, self.DEAD_END_HEAD)
+                x = (x[:cut + 1] if cut > 80 else x[:self.DEAD_END_HEAD].rstrip() + " ...")
+            items.append(f"- {x}")
+        note = ("" if not compact else
+                "\n(claims only; full measurements are in "
+                "config/modification_menu.json)")
+        return ("### Measured dead ends (do NOT respend iterations here):"
+                + note + "\n" + "\n".join(items))
 
 
 def load_agent_config(path: str) -> dict:

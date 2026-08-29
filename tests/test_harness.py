@@ -1506,6 +1506,14 @@ def test_stage_b_path_freedom():
           "what is the SIMPLEST experiment" in psrc)
     m = Menu(MENU_PATH)
     full, comp = m.render_for_prompt(), m.render_compact() + m.render_dead_ends()
+    check("every dead end survives compaction (none silently dropped)",
+          m.render_dead_ends().count("\n- ")
+          == len(json.load(open(MENU_PATH))["notes"]["tested_dead_ends"]))
+    check("compaction keeps the CLAIM, not just a truncated fragment",
+          all(len(ln) > 40 for ln in m.render_dead_ends().split("\n") if ln.startswith("- ")))
+    check("dead ends stay a minority of the compact prompt",
+          len(m.render_dead_ends()) < len(m.render_for_prompt()) * 0.35,
+          f"{len(m.render_dead_ends())} vs {len(m.render_for_prompt())}")
     check("compact menu is materially smaller than the full menu",
           len(comp) < 0.5 * len(full), f"{len(comp)} vs {len(full)} chars")
     check("dead-ends survive compression (never dropped)",
