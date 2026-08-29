@@ -69,9 +69,10 @@ def control_scores(n_seeds: int) -> dict:
 
 
 def run_variant(overrides: dict, seeds: list, tag: str,
-                choices: dict | None = None, quiet: bool = True) -> dict:
+                choices: dict | None = None, quiet: bool = True,
+                save_dir: str | None = None) -> dict:
     """Train the incumbent with `overrides` applied, at each seed."""
-    import numpy as np  # noqa: F401
+    import numpy as np
     import train_lib
     from evaluate import evaluate
 
@@ -91,6 +92,15 @@ def run_variant(overrides: dict, seeds: list, tag: str,
         m = evaluate(list(va["user_raw"]), va["long_view"], r["scores_valid"])
         res[s] = {k: float(m[k]) for k in ("GAUC", "nDCG@5", "primary")}
         res[s]["seconds"] = round(time.time() - t0, 1)
+        if save_dir:
+            # the prediction arrays are what an ensemble comparison needs; the
+            # metrics alone cannot answer it
+            d = os.path.join(save_dir, f"seed_{s:02d}")
+            os.makedirs(d, exist_ok=True)
+            np.save(os.path.join(d, "scores_valid.npy"), r["scores_valid"])
+            np.save(os.path.join(d, "scores_test.npy"), r["scores_test"])
+            with open(os.path.join(d, "metrics.json"), "w") as fh:
+                json.dump({k: res[s][k] for k in ("GAUC", "nDCG@5", "primary")}, fh)
         print(f"    [{tag}] seed {s}  primary {res[s]['primary']:.5f}  "
               f"{res[s]['seconds']:.0f}s", flush=True)
     return res
