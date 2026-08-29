@@ -168,6 +168,17 @@ class AgentLoop:
 
         res = run_solution(code, code_path, obj["menu_choices"], run_dir,
                            timeout_s=self.exec_timeout_s, seed=self.seed)
+        if res.metric_audit is not None:
+            events.append({"type": "validation_metrics_recomputed",
+                           **res.metric_audit})
+        if res.verification:
+            events.append({
+                "type": "parent_verification",
+                "status": res.verification.get("status"),
+                "solution_sha256": res.verification.get("solution_sha256"),
+                "menu_choices_sha256": res.verification.get("menu_choices_sha256"),
+                "protected_changed": res.verification.get("protected_changed", []),
+            })
         if not res.ok:
             events.append({"type": "execution_error",
                            "error_head": (res.error_trace or "")[:300]})

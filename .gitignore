@@ -14,6 +14,10 @@ results/**/scores_*.npy
 # derived data cache (rebuilt automatically on first train_lib use)
 runtime/cache/
 
+# local research runs (large score arrays and disposable probes)
+scratch/
+results/verified_ensemble/
+
 # per-node prediction arrays are reproducible and too large for Git. The compact
 # node script, record, metrics, and resource files remain committed together.
 logs/nodes/**/scores_*.npy

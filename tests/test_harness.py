@@ -4,20 +4,28 @@ Covers the pieces that must be right before an autonomous run is trusted:
 the safety gate, cross-axis validity checks, the search policy's branching
 decisions, the convergence rule, and the executor's contract enforcement.
 """
+import hashlib
 import json
 import os
 import sys
 import tempfile
 import time
 
+import numpy as np
+
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
 from agent.contracts import ExperimentTree, Node, error_headline  # noqa: E402
-from agent.executor import run_solution  # noqa: E402
+from agent.executor import (_hash_protected, _protected_paths, _runtime_fingerprint,
+                            run_solution)  # noqa: E402
 from agent.loop import EPSILON, N_CONVERGE, AgentLoop  # noqa: E402
+from agent.make_submission import verified_ensemble_scores  # noqa: E402
 from agent.menu import Menu, MenuError  # noqa: E402
 from agent.policy import decide_action  # noqa: E402
+from agent.verified_ensemble import (MENU_CHOICES as ENSEMBLE_CHOICES,
+                                     _rank_normalize,
+                                     _recover_previous)  # noqa: E402
 
 MENU_PATH = os.path.join(_ROOT, "config", "modification_menu.json")
 PASS, FAIL = [], []
@@ -166,6 +174,19 @@ def test_convergence():
 # ------------------------------------------------------- executor robustness
 def test_executor():
     print("\n[executor contract enforcement]")
+    from agent.executor import _env
+    old_key = os.environ.get("OPENAI_API_KEY")
+    os.environ["OPENAI_API_KEY"] = "unit-test-secret"
+    try:
+        check("child environment strips provider credentials",
+              "OPENAI_API_KEY" not in _env())
+    finally:
+        if old_key is None:
+            os.environ.pop("OPENAI_API_KEY", None)
+        else:
+            os.environ["OPENAI_API_KEY"] = old_key
+    trusted = {"GAUC": 0.61, "nDCG@5": 0.53, "primary": 0.57}
+    fake_evaluator = lambda scores: dict(trusted)
     with tempfile.TemporaryDirectory() as td:
         cases = {
             "syntax error": "def broken(:\n",
@@ -179,15 +200,184 @@ def test_executor():
                 "json.dump({'GAUC':float('nan'),'nDCG@5':1,'primary':1},"
                 "open(os.path.join(a.output_dir,'metrics.json'),'w'))\n"),
         }
-        for label, code in cases.items():
-            r = run_solution(code, os.path.join(td, "s.py"), {}, os.path.join(td, "r"),
-                             timeout_s=60)
+        for i, (label, code) in enumerate(cases.items()):
+            r = run_solution(code, os.path.join(td, f"s{i}.py"), {},
+                             os.path.join(td, f"r{i}"), timeout_s=60,
+                             validation_evaluator=fake_evaluator)
             check(f"{label} -> error, not a crash",
                   (not r.ok) and bool(r.error_trace), error_headline(r.error_trace, 60))
+            if label == "runtime exception":
+                check("nonzero exit records unchanged solution hash",
+                      bool(r.verification.get("solution_sha256"))
+                      and r.verification.get("solution_sha256")
+                      == r.verification.get("solution_after_sha256"))
+
+        mutation_cases = {
+            "rewrite": "open(__file__, 'w').write('changed')\n",
+            "delete": "import os\nos.remove(__file__)\n",
+            "rename": "import os\nos.rename(__file__, __file__ + '.moved')\n",
+        }
+        for action, code in mutation_cases.items():
+            code_path = os.path.join(td, f"self_{action}.py")
+            try:
+                result = run_solution(
+                    code, code_path, {}, os.path.join(td, f"self_{action}"),
+                    timeout_s=60, validation_evaluator=fake_evaluator)
+                with open(code_path, encoding="utf-8") as handle:
+                    unchanged = handle.read() == code
+                check(f"guard blocks generated-code self-{action}",
+                      (not result.ok)
+                      and "generated-code guard blocked" in
+                      (result.error_trace or "")
+                      and unchanged)
+                check(f"self-{action} failure records unchanged solution hash",
+                      bool(result.verification.get("solution_sha256"))
+                      and result.verification.get("solution_sha256")
+                      == result.verification.get("solution_after_sha256"))
+            except Exception as error:
+                check(f"guard blocks generated-code self-{action}", False,
+                      f"executor crashed: {error}")
         r = run_solution("import time; time.sleep(30)\n", os.path.join(td, "s.py"),
-                         {}, os.path.join(td, "r"), timeout_s=3)
+                         {}, os.path.join(td, "timeout"), timeout_s=3,
+                         validation_evaluator=fake_evaluator)
         check("timeout -> killed and reported",
               (not r.ok) and "TIMEOUT" in (r.error_trace or ""))
+
+        def output_script(reported):
+            return (
+                "import argparse,json,os,numpy as np\n"
+                "p=argparse.ArgumentParser();p.add_argument('--menu-choices');"
+                "p.add_argument('--output-dir');p.add_argument('--seed');a=p.parse_args()\n"
+                "os.makedirs(a.output_dir,exist_ok=True)\n"
+                f"json.dump({reported!r},open(os.path.join(a.output_dir,'metrics.json'),'w'))\n"
+                "np.save(os.path.join(a.output_dir,'scores_valid.npy'),np.zeros(124909))\n"
+                "np.save(os.path.join(a.output_dir,'scores_test.npy'),np.zeros(170588))\n")
+
+        good_dir = os.path.join(td, "good")
+        r = run_solution(output_script(trusted), os.path.join(td, "good.py"), {},
+                         good_dir, timeout_s=60,
+                         validation_evaluator=fake_evaluator)
+        check("parent-authoritative matching metrics succeed",
+              r.ok and r.metrics == trusted and r.metric_audit["matched"])
+        check("successful execution writes a verification manifest",
+              os.path.exists(os.path.join(good_dir, "verification.json"))
+              and bool(r.verification.get("solution_sha256")))
+        check("successful execution records unchanged solution hash",
+              r.verification.get("solution_sha256")
+              == r.verification.get("solution_after_sha256"))
+        check("successful execution records the generated-code guard",
+              r.verification.get("generated_code_guard", {}).get("mode")
+              == "python_audit_hook")
+
+        blocked_code = (
+            "import os\n"
+            "p=os.path.join(os.environ['KUAIRAND_DATA'],"
+            "'log_standard_4_22_to_5_08_pure.csv')\n"
+            "open(p,'rb').read(1)\n")
+        blocked = run_solution(
+            blocked_code, os.path.join(td, "blocked.py"), {},
+            os.path.join(td, "blocked"), timeout_s=60,
+            validation_evaluator=fake_evaluator)
+        check("generated code cannot directly read raw outcome files",
+              not blocked.ok and "generated-code guard blocked file access"
+              in (blocked.error_trace or ""))
+
+        forged_dir = os.path.join(td, "forged")
+        r = run_solution(output_script({"GAUC": .999, "nDCG@5": .999,
+                                        "primary": .999}),
+                         os.path.join(td, "forged.py"), {}, forged_dir,
+                         timeout_s=60, validation_evaluator=fake_evaluator)
+        check("forged child metrics cannot control model selection",
+              r.ok and r.metrics == trusted and not r.metric_audit["matched"])
+        with open(os.path.join(forged_dir, "metrics.json")) as fh:
+            replaced = json.load(fh)
+        with open(os.path.join(forged_dir, "metrics_reported.json")) as fh:
+            preserved = json.load(fh)
+        check("trusted metrics replace the child report", replaced == trusted)
+        check("the mismatched child report remains auditable",
+              preserved["primary"] == .999)
+
+
+def test_hidden_test_boundary():
+    print("\n[hidden-test data boundary]")
+    from runtime.train_lib import (_CACHE_SCHEMA_FILE, _CACHE_SCHEMA_VERSION,
+                                   _TARGET_COLUMNS, build_cache, load_cache,
+                                   load_validation_targets)
+    with tempfile.TemporaryDirectory() as td:
+        with open(os.path.join(td, "meta.json"), "w") as fh:
+            json.dump({"field_dims": {}}, fh)
+        with open(os.path.join(td, "vocabs.json"), "w") as fh:
+            json.dump({}, fh)
+        with open(os.path.join(td, _CACHE_SCHEMA_FILE), "w") as fh:
+            json.dump({"version": _CACHE_SCHEMA_VERSION}, fh)
+        base = {
+            "user": np.array([0, 1], dtype=np.int32),
+            "video": np.array([0, 1], dtype=np.int32),
+            "user_raw": np.array(["u0", "u1"], dtype=object),
+            "video_raw": np.array(["v0", "v1"], dtype=object),
+        }
+        outcomes = {key: np.array([0.0, 1.0], dtype=np.float32)
+                    for key in _TARGET_COLUMNS}
+        for split in ("train", "valid", "test"):
+            np.savez(os.path.join(td, f"{split}.npz"), **base, **outcomes)
+        splits, _ = load_cache(td)
+        check("train and validation retain their outcomes",
+              all(key in splits["train"] and key in splits["valid"]
+                  for key in _TARGET_COLUMNS))
+        check("normal API strips every hidden-test outcome from old caches",
+              all(key not in splits["test"] for key in _TARGET_COLUMNS))
+        with np.load(os.path.join(td, "test.npz"), allow_pickle=True) as z:
+            persisted_keys = set(z.files)
+        check("old cache is physically migrated to a feature-only test file",
+              not (persisted_keys & set(_TARGET_COLUMNS)))
+        users, labels = load_validation_targets(td)
+        check("trusted parent can load copied validation targets",
+              list(users) == ["u0", "u1"]
+              and np.array_equal(labels, outcomes["long_view"]))
+
+    # A fresh cache must not even access/convert target cells on test dates.
+    # The deliberately invalid test outcome strings would crash the old path.
+    with tempfile.TemporaryDirectory() as td:
+        header = ("user_id,video_id,tab,duration_ms,hourmin,date,time_ms,"
+                  "long_view,is_click,is_like,is_forward,play_time_ms\n")
+        train_row = "u0,v0,1,1000,1200,20220408,1,1,1,0,0,900\n"
+        valid_row = "u1,v1,1,2000,1300,20220422,2,0,1,1,0,400\n"
+        test_row = ("u2,v2,1,3000,1400,20220429,3,DO_NOT_READ,"
+                    "DO_NOT_READ,DO_NOT_READ,DO_NOT_READ,DO_NOT_READ\n")
+        with open(os.path.join(td, "video_features_basic_pure.csv"), "w") as fh:
+            fh.write("video_id,author_id\nv0,a0\nv1,a1\nv2,a2\n")
+        with open(os.path.join(
+                td, "log_standard_4_08_to_4_21_pure.csv"), "w") as fh:
+            fh.write(header + train_row)
+        with open(os.path.join(
+                td, "log_standard_4_22_to_5_08_pure.csv"), "w") as fh:
+            fh.write(header + valid_row + test_row)
+        cache_dir = os.path.join(td, "cache")
+        try:
+            build_cache(data_dir=td, cache_dir=cache_dir)
+            fresh, _ = load_cache(cache_dir)
+            built = True
+        except (TypeError, ValueError) as error:
+            built = False
+            fresh = {}
+            fresh_error = str(error)
+        check("fresh cache never converts hidden-test outcome cells", built,
+              "" if built else fresh_error)
+        if built:
+            check("fresh test cache contains features only",
+                  not (set(fresh["test"]) & set(_TARGET_COLUMNS)))
+            check("fresh split row order remains exact",
+                  [str(v) for v in fresh["train"]["user_raw"]] == ["u0"]
+                  and [str(v) for v in fresh["valid"]["user_raw"]] == ["u1"]
+                  and [str(v) for v in fresh["test"]["user_raw"]] == ["u2"])
+            check("fresh cache preserves raw video identity",
+                  [str(v) for v in fresh["train"]["video_raw"]] == ["v0"]
+                  and [str(v) for v in fresh["valid"]["video_raw"]] == ["v1"]
+                  and [str(v) for v in fresh["test"]["video_raw"]] == ["v2"])
+            check("fresh train/valid targets remain aligned",
+                  fresh["train"]["long_view"].tolist() == [1.0]
+                  and fresh["valid"]["long_view"].tolist() == [0.0]
+                  and fresh["valid"]["play_time_ms"].tolist() == [400.0])
 
 
 # ------------------------------------------------------------- crossover move
@@ -423,10 +613,234 @@ def test_numpy2_json_serialization():
           'meta["field_dims"]["user"]' in api)
 
 
+def test_research_primitives():
+    """Fast invariants for the two new, leakage-aware research directions."""
+    print("\n[research primitives]")
+    import copy
+    import numpy as np
+    from runtime.train_lib import (History, MultiBehaviorHistory, RankFM,
+                                   batch_repeat_fatigue_scores,
+                                   oof_recency_bayesian_prior_scores,
+                                   rank_normalize)
+
+    tr = {
+        "user": np.array([0, 0, 0, 1, 1, 1], dtype=np.int32),
+        "video": np.array([0, 1, 2, 0, 2, 3], dtype=np.int32),
+        "author": np.array([0, 1, 1, 0, 1, 2], dtype=np.int32),
+        "date": np.array([1, 1, 2, 1, 2, 2], dtype=np.int32),
+        "time_ms": np.array([1, 2, 3, 1, 2, 3], dtype=np.int64) * 86400_000,
+        "long_view": np.array([1, 0, 1, 0, 1, 0], dtype=np.float32),
+        "is_click": np.array([1, 1, 1, 0, 1, 1], dtype=np.float32),
+        "is_like": np.array([0, 0, 1, 0, 0, 0], dtype=np.float32),
+        "is_forward": np.zeros(6, dtype=np.float32),
+    }
+    query = {
+        "user": np.array([0, 1], dtype=np.int32),
+        "video": np.array([1, 3], dtype=np.int32),
+        "author": np.array([1, 2], dtype=np.int32),
+    }
+    splits = {"train": tr, "valid": query, "test": query}
+    rng = np.random.default_rng(7)
+    V = rng.normal(size=(4, 3)).astype(np.float32)
+
+    incumbent = History(splits, 2, "recency_weighted_pool")
+    multi = MultiBehaviorHistory(splits, 2)
+    old_sum = incumbent.pooled(V)
+    new_sum = multi.pooled_many(V)
+    old_valid = incumbent.batch_vectors(old_sum, query["user"], False)
+    new_valid = multi.batch_vectors_many(new_sum, query["user"], False)[:, 0]
+    check("multi-behavior positive channel reproduces recency pool",
+          np.allclose(old_valid, new_valid, atol=1e-6))
+
+    old_train = incumbent.batch_vectors(
+        old_sum, tr["user"], True, V, tr["video"],
+        incumbent.train_row_w, tr["long_view"])
+    new_train = multi.batch_vectors_many(
+        new_sum, tr["user"], True, V_video=V,
+        row_index=np.arange(len(tr["user"])))[:, 0]
+    check("multi-behavior train positive channel preserves leave-one-out",
+          np.allclose(old_train, new_train, atol=1e-6))
+
+    X = np.array([[0, 4, 8], [1, 5, 9]], dtype=np.int32)
+    H = rng.normal(size=(2, 4)).astype(np.float32)
+    Hx = rng.normal(size=(2, 3, 4)).astype(np.float32)
+    control = RankFM(12, k=4, seed=11)
+    signed = RankFM(12, k=4, seed=11, history_channels=3)
+    z0, _ = control.forward(X, H)
+    z1, cache = signed.forward(X, H, Hx)
+    check("zero signed-history gates exactly match the control logits",
+          np.array_equal(z0, z1))
+    signed.apply_grads([(cache, np.array([0.5, -0.5], dtype=np.float32))])
+    check("signed-history gates receive a training gradient",
+          bool(np.any(np.abs(signed.history_gate_raw) > 0)))
+
+    fwfm = RankFM(12, k=4, seed=11, n_fields=3, field_weighted=True)
+    zf, fw_cache = fwfm.forward(X, H)
+    check("field-weighted FM starts from ordinary FM logits",
+          np.allclose(z0, zf, atol=1e-6))
+    fwfm.apply_grads([(fw_cache, np.array([0.5, -0.5], dtype=np.float32))])
+    check("field interaction weights receive a training gradient",
+          bool(np.any(np.abs(fwfm.field_pair_raw) > 0)))
+
+    before, _ = oof_recency_bayesian_prior_scores(splits)
+    changed = copy.deepcopy(splits)
+    changed["train"] = {k: v.copy() for k, v in tr.items()}
+    changed["train"]["long_view"][tr["date"] == 1] = \
+        1 - changed["train"]["long_view"][tr["date"] == 1]
+    after, _ = oof_recency_bayesian_prior_scores(changed)
+    held = tr["date"] == 1
+    check("date-OOF prior excludes every label from the held-out date",
+          np.allclose(before["train"][held], after["train"][held], atol=1e-6))
+    check("date-OOF prior arrays are finite and aligned",
+          all(v.shape == (len(splits[k]["user"]),) and np.all(np.isfinite(v))
+              for k, v in before.items()))
+    ranks = rank_normalize(np.array([4.0, -2.0, 1.5, 1.5], dtype=np.float32))
+    check("snapshot rank normalization is deterministic and tie-aware",
+          np.array_equal(ranks, np.array([1.0, 0.0, 0.5, 0.5])))
+
+    batch_split = {
+        "user": np.array([99, 99, 99, 99, 99], dtype=np.int32),
+        "user_raw": np.array(["new-a", "new-a", "new-a", "new-b", "new-b"]),
+        # Every encoded video is the shared UNK value; raw ids remain distinct.
+        "video": np.array([99, 99, 99, 99, 99], dtype=np.int32),
+        "video_raw": np.array(["v1", "v1", "v2", "v3", "v4"]),
+    }
+    adjusted, info = batch_repeat_fatigue_scores(
+        np.array([3.0, 2.0, 1.0, 3.0, 2.0]), batch_split)
+    base_a = np.array([3.0, 2.0, 1.0])
+    base_a = (base_a - base_a.mean()) / base_a.std()
+    check("batch fatigue uses true users instead of a shared UNK code",
+          np.isclose(info["affected_user_fraction"], 0.5))
+    check("batch fatigue uses raw videos instead of a shared UNK code",
+          info["identity"] == "user_raw_x_video_raw")
+    check("repeat penalty boosts a unique item relative to a repeated item",
+          adjusted[2] - adjusted[1] > base_a[2] - base_a[1])
+    check("batch fatigue is finite and explicitly label-free",
+          np.all(np.isfinite(adjusted)) and not info["uses_outcome_columns"])
+
+
+def test_verified_ensemble_contract():
+    """Fast checks for the frozen, reproducible final-run entry point."""
+    print("\n[verified ensemble contract]")
+    try:
+        Menu(MENU_PATH).validate_choices(ENSEMBLE_CHOICES)
+        check("frozen ensemble configuration remains selectable", True)
+    except MenuError as error:
+        check("frozen ensemble configuration remains selectable", False,
+              str(error))
+
+    ranks = _rank_normalize(
+        np.array([4.0, -2.0, 1.5, 1.5], dtype=np.float64),
+        np.array(["u", "u", "u", "u"]),
+        np.array([4, 1, 2, 3], dtype=np.int64))
+    check("ensemble ranks within user and breaks score ties by time",
+          np.array_equal(ranks, np.array([1.0, 0.0, 1 / 3, 2 / 3])))
+    check("exact score-and-time ties receive neutral midranks",
+          np.array_equal(
+              _rank_normalize(np.ones(3), np.array(["u", "u", "u"]),
+                              np.ones(3, dtype=np.int64)),
+              np.full(3, 0.5)))
+    check("ensemble rank scaling is per-user",
+          np.array_equal(
+              _rank_normalize(np.array([0.0, 5.0, 2.0, 9.0]),
+                              np.array(["a", "a", "b", "b"]),
+                              np.arange(4)),
+              np.array([0.0, 1.0, 0.0, 1.0])))
+    protected = _protected_paths()
+    check("reuse binds every split cache and cache metadata",
+          {"train_cache", "validation_cache", "test_cache", "cache_meta",
+           "cache_vocabs", "cache_schema", "executor", "child_guard"}
+          .issubset(protected))
+    runtime = _runtime_fingerprint()
+    check("reuse binds Python, NumPy, and platform versions",
+          {"python_version", "numpy_version", "platform"}.issubset(runtime))
+    with tempfile.TemporaryDirectory() as td:
+        from pathlib import Path
+        seed_dir = Path(td) / "seed_00"
+        backup = Path(td) / ".seed_00.previous-test"
+        backup.mkdir()
+        (backup / "marker").write_text("previous", encoding="utf-8")
+        _recover_previous(seed_dir)
+        check("interrupted member promotion restores its previous artifact",
+              (seed_dir / "marker").read_text(encoding="utf-8") == "previous")
+
+
+def test_verified_submission_bundle():
+    """Submission loading must trust only the hash-checked published bundle."""
+    print("\n[verified submission bundle]")
+    from pathlib import Path
+
+    def digest(path):
+        value = hashlib.sha256()
+        with path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                value.update(block)
+        return value.hexdigest()
+
+    with tempfile.TemporaryDirectory() as td:
+        verified_root = Path(td) / "results" / "verified_ensemble"
+        bundle = verified_root / "bundles" / "fake-bundle"
+        bundle.mkdir(parents=True)
+        valid_path = bundle / "scores_valid.npy"
+        test_path = bundle / "scores_test.npy"
+        expected_valid = np.zeros(124_909, dtype=np.float32)
+        expected_valid[:3] = [0.25, 0.5, 0.75]
+        np.save(valid_path, expected_valid)
+        np.save(test_path, np.zeros(170_588, dtype=np.float32))
+        summary = {
+            "seeds": list(range(5)),
+            "ensemble_runner_sha256": digest(
+                Path(_ROOT) / "agent" / "verified_ensemble.py"),
+            "runtime_fingerprint": _runtime_fingerprint(),
+            "protected_sha256": _hash_protected(_protected_paths()),
+            "artifacts_sha256": {
+                "scores_valid.npy": digest(valid_path),
+                "scores_test.npy": digest(test_path),
+            }
+        }
+        summary_path = bundle / "summary.json"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+        latest_path = verified_root / "latest.json"
+        latest = {
+            "bundle": "bundles/fake-bundle",
+            "summary_sha256": digest(summary_path),
+        }
+        latest_path.write_text(json.dumps(latest), encoding="utf-8")
+
+        scores, loaded_summary, loaded_bundle = verified_ensemble_scores(
+            td, "valid")
+        check("submission loads a valid hash-checked ensemble bundle",
+              np.array_equal(scores, expected_valid)
+              and loaded_summary == summary
+              and loaded_bundle == bundle.resolve())
+
+        with valid_path.open("ab") as handle:
+            handle.write(b"corrupt")
+        try:
+            verified_ensemble_scores(td, "valid")
+            check("submission rejects a corrupt ensemble score artifact", False)
+        except ValueError as error:
+            check("submission rejects a corrupt ensemble score artifact",
+                  "scores_valid.npy hash mismatch" in str(error), str(error))
+
+        np.save(valid_path, expected_valid)
+        latest["summary_sha256"] = "0" * 64
+        latest_path.write_text(json.dumps(latest), encoding="utf-8")
+        try:
+            verified_ensemble_scores(td, "valid")
+            check("submission rejects a corrupt ensemble summary hash", False)
+        except ValueError as error:
+            check("submission rejects a corrupt ensemble summary hash",
+                  "summary hash mismatch" in str(error), str(error))
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
-              test_executor, test_crossover, test_spend_ceiling,
-              test_audit_regressions, test_numpy2_json_serialization):
+              test_executor, test_hidden_test_boundary, test_crossover,
+              test_spend_ceiling,
+              test_audit_regressions, test_numpy2_json_serialization,
+              test_research_primitives, test_verified_ensemble_contract,
+              test_verified_submission_bundle):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

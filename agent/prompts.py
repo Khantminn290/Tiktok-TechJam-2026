@@ -43,6 +43,10 @@ SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
 - On success: writes metrics.json ({"GAUC","nDCG@5","primary"} on VALID),
   scores_valid.npy and scores_test.npy (row_id-aligned, one float per split row)
   into --output-dir, exits 0. On failure: non-zero exit, readable stderr.
+- The parent recomputes VALID metrics from scores_valid.npy; reported metrics
+  cannot control selection. Test outcome columns are absent from load_cache().
+- Standard Python reads of raw data/.env/prior runs, subprocesses, and network
+  sockets are blocked by the generated-code guard. Use only the supported cache.
 - Score with the official evaluate (import from train_lib) — NEVER reimplement metrics.
 - NEVER read test labels or compute test metrics. Early stopping uses valid only.
 - Runtime must stay under 20 minutes (numpy FM baseline ≈ 1 min).

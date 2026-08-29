@@ -18,7 +18,8 @@
       "options": {
         "none": {"description": "No post-training prior blend; use the model score directly."},
         "bayesian_item_author": {"description": "Blend the model logit with smoothed train-only item and author long-view logits. Uses global-prior shrinkage for rare and unseen entities. Same-seed baseline check: +0.0002 primary (weak control)."},
-        "recency_bayesian_item_author": {"description": "As above, but exponentially downweight older training interactions so the prior follows recent preference and catalog trends. Same-seed baseline check: +0.0009 primary; prefer this variant."}
+        "recency_bayesian_item_author": {"description": "As above, but exponentially downweight older training interactions so the prior follows recent preference and catalog trends. Same-seed baseline check: +0.0009 primary; prefer this variant."},
+        "batch_repeat_fatigue": {"description": "Label-free batch inference adjustment: within each true user, mildly penalize videos exposed repeatedly in the evaluation batch. Uses only user/video input fields, never outcome columns; fixed weight 0.10. Motivated by repeated-exposure fatigue and disclosed as transductive batch inference."}
       }
     },
     "user_history": {
@@ -75,8 +76,7 @@
       "options": {
         "none": {"description": "Standard logs only."},
         "video_stats_features": {"description": "video_features_statistic_pure.csv aggregate counters (show_cnt, play_cnt, ...). LOCKED: statistics are aggregated over a window that overlaps the validation/test dates — using them as features risks target leakage from the evaluation period.", "locked": true},
-        "random_log_test_period": {"description": "Rows of log_random_4_22_to_5_08_pure.csv with date in the test window (20220429–20220508). LOCKED: direct test-period exposure.", "locked": true},
-        "random_log_valid_unbiased_check": {"description": "Rows of the random-exposure log restricted to the VALIDATION window (20220422–20220428), used as an extra unbiased evaluation diagnostic only — never as training data. Allowed (organizers suggest it)."}
+        "random_log_test_period": {"description": "Rows of log_random_4_22_to_5_08_pure.csv with date in the test window (20220429–20220508). LOCKED: direct test-period exposure.", "locked": true}
       }
     }
   },
@@ -84,7 +84,12 @@
     "tested_dead_ends": [
       "Adding static features (all 13 CWM fields + user-side coarse buckets): primary 0.5940 vs 0.5950 — no gain.",
       "Raising FM embedding dim k=8/16/32: 0.5895/0.5902/0.5887 — no gain.",
-      "Pure user-side first-order terms contribute exactly 0 to within-user ranking."
+      "Pure user-side first-order terms contribute exactly 0 to within-user ranking.",
+      "Date-OOF recency prior as an in-training BPR offset: +0.00011 on seed 0, below seed noise — not promoted.",
+      "Signed multi-behavior FISM history: -0.00004 on seed 0 — not promoted.",
+      "Field-weighted FM: -0.00021 on seed 0 — rejected.",
+      "Scenario-cross FM: -0.00243 on seed 0 — rejected.",
+      "True cosine snapshot attempt deteriorated from 0.6047 at epoch 14 to 0.6015 at epoch 28 and was stopped — rejected."
     ],
     "hidden_test_discipline": "Generated solutions may WRITE test-split scores to disk (scores_test.npy) but must never read test labels or compute test metrics; only the harness scores test once at the very end."
   }

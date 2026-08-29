@@ -7,8 +7,8 @@ validation score stops improving.
 
 The thing being searched over is **complete Python scripts, never diffs**. Every
 attempt is a *node*: a full script plus the validation score it earned. A search
-policy picks which node to extend, the model writes the next script, a sandboxed
-runner scores it, and the result is appended to `logs/journal.jsonl`, which is both
+policy picks which node to extend, the model writes the next script, a guarded
+subprocess runner scores it, and the result is appended to `logs/journal.jsonl`, which is both
 the agent's memory and the competition's required run-log deliverable.
 
 **Task (fixed by the organisers):** rank each user's logged impressions;
@@ -16,6 +16,11 @@ positive label is `long_view`; metrics are GAUC and nDCG@5; primary score is the
 mean. Official baseline: **0.6016** validation / **0.5946** test. The metric ceiling
 is **0.8484** / **0.8645**, not 1.0 — 27% of users have no positive label at all,
 so judge progress against that, not against a perfect score.
+
+**Current independently verified candidate:** the BPR + recency-history incumbent
+with a fixed, label-free repeat-fatigue reranker reaches **0.605660 validation**
+as a predetermined five-seed rank ensemble. It improved all 5/5 paired members;
+see [`research/README.md`](research/README.md) for the evidence and caveats.
 
 ---
 
@@ -58,7 +63,7 @@ the agent with no code changes.
 ### 1. Harness self-test (free, no model calls, seconds)
 
 ```bash
-python3 tests/test_harness.py        # 55 checks
+python3 tests/test_harness.py        # contract/integrity checks
 ```
 
 Covers the safety gate, cross-axis validation, every search-policy branch
@@ -112,8 +117,10 @@ is 5σ and is a real effect.
 ### 5. Final submission — runs exactly once, at the end
 
 ```bash
-python3 -m agent.make_submission --split valid --score --ensemble   # inspect first
-python3 -m agent.make_submission --final-test-eval --ensemble       # THE one-time eval
+python3 -m agent.verified_ensemble --seeds 5                         # rebuild/reuse bundle
+python3 -m agent.make_submission --split valid --score --verified-ensemble  # inspect
+python3 -m agent.make_submission --verified-ensemble                       # blind test CSV
+python3 -m agent.make_submission --verified-ensemble --final-test-eval     # optional one-time eval
 ```
 
 `--final-test-eval` is the **single** hidden-test evaluation of the whole project.
@@ -121,13 +128,10 @@ Everything before it develops on train + validation only. It writes
 `results/final_results.json` with test metrics, deltas over the baseline, and the
 delta in σ units.
 
-`--ensemble` rank-averages the top-K distinct successful nodes (K from
-`config/llm_config.json`, default 3) instead of using the single best node. Scores
-are rank-normalised before averaging because different nodes produce scores on
-different scales; averaging raw values would let whichever model has the widest
-spread dominate. It costs no extra model calls — it just averages score arrays that
-are already on disk — and the comparison table prints best-single next to
-best-ensemble so you can see whether it actually helped.
+`--verified-ensemble` loads only the immutable five-seed bundle named by
+`results/verified_ensemble/latest.json` and rechecks its pointer, runner, runtime,
+cache, score hashes, shape, and finiteness before writing. The older `--ensemble`
+search-node path remains available for exploration, but it is not the final path.
 
 ### Logging manual interventions
 
@@ -146,13 +150,13 @@ flattered by the thing being measured.
 
 `config/modification_menu.json` defines everything the agent is allowed to change.
 **Anything not in it is invisible to the search**, which makes it the
-highest-leverage file in the repo. Seven axes, priority-ordered from the organisers'
+highest-leverage file in the repo. Eight axes, priority-ordered from the organisers'
 own measured findings:
 
 | Priority | Axis | What it changes |
 |---|---|---|
 | 1 | `loss` | pointwise → BPR pairwise / listwise softmax / hybrid |
-| 2 | `score_prior` | train-only Bayesian item/author propensity blend |
+| 2 | `score_prior` | train-only Bayesian priors or label-free batch fatigue reranking |
 | 3 | `user_history` | behaviour-sequence pooling, DIN-style attention |
 | 4 | `multitask` | auxiliary heads on click / like / forward, censored watch-time |
 | 5 | `model` | FM → DeepFM / DCN |
@@ -195,7 +199,7 @@ agent/
   prompts.py                 four-section prompt builder
   llm.py                     provider-agnostic client (OpenAI | Anthropic)
   pricing.py                 rate table + spend tracker
-  executor.py                subprocess sandbox, timeout, contract checks
+  executor.py                guarded subprocess + parent-side verification
   loop.py                    orchestration, convergence, spend + GPU accounting
   interventions.py           manual-intervention log
   make_submission.py         submission CSV, ensembling, one-time test eval
@@ -209,12 +213,14 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        55 checks, no model calls
+tests/test_harness.py        contract/integrity checks, no model calls
 logs/
   nodes/node_NNN/            one self-contained folder per research iteration
     solution.py              complete generated script
     record.json              hypothesis, choices, metrics, errors, usage
     metrics.json             validation metrics (successful nodes)
+    metrics_reported.json    child claim retained for audit
+    verification.json        parent metric check + code/config/artifact hashes
     resource.json            measured compute (when produced)
     scores_*.npy             prediction artifacts (local, Git-ignored)
   smoke/                     isolated smoke-test journal and nodes
@@ -227,6 +233,19 @@ logs/
 
 ## Reproducing the numbers
 
+Rebuild the adopted, validation-only five-seed result (test predictions are
+written blind; test outcome fields are never extracted into runtime arrays or
+evaluated):
+
+```bash
+python3 -m agent.verified_ensemble --seeds 5
+```
+
+The runner publishes one immutable artifact bundle and atomically updates
+`results/verified_ensemble/latest.json` to point at it. Each seed is reusable
+only when its code, configuration, runtime version, and every split cache hash
+still match.
+
 Harness sanity checks (these should match before trusting anything else):
 
 | Check | Expected |
@@ -237,20 +256,20 @@ Harness sanity checks (these should match before trusting anything else):
 
 ## Limitations and what we'd improve
 
-- The five-iteration verification run reached +0.0018 validation (about 2σ). It was
-  capped at five to prove the machinery, not to find gains — treat that number as
-  unproven rather than as a ceiling.
+- The repeat-fatigue gain over the strong incumbent is small (`+0.000161`), even
+  though it is consistent across five paired seeds. It is a batch/transductive
+  feature; a live online system would use past exposure only.
 - Crossover only combines menu choices, not code. Merging two scripts' actual
   implementations would be strictly more expressive.
-- The unbiased random-exposure diagnostic is wired for the NumPy engine only, and
-  the agent does not yet act on it automatically.
+- The organizer-suggested random-exposure diagnostic is not exposed to generated
+  code; moving it into a trusted parent-side evaluator is future work.
 - Search is single-threaded; parallel drafts would cut wall-clock substantially.
 - Bonus benchmarks (KuaiRand-1k / 27k) are not attempted; the data cache would need
   chunking to scale.
 
 ## Team
 
-Solo participant. Every agent-authored script is journaled per iteration in
+Fill in the final team contribution breakdown before submission. Every agent-authored script is journaled per iteration in
 `logs/journal.jsonl` with its hypothesis. Every node is self-contained under
 `logs/nodes/node_NNN/`, so its source, record, metrics, errors, and local prediction
 artifacts can be inspected without cross-referencing `solutions/` and `runs/`.

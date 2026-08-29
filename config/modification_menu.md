@@ -50,8 +50,9 @@ logged as a manual intervention).
   aggregated over a window overlapping the validation/test dates → target-leakage risk.
 - `data_extras.random_log_test_period` — the test-window slice of the random-exposure log
   is direct test-period exposure.
-- `data_extras.random_log_valid_unbiased_check` is *allowed* (organizer-suggested), but as
-  an **evaluation diagnostic only**, never training data.
+The organizer-suggested validation-window random-exposure diagnostic is deliberately
+not a generated-code menu option. It reads an additional outcome-bearing file, so it
+belongs in a future trusted parent-side evaluator rather than the guarded training child.
 
 ## Cross-axis constraints (enforced by `validate_choices()`)
 

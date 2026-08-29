@@ -4,7 +4,8 @@ Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--
 
 Contract (enforced by the harness):
   * on success: write to --output-dir
-      metrics.json        {"GAUC": float, "nDCG@5": float, "primary": float}  (VALID split)
+      metrics.json        {"GAUC": float, "nDCG@5": float, "primary": float}  (VALID split;
+                          parent runner recomputes and verifies this)
       scores_valid.npy    float array, one score per valid row, data.load() row order
       scores_test.npy     float array, one score per test row,  data.load() row order
     and exit 0.

@@ -5,12 +5,28 @@
 An autonomous agent that improves a KuaiRand-Pure ranking model on its own. It searches
 over **complete Python training scripts, not diffs**: every attempt is a *node* (a full
 script plus the validation score it earned), a policy picks which node to extend next,
-an LLM writes the next script, a sandboxed runner scores it, and the result is appended
+an LLM writes the next script, a guarded subprocess runner scores it, and the result is appended
 to `logs/journal.jsonl`. A run stops when it **converges** — the best validation score
 hasn't improved by more than 0.002 over the last 3 scored iterations — or hits the
 iteration, time, or spend cap. Read [README.md](README.md) for the architecture and
 [config/modification_menu.json](config/modification_menu.json) for the search space
 before changing any search logic.
+
+## Current strongest verified result
+
+The independent branch's frozen five-seed candidate reaches **0.605660439** on
+validation versus the official **0.6016** baseline. It combines the strong BPR
++ recency-history configuration with a fixed, label-free repeat-fatigue reranker.
+All five paired seeds improved. Reproduce it with:
+
+```bash
+python3 -m agent.verified_ensemble --seeds 5
+```
+
+The command reuses a member only when its code, configuration, complete cache,
+and runtime hashes match; otherwise it retrains. It evaluates validation only
+and writes test predictions blind. Details and rejected ideas are in
+[`research/README.md`](research/README.md).
 
 ## Get running in under 5 minutes
 
@@ -29,7 +45,7 @@ gitignored). Nothing else in `.env` needs changing.
 Download the dataset once (see README Setup), then:
 
 ```bash
-python3 tests/test_harness.py     # 80 checks, no model calls, zero spend
+python3 tests/test_harness.py     # 129 checks, no model calls, zero spend
 python3 run_agent.py --smoke      # ~$0.015, 3 iterations, proves you reach the model
 ```
 
@@ -84,7 +100,9 @@ just be luck; above ~3σ it's probably real. Quote the σ number when you claim 
 improvement.
 
 Final submission runs **exactly once, at the end**:
-`python3 -m agent.make_submission --final-test-eval --ensemble`.
+`python3 -m agent.make_submission --verified-ensemble` writes the blind CSV without
+opening test outcomes. If a one-time local test evaluation is explicitly wanted, run
+`python3 -m agent.make_submission --verified-ensemble --final-test-eval` only at the end.
 
 ## Known rough edges
 

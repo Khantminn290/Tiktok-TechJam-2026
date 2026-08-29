@@ -5,8 +5,9 @@ Design notes
   date-filtered, original file order preserved — so scores_{valid,test}.npy written
   by index are row_id-aligned with submit.py.
 - Scoring is delegated to the starter kit's evaluate.py (never reimplemented).
-- Hidden-test discipline: this module computes test-split *scores* but never touches
-  test labels; only the harness evaluates test, once, at the very end of the run.
+- Hidden-test discipline: this module computes test-split *scores* but never
+  extracts test outcomes into runtime arrays or evaluates them; only the
+  organizer-side harness may evaluate test at the end.
 - The pooled-history feature is recomputed from current embeddings each epoch but
   treated as stop-gradient in the numpy engine (a feature, not a trained path);
   the torch DIN path trains attention end-to-end.
@@ -44,6 +45,68 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -30, 30)))
 
 
+def rank_normalize(scores):
+    """Tie-aware, scale-free midranks in [0,1] for fixed ensembles."""
+    scores = np.asarray(scores).reshape(-1)
+    _, inverse, counts = np.unique(
+        scores, return_inverse=True, return_counts=True)
+    starts = np.cumsum(np.r_[0, counts[:-1]])
+    midranks = starts + (counts - 1) / 2.0
+    return midranks[inverse].astype(np.float64) / max(1, len(scores) - 1)
+
+
+def batch_repeat_fatigue_scores(base_scores: np.ndarray, split: dict,
+                                weight: float = 0.10) -> tuple[np.ndarray, dict]:
+    """Label-free batch rerank that penalizes repeated user-video exposure.
+
+    The complete evaluation feature batch is available when producing the
+    required row-aligned submission.  Repetition counts use true `user_raw`
+    identities (never the train-vocabulary UNK bucket) and no outcome column.
+    Per-user standardization keeps the fixed coefficient comparable across
+    models without changing the base ranking by itself.
+    """
+    scores = np.asarray(base_scores, dtype=np.float64).reshape(-1)
+    users_raw = np.asarray(split["user_raw"])
+    videos_raw = np.asarray(split["video_raw"])
+    if len(scores) != len(users_raw) or len(scores) != len(videos_raw):
+        raise ValueError("batch repeat rerank arrays are not row-aligned")
+
+    _, users = np.unique(users_raw, return_inverse=True)
+    users = users.astype(np.int64, copy=False)
+    n_users = int(users.max()) + 1 if len(users) else 0
+    _, videos = np.unique(videos_raw, return_inverse=True)
+    videos = videos.astype(np.int64, copy=False)
+
+    def user_z(values):
+        values = np.asarray(values, dtype=np.float64)
+        count = np.bincount(users, minlength=n_users).astype(np.float64)
+        total = np.bincount(users, weights=values, minlength=n_users)
+        mean = total / np.maximum(count, 1.0)
+        centered = values - mean[users]
+        variance = np.bincount(
+            users, weights=centered * centered, minlength=n_users)
+        std = np.sqrt(variance / np.maximum(count, 1.0))
+        return centered / np.maximum(std[users], 1e-12)
+
+    video_dim = int(videos.max()) + 1 if len(videos) else 1
+    pair = users * video_dim + videos
+    _, pair_code = np.unique(pair, return_inverse=True)
+    pair_count = np.bincount(pair_code)
+    repeats_excluding_self = pair_count[pair_code] - 1
+    fatigue = np.log1p(repeats_excluding_self.astype(np.float64))
+    adjusted = user_z(scores) - float(weight) * user_z(fatigue)
+    info = {
+        "method": "label_free_batch_repeat_fatigue",
+        "weight": float(weight),
+        "identity": "user_raw_x_video_raw",
+        "uses_outcome_columns": False,
+        "repeated_row_fraction": float(np.mean(repeats_excluding_self > 0)),
+        "affected_user_fraction": float(
+            len(np.unique(users[repeats_excluding_self > 0])) / max(n_users, 1)),
+    }
+    return adjusted, info
+
+
 def bayesian_prior_scores(splits: dict, mode: str) -> dict:
     """Train-only smoothed item/author long-view logits for valid/test ranking."""
     if mode == "none":
@@ -77,6 +140,79 @@ def bayesian_prior_scores(splits: dict, mode: str) -> dict:
     author = table("author", 100.0)
     return {name: (0.7 * video[s["video"]] + 0.3 * author[s["author"]]).astype(np.float32)
             for name, s in splits.items()}
+
+
+def oof_recency_bayesian_prior_scores(splits: dict) -> tuple[dict, dict]:
+    """Recency item/author prior with leave-one-date-out TRAIN scores.
+
+    Validation and test priors are fit on the complete official training window.
+    A training row receives a table fit on every *other* training date, excluding
+    its own label and all same-day correlated outcomes.  The fixed prior can then
+    be used as an offset inside BPR without leaking the target into its margin.
+    """
+    tr = splits["train"]
+    y = tr["long_view"].astype(np.float64)
+    age = tr["time_ms"].max() - tr["time_ms"].astype(np.float64)
+    w = np.exp(-age / (3.0 * 86400e3))
+    dates, date_code = np.unique(tr["date"], return_inverse=True)
+    n_dates = len(dates)
+    total_w = float(np.sum(w))
+    total_pos = float(np.sum(w * y))
+    date_w = np.bincount(date_code, weights=w, minlength=n_dates)
+    date_pos = np.bincount(date_code, weights=w * y, minlength=n_dates)
+
+    def clipped_logit(rate):
+        rate = np.clip(rate, 1e-5, 1.0 - 1e-5)
+        return np.log(rate / (1.0 - rate))
+
+    full_global = float(total_pos / max(total_w, 1.0))
+    oof_global = ((total_pos - date_pos[date_code]) /
+                  np.maximum(total_w - date_w[date_code], 1.0))
+
+    def table(field: str, strength: float):
+        n_entities = int(max(np.max(s[field]) for s in splits.values())) + 1
+        count = np.bincount(tr[field], weights=w, minlength=n_entities)
+        positive = np.bincount(tr[field], weights=w * y, minlength=n_entities)
+        pair = tr[field].astype(np.int64) * n_dates + date_code
+        count_by_date = np.bincount(
+            pair, weights=w, minlength=n_entities * n_dates).reshape(n_entities, n_dates)
+        pos_by_date = np.bincount(
+            pair, weights=w * y,
+            minlength=n_entities * n_dates).reshape(n_entities, n_dates)
+
+        entity = tr[field]
+        oof_count = count[entity] - count_by_date[entity, date_code]
+        oof_pos = positive[entity] - pos_by_date[entity, date_code]
+        oof_rate = ((oof_pos + strength * oof_global) /
+                    (oof_count + strength))
+        train_residual = clipped_logit(oof_rate) - clipped_logit(oof_global)
+
+        full_rate = (positive + strength * full_global) / (count + strength)
+        full_residual = clipped_logit(full_rate) - clipped_logit(full_global)
+        query = {name: full_residual[s[field]] for name, s in splits.items()
+                 if name != "train"}
+        return train_residual, query
+
+    video_train, video_query = table("video", 20.0)
+    author_train, author_query = table("author", 100.0)
+    scores = {
+        "train": (0.7 * video_train + 0.3 * author_train).astype(np.float32),
+    }
+    for name in ("valid", "test"):
+        scores[name] = (0.7 * video_query[name] +
+                        0.3 * author_query[name]).astype(np.float32)
+    info = {
+        "method": "leave_one_date_out_recency_empirical_bayes",
+        "dates": [int(d) for d in dates],
+        "tau_days": 3.0,
+        "video_strength": 20.0,
+        "author_strength": 100.0,
+        "video_weight": 0.7,
+        "author_weight": 0.3,
+        "offset_beta": 0.30,
+        "label_sources": {"train": "long_view", "valid": None, "test": None},
+    }
+    return scores, info
 
 
 GPU_DEVICES = ("cuda", "mps")
@@ -123,16 +259,30 @@ def write_resource_json(output_dir: str, device: str, train_seconds: float) -> N
 _CACHE_COLS = ["user", "video", "author", "tab", "duration_ms", "hourmin", "date",
                "time_ms", "long_view", "is_click", "is_like", "is_forward",
                "play_time_ms"]
+_TARGET_COLUMNS = frozenset(
+    {"long_view", "is_click", "is_like", "is_forward", "play_time_ms"})
+_CACHE_SCHEMA_VERSION = 2
+_CACHE_SCHEMA_FILE = "cache_schema.json"
 
 
 def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
     os.makedirs(cache_dir, exist_ok=True)
+    schema_path = os.path.join(cache_dir, _CACHE_SCHEMA_FILE)
+    # Version 0 marks an interrupted/incomplete rebuild. The ready version is
+    # written only after every split and metadata file has been replaced.
+    with open(schema_path, "w") as fh:
+        json.dump({"version": 0}, fh)
     vid2author = {}
     with open(os.path.join(data_dir, "video_features_basic_pure.csv")) as fh:
         for r in csv.DictReader(fh):
             vid2author[r["video_id"]] = r["author_id"]
 
-    raw = {c: [] for c in _CACHE_COLS}
+    # Feature rows span train/valid/test. Target rows deliberately stop at
+    # validation, so hidden-test outcomes never enter a Python list or NumPy
+    # array used by the runtime.
+    raw = {c: [] for c in _CACHE_COLS if c not in _TARGET_COLUMNS}
+    raw_targets = {c: [] for c in _CACHE_COLS if c in _TARGET_COLUMNS}
+    target_dates = []
     for f in LOG_FILES:
         with open(os.path.join(data_dir, f)) as fh:
             for r in csv.DictReader(fh):
@@ -147,11 +297,20 @@ def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
                 raw["hourmin"].append(int(r["hourmin"]))
                 raw["date"].append(d)
                 raw["time_ms"].append(int(r["time_ms"]))
-                raw["long_view"].append(1.0 if r["long_view"] != "0" else 0.0)
-                raw["is_click"].append(1.0 if r["is_click"] != "0" else 0.0)
-                raw["is_like"].append(1.0 if r["is_like"] != "0" else 0.0)
-                raw["is_forward"].append(1.0 if r["is_forward"] != "0" else 0.0)
-                raw["play_time_ms"].append(float(r["play_time_ms"]))
+                is_hidden_test = (
+                    SPLITS["test"][0] <= d <= SPLITS["test"][1])
+                if not is_hidden_test:
+                    target_dates.append(d)
+                    raw_targets["long_view"].append(
+                        1.0 if r["long_view"] != "0" else 0.0)
+                    raw_targets["is_click"].append(
+                        1.0 if r["is_click"] != "0" else 0.0)
+                    raw_targets["is_like"].append(
+                        1.0 if r["is_like"] != "0" else 0.0)
+                    raw_targets["is_forward"].append(
+                        1.0 if r["is_forward"] != "0" else 0.0)
+                    raw_targets["play_time_ms"].append(
+                        float(r["play_time_ms"]))
 
     date = np.asarray(raw["date"], dtype=np.int32)
     train_mask = (date >= SPLITS["train"][0]) & (date <= SPLITS["train"][1])
@@ -173,49 +332,94 @@ def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
     with open(os.path.join(cache_dir, "vocabs.json"), "w") as fh:
         json.dump(vocabs, fh)
 
-    arrays = {
+    feature_arrays = {
         "user": coded["user"], "video": coded["video"],
         "author": coded["author"], "tab": coded["tab"],
         "duration_ms": np.asarray(raw["duration_ms"], dtype=np.float32),
         "hourmin": np.asarray(raw["hourmin"], dtype=np.int32),
         "date": date,
         "time_ms": np.asarray(raw["time_ms"], dtype=np.int64),
-        "long_view": np.asarray(raw["long_view"], dtype=np.float32),
-        "is_click": np.asarray(raw["is_click"], dtype=np.float32),
-        "is_like": np.asarray(raw["is_like"], dtype=np.float32),
-        "is_forward": np.asarray(raw["is_forward"], dtype=np.float32),
-        "play_time_ms": np.asarray(raw["play_time_ms"], dtype=np.float32),
         # raw user strings are needed so GAUC groups match the official ids
         "user_raw": np.asarray(raw["user"], dtype=object),
+        # Raw video identity is required for evaluation-batch repeat features;
+        # encoded unseen videos all share one UNK slot and are not interchangeable.
+        "video_raw": np.asarray(raw["video"], dtype=object),
+    }
+    target_date = np.asarray(target_dates, dtype=np.int32)
+    target_arrays = {
+        key: np.asarray(values, dtype=np.float32)
+        for key, values in raw_targets.items()
     }
     for name, (lo, hi) in SPLITS.items():
         m = (date >= lo) & (date <= hi)
+        payload = {k: v[m] for k, v in feature_arrays.items()}
+        if name != "test":
+            target_mask = (target_date >= lo) & (target_date <= hi)
+            if int(target_mask.sum()) != int(m.sum()):
+                raise RuntimeError(
+                    f"{name} feature/target cache rows are not aligned")
+            payload.update(
+                {key: values[target_mask]
+                 for key, values in target_arrays.items()})
         np.savez(os.path.join(cache_dir, f"{name}.npz"),
-                 **{k: v[m] for k, v in arrays.items()})
+                 **payload)
     with open(os.path.join(cache_dir, "meta.json"), "w") as fh:
         json.dump(meta, fh)
+    ready_path = schema_path + ".ready"
+    with open(ready_path, "w") as fh:
+        json.dump({"version": _CACHE_SCHEMA_VERSION}, fh)
+    os.replace(ready_path, schema_path)
 
 
 def load_cache(cache_dir: str = CACHE_DIR) -> tuple[dict, dict]:
     """Returns ({split: {col: array}}, meta). Builds the cache on first use."""
     meta_path = os.path.join(cache_dir, "meta.json")
-    if not os.path.exists(meta_path):
+    schema_path = os.path.join(cache_dir, _CACHE_SCHEMA_FILE)
+    try:
+        with open(schema_path) as fh:
+            cache_version = int(json.load(fh).get("version", -1))
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        cache_version = -1
+    required = [meta_path, os.path.join(cache_dir, "vocabs.json")]
+    required.extend(os.path.join(cache_dir, f"{name}.npz") for name in SPLITS)
+    if cache_version != _CACHE_SCHEMA_VERSION \
+            or not all(os.path.isfile(path) for path in required):
         print("train_lib: building data cache (first run, ~1 min)...", flush=True)
         build_cache(cache_dir=cache_dir)
     with open(meta_path) as fh:
         meta = json.load(fh)
     splits = {}
     for name in SPLITS:
-        z = np.load(os.path.join(cache_dir, f"{name}.npz"), allow_pickle=True)
-        splits[name] = {k: z[k] for k in z.files}
+        with np.load(os.path.join(cache_dir, f"{name}.npz"), allow_pickle=True) as z:
+            splits[name] = {k: z[k] for k in z.files}
+    # Old caches may predate the boundary. Never expose hidden-test outcomes
+    # through the supported training API, even when such a cache is reused.
+    had_test_targets = any(key in splits["test"] for key in _TARGET_COLUMNS)
+    for key in _TARGET_COLUMNS:
+        splits["test"].pop(key, None)
+    if had_test_targets:
+        test_path = os.path.join(cache_dir, "test.npz")
+        migration_path = os.path.join(cache_dir, "test.boundary-migration.npz")
+        np.savez(migration_path, **splits["test"])
+        os.replace(migration_path, test_path)
     return splits, meta
+
+
+def load_validation_targets(cache_dir: str = CACHE_DIR) -> tuple[np.ndarray, np.ndarray]:
+    """Trusted parent-only validation grouping/labels for authoritative scoring."""
+    # load_cache also completes schema upgrades and old test-target migration
+    # before the executor captures protected hashes.
+    splits, _ = load_cache(cache_dir=cache_dir)
+    return (splits["valid"]["user_raw"].copy(),
+            splits["valid"]["long_view"].copy())
 
 
 # --------------------------------------------------------------------------
 # Feature encoding: X (N, F) int32 with per-field offsets
 # --------------------------------------------------------------------------
-def encode_features(splits: dict, meta: dict, temporal: str = "none"):
-    """Fields: user, video, author, tab, dur_bucket [+ hour_bucket [+ dow]]."""
+def encode_features(splits: dict, meta: dict, temporal: str = "none",
+                    feature_mode: str = "standard"):
+    """Encode base fields and optional compact multi-scenario cross fields."""
     tr = splits["train"]
     edges = np.quantile(tr["duration_ms"], np.linspace(0, 1, 11)[1:-1])
     dims = [meta["field_dims"]["user"], meta["field_dims"]["video"],
@@ -226,6 +430,47 @@ def encode_features(splits: dict, meta: dict, temporal: str = "none"):
         dims.append(24)
     if use_dow:
         dims.append(7)
+
+    composite = []
+    if feature_mode == "scenario_crosses":
+        dur_all = {}
+        for name, s in splits.items():
+            dur_all[name] = np.searchsorted(
+                edges, s["duration_ms"]).astype(np.int64)
+        pair_specs = [
+            ("user_tab", "user", "tab", meta["field_dims"]["tab"]),
+            ("video_tab", "video", "tab", meta["field_dims"]["tab"]),
+            ("author_tab", "author", "tab", meta["field_dims"]["tab"]),
+        ]
+        for label, left, right, right_dim in pair_specs:
+            train_key = (tr[left].astype(np.int64) * int(right_dim) +
+                         tr[right].astype(np.int64))
+            vocab = np.unique(train_key)
+            codes = {}
+            for name, s in splits.items():
+                key = (s[left].astype(np.int64) * int(right_dim) +
+                       s[right].astype(np.int64))
+                pos = np.searchsorted(vocab, key)
+                seen = pos < len(vocab)
+                safe = np.minimum(pos, len(vocab) - 1)
+                seen &= vocab[safe] == key
+                codes[name] = np.where(seen, pos, len(vocab)).astype(np.int32)
+            composite.append((label, codes, len(vocab) + 1))
+
+        train_key = tr["tab"].astype(np.int64) * 11 + dur_all["train"]
+        vocab = np.unique(train_key)
+        codes = {}
+        for name, s in splits.items():
+            key = s["tab"].astype(np.int64) * 11 + dur_all[name]
+            pos = np.searchsorted(vocab, key)
+            seen = pos < len(vocab)
+            safe = np.minimum(pos, len(vocab) - 1)
+            seen &= vocab[safe] == key
+            codes[name] = np.where(seen, pos, len(vocab)).astype(np.int32)
+        composite.append(("tab_duration", codes, len(vocab) + 1))
+        dims.extend(int(dim) for _, _, dim in composite)
+    elif feature_mode != "standard":
+        raise ValueError(f"unknown feature_mode: {feature_mode}")
     offsets = np.cumsum([0] + dims[:-1]).astype(np.int32)
 
     enc = {}
@@ -238,6 +483,8 @@ def encode_features(splits: dict, meta: dict, temporal: str = "none"):
             # date is yyyymmdd in April–May 2022; day-of-week via day offset from 20220408 (a Friday)
             day = (s["date"] % 100) + np.where(s["date"] >= 20220501, 30, 0)
             cols.append(((day - 8 + 4) % 7).astype(np.int32))
+        for _, codes, _ in composite:
+            cols.append(codes[name])
         X = np.stack(cols, axis=1).astype(np.int32) + offsets[None, :]
         enc[name] = X
     return enc, int(sum(dims)), offsets, dims
@@ -294,6 +541,68 @@ class History:
         return num / den
 
 
+class MultiBehaviorHistory:
+    """Four disjoint, recency-weighted train histories with row-wise LOO.
+
+    Channels are: long-view positive; social engagement without long-view;
+    click-only without long-view/social; and clear negative (none of those).
+    Channel 0 exactly supplies the incumbent positive history.  Channels 1..3
+    are consumed by trainable, bounded FISM-style affinity gates.
+    """
+
+    N_CHANNELS = 4
+
+    def __init__(self, splits: dict, n_users: int, tau_days: float = 3.0):
+        tr = splits["train"]
+        self.n_users = n_users
+        positive = tr["long_view"] > 0
+        social = (~positive) & ((tr["is_like"] > 0) | (tr["is_forward"] > 0))
+        click_only = (~positive) & (~social) & (tr["is_click"] > 0)
+        channel = np.full(len(positive), 3, dtype=np.int8)
+        channel[click_only] = 2
+        channel[social] = 1
+        channel[positive] = 0
+        self.channel = channel
+        self.user = tr["user"]
+        self.video = tr["video"]
+
+        t = tr["time_ms"].astype(np.float64)
+        tmax = np.zeros(n_users, dtype=np.float64)
+        np.maximum.at(tmax, self.user, t)
+        self.row_weight = np.exp(
+            -(tmax[self.user] - t) / (tau_days * 86400e3)).astype(np.float32)
+        self.count = np.zeros((self.N_CHANNELS, n_users), dtype=np.float32)
+        for c in range(self.N_CHANNELS):
+            mask = channel == c
+            np.add.at(self.count[c], self.user[mask], self.row_weight[mask])
+
+    def pooled_many(self, V_video: np.ndarray) -> np.ndarray:
+        k = V_video.shape[1]
+        sums = np.zeros((self.N_CHANNELS, self.n_users, k), dtype=np.float32)
+        for c in range(self.N_CHANNELS):
+            mask = self.channel == c
+            np.add.at(sums[c], self.user[mask],
+                      self.row_weight[mask, None] * V_video[self.video[mask]])
+        return sums
+
+    def batch_vectors_many(self, sums, users, split_is_train,
+                           V_video=None, row_index=None):
+        """Return (B,4,k) means; remove a train row from its own channel."""
+        num = np.transpose(sums[:, users, :], (1, 0, 2)).copy()
+        den = self.count[:, users].T.copy()
+        if split_is_train:
+            if row_index is None or V_video is None:
+                raise ValueError("V_video and row_index are required for train history LOO")
+            row_index = np.asarray(row_index, dtype=np.int64)
+            rows = np.arange(len(row_index))
+            channels = self.channel[row_index]
+            weights = self.row_weight[row_index]
+            vids = self.video[row_index]
+            num[rows, channels] -= weights[:, None] * V_video[vids]
+            den[rows, channels] -= weights
+        return num / np.maximum(den, 1e-6)[:, :, None]
+
+
 # --------------------------------------------------------------------------
 # Numpy FM engine with pluggable loss / history / multitask
 # --------------------------------------------------------------------------
@@ -304,7 +613,8 @@ class RankFM:
     Aux heads (multitask): z_t = b_t + W_t[X].sum + u_t · (S_f + H).
     """
 
-    def __init__(self, dim, k=16, lr=1e-3, l2=1e-6, seed=0, aux_tasks=()):
+    def __init__(self, dim, k=16, lr=1e-3, l2=1e-6, seed=0, aux_tasks=(),
+                 history_channels=0, n_fields=None, field_weighted=False):
         rng = np.random.default_rng(seed)
         self.V = rng.normal(0, 0.01, (dim, k)).astype(np.float32)
         self.W = np.zeros(dim, dtype=np.float32)
@@ -314,6 +624,17 @@ class RankFM:
         self.Wt = {t: np.zeros(dim, dtype=np.float32) for t in self.aux_tasks}
         self.ut = {t: rng.normal(0, 0.01, k).astype(np.float32) for t in self.aux_tasks}
         self.bt = {t: np.float32(0.0) for t in self.aux_tasks}
+        self.history_gate_raw = np.zeros(history_channels, dtype=np.float32)
+        self.field_weighted = bool(field_weighted)
+        self.n_fields = int(n_fields or 0)
+        if self.field_weighted:
+            self.pair_i, self.pair_j = np.triu_indices(self.n_fields, 1)
+            self.field_pair_raw = np.zeros(len(self.pair_i), dtype=np.float32)
+            self.history_field_raw = np.zeros(self.n_fields, dtype=np.float32)
+        else:
+            self.pair_i = self.pair_j = np.zeros(0, dtype=np.int64)
+            self.field_pair_raw = np.zeros(0, dtype=np.float32)
+            self.history_field_raw = np.zeros(0, dtype=np.float32)
         self._adam = {}
         self.t = 0
 
@@ -325,18 +646,37 @@ class RankFM:
         v *= b2; v += (1 - b2) * (G * G)
         P -= self.lr * (m / (1 - b1 ** self.t)) / (np.sqrt(v / (1 - b2 ** self.t)) + eps)
 
-    def forward(self, X, H=None):
+    def forward(self, X, H=None, H_extra=None):
         E = self.V[X]                     # (B,F,k)
         S = E.sum(1)                      # (B,k)
         St = S if H is None else S + H
-        inter = 0.5 * ((St ** 2).sum(1) - (E ** 2).sum((1, 2)))
-        if H is not None:
-            inter -= 0.5 * (H ** 2).sum(1)
+        if self.field_weighted:
+            pair_weights = 2.0 * sigmoid(self.field_pair_raw)
+            R = np.zeros((self.n_fields, self.n_fields), dtype=np.float32)
+            R[self.pair_i, self.pair_j] = pair_weights
+            R[self.pair_j, self.pair_i] = pair_weights
+            weighted_other = np.einsum("ij,bjk->bik", R, E, optimize=True)
+            inter = 0.5 * np.sum(E * weighted_other, axis=(1, 2))
+            if H is not None:
+                history_weights = 2.0 * sigmoid(self.history_field_raw)
+                inter += np.einsum("bik,bk,i->b", E, H, history_weights,
+                                   optimize=True)
+        else:
+            inter = 0.5 * ((St ** 2).sum(1) - (E ** 2).sum((1, 2)))
+            if H is not None:
+                inter -= 0.5 * (H ** 2).sum(1)
         z = self.b + self.W[X].sum(1) + inter
-        return z, (X, E, St)
+        hmix = None
+        if H_extra is not None and self.history_gate_raw.size:
+            gates = np.tanh(self.history_gate_raw)
+            hmix = np.einsum("c,bck->bk", gates, H_extra, optimize=True)
+            # FISM-style candidate-to-history affinity.  The history vectors are
+            # stop-gradient; candidate embeddings and bounded gates are trained.
+            z = z + np.sum(E[:, 1, :] * hmix, axis=1)
+        return z, (X, E, St, H_extra, hmix, H)
 
     def aux_forward(self, task, cache):
-        X, _, St = cache
+        X, _, St = cache[:3]
         return self.bt[task] + self.Wt[task][X].sum(1) + St @ self.ut[task]
 
     def apply_grads(self, contribs, aux_contribs=()):
@@ -345,14 +685,44 @@ class RankFM:
         gV = np.zeros_like(self.V)
         gW = np.zeros_like(self.W)
         gb = 0.0
-        for (X, E, St), g in contribs:
+        gate_grad = np.zeros_like(self.history_gate_raw)
+        pair_grad = np.zeros_like(self.field_pair_raw)
+        history_field_grad = np.zeros_like(self.history_field_raw)
+        for cache, g in contribs:
+            X, E, St, H_extra, hmix, H = cache
             np.add.at(gW, X, g[:, None])
-            np.add.at(gV, X, g[:, None, None] * (St[:, None, :] - E))
+            if self.field_weighted:
+                pair_weights = 2.0 * sigmoid(self.field_pair_raw)
+                R = np.zeros((self.n_fields, self.n_fields), dtype=np.float32)
+                R[self.pair_i, self.pair_j] = pair_weights
+                R[self.pair_j, self.pair_i] = pair_weights
+                grad_e = np.einsum("ij,bjk->bik", R, E, optimize=True)
+                pair_dot = np.sum(E[:, self.pair_i, :] * E[:, self.pair_j, :],
+                                  axis=2)
+                pair_dr = pair_weights * (1.0 - pair_weights / 2.0)
+                pair_grad += np.sum(g[:, None] * pair_dot, axis=0) * pair_dr
+                if H is not None:
+                    history_weights = 2.0 * sigmoid(self.history_field_raw)
+                    grad_e += history_weights[None, :, None] * H[:, None, :]
+                    history_dot = np.einsum("bik,bk->bi", E, H, optimize=True)
+                    hist_dr = history_weights * (1.0 - history_weights / 2.0)
+                    history_field_grad += (
+                        np.sum(g[:, None] * history_dot, axis=0) * hist_dr)
+                np.add.at(gV, X, g[:, None, None] * grad_e)
+            else:
+                np.add.at(gV, X, g[:, None, None] * (St[:, None, :] - E))
+            if H_extra is not None and hmix is not None:
+                np.add.at(gV, X[:, 1], g[:, None] * hmix)
+                affinity = np.einsum("bk,bck->bc", E[:, 1, :], H_extra,
+                                     optimize=True)
+                gates = np.tanh(self.history_gate_raw)
+                gate_grad += np.sum(g[:, None] * affinity, axis=0) * (1.0 - gates ** 2)
             gb += g.sum()
         gWt = {t: np.zeros_like(self.W) for t in self.aux_tasks}
         gut = {t: np.zeros_like(self.ut[t]) for t in self.aux_tasks}
         gbt = {t: 0.0 for t in self.aux_tasks}
-        for task, (X, E, St), g in aux_contribs:
+        for task, cache, g in aux_contribs:
+            X, E, St = cache[:3]
             np.add.at(gWt[task], X, g[:, None])
             gut[task] += (g[:, None] * St).sum(0)
             gbt[task] += g.sum()
@@ -363,24 +733,35 @@ class RankFM:
         self.t += 1
         self._step_param("V", self.V, gV)
         self._step_param("W", self.W, gW)
+        if self.history_gate_raw.size:
+            self._step_param("history_gate_raw", self.history_gate_raw, gate_grad)
+        if self.field_weighted:
+            # Keep the light interaction reweighting near its exact FM start.
+            pair_grad += 1e-4 * self.field_pair_raw
+            history_field_grad += 1e-4 * self.history_field_raw
+            self._step_param("field_pair_raw", self.field_pair_raw, pair_grad)
+            self._step_param("history_field_raw", self.history_field_raw,
+                             history_field_grad)
         self.b -= self.lr * np.float32(gb)
         for t_ in self.aux_tasks:
             self._step_param(f"Wt.{t_}", self.Wt[t_], gWt[t_])
             self._step_param(f"ut.{t_}", self.ut[t_], gut[t_])
             self.bt[t_] -= self.lr * np.float32(gbt[t_])
 
-    def predict(self, X, H=None, bs=200_000):
+    def predict(self, X, H=None, H_extra=None, bs=200_000):
         out = []
         for i in range(0, len(X), bs):
             h = None if H is None else H[i:i + bs]
-            out.append(self.forward(X[i:i + bs], h)[0])
+            hx = None if H_extra is None else H_extra[i:i + bs]
+            out.append(self.forward(X[i:i + bs], h, hx)[0])
         return np.concatenate(out) if out else np.zeros(0, dtype=np.float32)
 
     def state(self):
         s = (self.V.copy(), self.W.copy(), np.float32(self.b),
              {t: self.Wt[t].copy() for t in self.aux_tasks},
              {t: self.ut[t].copy() for t in self.aux_tasks},
-             dict(self.bt))
+             dict(self.bt), self.history_gate_raw.copy(),
+             self.field_pair_raw.copy(), self.history_field_raw.copy())
         return s
 
     def load_state(self, s):
@@ -389,6 +770,11 @@ class RankFM:
             self.Wt[t] = s[3][t].copy()
             self.ut[t] = s[4][t].copy()
             self.bt[t] = s[5][t]
+        if self.history_gate_raw.size and len(s) > 6:
+            self.history_gate_raw = s[6].copy()
+        if self.field_weighted and len(s) > 8:
+            self.field_pair_raw = s[7].copy()
+            self.history_field_raw = s[8].copy()
 
 
 # ---- loss-specific epoch runners (numpy engine) ----
@@ -429,16 +815,31 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     ytr = tr["long_view"]
     uva_raw = list(splits["valid"]["user_raw"])
     yva = splits["valid"]["long_view"]
+    fixed = cfg.get("fixed_score_offsets")
+    if fixed is None:
+        qtr = np.zeros(len(Xtr), dtype=np.float32)
+        qva = np.zeros(len(Xva), dtype=np.float32)
+        qte = np.zeros(len(Xte), dtype=np.float32)
+    else:
+        qtr = np.asarray(fixed["train"], dtype=np.float32)
+        qva = np.asarray(fixed["valid"], dtype=np.float32)
+        qte = np.asarray(fixed["test"], dtype=np.float32)
 
     hist = None
     Htr = Hva = Hte = None
+    Htr_extra = Hva_extra = Hte_extra = None
     if cfg["history"] in ("mean_pool_positives", "recency_weighted_pool"):
         hist = History(splits, meta["field_dims"]["user"], cfg["history"])
+    elif cfg["history"] == "signed_multibehavior_fism":
+        hist = MultiBehaviorHistory(splits, meta["field_dims"]["user"])
 
     aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
                "censored_watch_time": ["watch"], "none": []}
     model = RankFM(dim=cfg["dim"], k=cfg["k"], lr=cfg["lr"], seed=cfg["seed"],
-                   aux_tasks=aux_map[cfg["multitask"]])
+                   aux_tasks=aux_map[cfg["multitask"]],
+                   history_channels=3 if cfg["history"] == "signed_multibehavior_fism"
+                   else 0, n_fields=Xtr.shape[1],
+                   field_weighted=cfg["model"] == "fwfm_numpy")
     aux = _aux_targets(tr, cfg["multitask"])
     lam = cfg.get("aux_weight", 0.2)
     rng = np.random.default_rng(cfg["seed"])
@@ -451,25 +852,39 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     bounds = np.searchsorted(user_tr[order], np.arange(n_users + 1))
 
     def refresh_pooled():
-        nonlocal Htr, Hva, Hte
+        nonlocal Htr, Hva, Hte, Htr_extra, Hva_extra, Hte_extra
         if hist is None:
             return
         # video embeddings live at offset of the video field (index 1)
         v_off = np.cumsum([0, meta["field_dims"]["user"]])[1]
         Vvid = model.V[v_off: v_off + meta["field_dims"]["video"]]
-        S = hist.pooled(Vvid)
-        Htr = hist.batch_vectors(S, tr["user"], True, Vvid, tr["video"],
-                                 hist.train_row_w, ytr)
-        Hva = hist.batch_vectors(S, splits["valid"]["user"], False)
-        Hte = hist.batch_vectors(S, splits["test"]["user"], False)
+        if isinstance(hist, MultiBehaviorHistory):
+            S = hist.pooled_many(Vvid)
+            all_train = hist.batch_vectors_many(
+                S, tr["user"], True, V_video=Vvid,
+                row_index=np.arange(len(tr["user"])))
+            all_valid = hist.batch_vectors_many(
+                S, splits["valid"]["user"], False)
+            all_test = hist.batch_vectors_many(
+                S, splits["test"]["user"], False)
+            Htr, Htr_extra = all_train[:, 0], all_train[:, 1:]
+            Hva, Hva_extra = all_valid[:, 0], all_valid[:, 1:]
+            Hte, Hte_extra = all_test[:, 0], all_test[:, 1:]
+        else:
+            S = hist.pooled(Vvid)
+            Htr = hist.batch_vectors(S, tr["user"], True, Vvid, tr["video"],
+                                     hist.train_row_w, ytr)
+            Hva = hist.batch_vectors(S, splits["valid"]["user"], False)
+            Hte = hist.batch_vectors(S, splits["test"]["user"], False)
 
     def epoch_pointwise():
         idx = rng.permutation(len(ytr))
         for i in range(0, len(idx), bs):
             b = idx[i:i + bs]
             h = None if Htr is None else Htr[b]
-            z, cache = model.forward(Xtr[b], h)
-            g = ((sigmoid(z) - ytr[b]) / len(b)).astype(np.float32)
+            hx = None if Htr_extra is None else Htr_extra[b]
+            z, cache = model.forward(Xtr[b], h, hx)
+            g = ((sigmoid(z + qtr[b]) - ytr[b]) / len(b)).astype(np.float32)
             model.apply_grads([(cache, g)],
                               _aux_grad_contribs(model, cache, aux, b, lam))
 
@@ -491,9 +906,12 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
             pb, nb = pos_rows[perm[i:i + bs]], neg_pick[perm[i:i + bs]]
             hp = None if Htr is None else Htr[pb]
             hn = None if Htr is None else Htr[nb]
-            zp, cp = model.forward(Xtr[pb], hp)
-            zn, cn = model.forward(Xtr[nb], hn)
-            g = (-sigmoid(-(zp - zn)) / len(pb)).astype(np.float32)
+            hxp = None if Htr_extra is None else Htr_extra[pb]
+            hxn = None if Htr_extra is None else Htr_extra[nb]
+            zp, cp = model.forward(Xtr[pb], hp, hxp)
+            zn, cn = model.forward(Xtr[nb], hn, hxn)
+            margin = (zp + qtr[pb]) - (zn + qtr[nb])
+            g = (-sigmoid(-margin) / len(pb)).astype(np.float32)
             contribs = [(cp, g), (cn, -g)]
             contribs_aux = (_aux_grad_contribs(model, cp, aux, pb, lam)
                             + _aux_grad_contribs(model, cn, aux, nb, lam))
@@ -522,7 +940,9 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
         seg = np.concatenate([np.full(len(g), i) for i, g in enumerate(groups)])
         nseg = len(groups)
         h = None if Htr is None else Htr[rows]
-        z, cache = model.forward(Xtr[rows], h)
+        hx = None if Htr_extra is None else Htr_extra[rows]
+        z, cache = model.forward(Xtr[rows], h, hx)
+        z = z + qtr[rows]
         zmax = np.full(nseg, -np.inf, dtype=np.float64)
         np.maximum.at(zmax, seg, z)
         ez = np.exp(z - zmax[seg])
@@ -550,32 +970,73 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
                   (cfg["loss"], cfg["epochs"], cfg["lr"] * 0.3)]
 
     best, best_state, bad = -1.0, None, 0
+    snapshot_mode = cfg["training"] == "cosine_snapshot_ensemble"
+    snapshots = []
     for loss_name, n_ep, lr in stages:
         model.lr = lr
         bad = 0
         for ep in range(1, n_ep + 1):
             t0 = time.time()
+            if snapshot_mode:
+                cycle_len = 7
+                phase = (ep - 1) % cycle_len
+                lo, hi = 1e-4, 7.5e-4
+                model.lr = lo + 0.5 * (hi - lo) * (
+                    1.0 + np.cos(np.pi * phase / (cycle_len - 1)))
             refresh_pooled()
             runners[loss_name]()
             refresh_pooled()
-            va = evaluate(uva_raw, yva, model.predict(Xva, Hva))
+            pred_valid = model.predict(Xva, Hva, Hva_extra) + qva
+            va = evaluate(uva_raw, yva, pred_valid)
             log(f"  [{loss_name}] epoch {ep:2d} | valid primary {va['primary']:.4f} "
-                f"(GAUC {va['GAUC']:.4f} nDCG@5 {va['nDCG@5']:.4f}) | {time.time()-t0:.1f}s")
+                f"(GAUC {va['GAUC']:.4f} nDCG@5 {va['nDCG@5']:.4f})"
+                + (f" lr {model.lr:.6f}" if snapshot_mode else "")
+                + f" | {time.time()-t0:.1f}s")
+            if snapshot_mode and ep >= 14 and ep % 7 == 0:
+                pred_test = model.predict(Xte, Hte, Hte_extra) + qte
+                snapshots.append({
+                    "epoch": ep,
+                    "primary": float(va["primary"]),
+                    "valid": pred_valid.copy(),
+                    "test": pred_test.copy(),
+                })
+                log(f"  snapshot captured at epoch {ep} "
+                    f"(member primary {va['primary']:.4f})")
             if va["primary"] > best + 1e-5:
                 best, bad, best_state = va["primary"], 0, model.state()
             else:
                 bad += 1
-                if bad >= cfg["patience"]:
+                if not snapshot_mode and bad >= cfg["patience"]:
                     log(f"  early stop ({loss_name}) at epoch {ep}")
                     break
 
     model.load_state(best_state)
     refresh_pooled()
+    snapshot_info = None
+    if snapshot_mode and len(snapshots) >= 2:
+        score_valid = np.mean(
+            [rank_normalize(s["valid"]) for s in snapshots], axis=0)
+        score_test = np.mean(
+            [rank_normalize(s["test"]) for s in snapshots], axis=0)
+        em = evaluate(uva_raw, yva, score_valid)
+        snapshot_info = {
+            "epochs": [s["epoch"] for s in snapshots],
+            "member_primary": [s["primary"] for s in snapshots],
+            "ensemble_primary": float(em["primary"]),
+            "schedule": {"cycle_epochs": 7, "lr_max": 7.5e-4,
+                         "lr_min": 1e-4, "warmup_cycle_excluded": True},
+        }
+        log(f"  fixed snapshot ensemble primary {em['primary']:.4f} "
+            f"from epochs {snapshot_info['epochs']}")
+    else:
+        score_valid = model.predict(Xva, Hva, Hva_extra) + qva
+        score_test = model.predict(Xte, Hte, Hte_extra) + qte
     return {
-        "scores_valid": model.predict(Xva, Hva),
-        "scores_test": model.predict(Xte, Hte),
+        "scores_valid": score_valid,
+        "scores_test": score_test,
         "model": model,
         "hist": hist,
+        "snapshot_info": snapshot_info,
     }
 
 
@@ -810,29 +1271,46 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
             print(msg, flush=True)
 
     splits, meta = load_cache()
-    enc, dim, offsets, dims = encode_features(splits, meta,
-                                              menu_choices.get("temporal", "none"))
+    model_choice = menu_choices.get("model", "fm_numpy")
+    feature_mode = ("scenario_crosses" if model_choice == "scenario_fm_numpy"
+                    else "standard")
+    enc, dim, offsets, dims = encode_features(
+        splits, meta, menu_choices.get("temporal", "none"), feature_mode)
 
     training = menu_choices.get("training", "default")
+    snapshot_training = training == "cosine_snapshot_ensemble"
     cfg = {
         "dim": dim, "k": 32 if training == "k32" else 16,
-        "lr": 5e-4 if training == "lower_lr_longer" else 1e-3,
+        "lr": (7.5e-4 if snapshot_training else
+               (5e-4 if training == "lower_lr_longer" else 1e-3)),
         "bs": 8192,
-        "epochs": 60 if training == "lower_lr_longer" else 40,
-        "patience": 6 if training == "lower_lr_longer" else 4,
+        "epochs": (42 if snapshot_training else
+                   (60 if training == "lower_lr_longer" else 40)),
+        "patience": (42 if snapshot_training else
+                     (6 if training == "lower_lr_longer" else 4)),
         "seed": seed,
         "loss": menu_choices.get("loss", "pointwise_logloss"),
         "history": menu_choices.get("user_history", "none"),
         "multitask": menu_choices.get("multitask", "none"),
-        "model": menu_choices.get("model", "fm_numpy"),
+        "model": model_choice,
         "training": training,
     }
     aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
                "censored_watch_time": ["watch"], "none": []}
     cfg["aux_tasks"] = aux_map[cfg["multitask"]]
+    prior_mode = menu_choices.get("score_prior", "none")
+    prior_info = None
+    if prior_mode == "recency_bayesian_offset_oof":
+        raw_offsets, prior_info = oof_recency_bayesian_prior_scores(splits)
+        beta = float(prior_info["offset_beta"])
+        cfg["fixed_score_offsets"] = {
+            name: beta * raw_offsets[name] for name in ("train", "valid", "test")
+        }
+        log("  score prior: leave-one-date-out recency Bayesian offset "
+            f"inside training (beta={beta:.2f})")
 
     t_train = time.time()
-    if cfg["model"] == "fm_numpy":
+    if cfg["model"] in ("fm_numpy", "fwfm_numpy", "scenario_fm_numpy"):
         device = "cpu"                       # the numpy engine never uses a GPU
         res = train_numpy_fm(cfg, enc, splits, meta, log)
     else:
@@ -845,9 +1323,57 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
     # Measured compute, read back by the harness for the GPU-hours report.
     write_resource_json(output_dir, device, train_seconds)
 
+    history_info = None
+    if cfg["history"] == "signed_multibehavior_fism":
+        gates = np.tanh(res["model"].history_gate_raw).astype(np.float64)
+        history_info = {
+            "method": "signed_multibehavior_fism",
+            "channels": ["social_without_long_view", "click_only", "clear_negative"],
+            "gates": [float(x) for x in gates],
+            "positive_history": "recency_weighted_long_view",
+            "train_leakage_control": "row removed from its own disjoint channel",
+        }
+        log(f"  learned signed-history gates: {history_info['gates']}")
+
+    field_weight_info = None
+    if cfg["model"] == "fwfm_numpy":
+        model = res["model"]
+        names = ["user", "video", "author", "tab", "duration"]
+        temporal = menu_choices.get("temporal", "none")
+        if temporal in ("hour_bucket", "hour_plus_dow"):
+            names.append("hour")
+        if temporal == "hour_plus_dow":
+            names.append("day_of_week")
+        weights = 2.0 * sigmoid(model.field_pair_raw)
+        field_weight_info = {
+            "method": "field_weighted_factorization_machine",
+            "initial_weight": 1.0,
+            "pair_weights": {
+                f"{names[i]}__{names[j]}": float(w)
+                for i, j, w in zip(model.pair_i, model.pair_j, weights)
+            },
+        }
+        if res.get("hist") is not None:
+            field_weight_info["history_weights"] = {
+                name: float(w) for name, w in zip(
+                    names, 2.0 * sigmoid(model.history_field_raw))
+            }
+
     sv, st = np.asarray(res["scores_valid"]), np.asarray(res["scores_test"])
-    prior_mode = menu_choices.get("score_prior", "none")
-    if prior_mode != "none":
+    batch_context_info = None
+    if prior_mode == "batch_repeat_fatigue":
+        sv, valid_context = batch_repeat_fatigue_scores(sv, splits["valid"])
+        st, test_context = batch_repeat_fatigue_scores(st, splits["test"])
+        batch_context_info = {
+            "method": "label_free_batch_repeat_fatigue",
+            "validation": valid_context,
+            "test": test_context,
+            "disclosure": (
+                "Uses the complete input feature batch at inference; no outcome "
+                "columns are accessed."),
+        }
+        log("  score adjustment: label-free repeated-exposure fatigue (weight=0.10)")
+    elif prior_mode not in ("none", "recency_bayesian_offset_oof"):
         priors = bayesian_prior_scores(splits, prior_mode)
         blend_weight = 0.25 if prior_mode == "bayesian_item_author" else 0.30
         sv = sv + blend_weight * priors["valid"]
@@ -866,6 +1392,21 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
     np.save(os.path.join(output_dir, "scores_test.npy"), st.astype(np.float64))
     with open(os.path.join(output_dir, "metrics.json"), "w") as fh:
         json.dump(metrics, fh, indent=2)
+    if prior_info is not None:
+        with open(os.path.join(output_dir, "prior_info.json"), "w") as fh:
+            json.dump(prior_info, fh, indent=2)
+    if history_info is not None:
+        with open(os.path.join(output_dir, "history_info.json"), "w") as fh:
+            json.dump(history_info, fh, indent=2)
+    if field_weight_info is not None:
+        with open(os.path.join(output_dir, "field_weights.json"), "w") as fh:
+            json.dump(field_weight_info, fh, indent=2)
+    if res.get("snapshot_info") is not None:
+        with open(os.path.join(output_dir, "snapshot_info.json"), "w") as fh:
+            json.dump(res["snapshot_info"], fh, indent=2)
+    if batch_context_info is not None:
+        with open(os.path.join(output_dir, "batch_context_info.json"), "w") as fh:
+            json.dump(batch_context_info, fh, indent=2)
 
     if menu_choices.get("data_extras") == "random_log_valid_unbiased_check":
         try:
