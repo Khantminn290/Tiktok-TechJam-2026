@@ -1671,6 +1671,101 @@ def test_research_state_no_side_effects():
                                                "research_state.py")).read())
 
 
+class _FakeState:
+    def __init__(self, **kw):
+        self.component_evidence = kw.get("component_evidence", {})
+        self.best_config_evidence = kw.get("best_config_evidence",
+                                           {"level": "reseed_verified", "n_runs": 5})
+        self.promising = kw.get("promising", [])
+        self.integration_candidates = kw.get("integration_candidates", [])
+        self.branches = kw.get("branches", [])
+        self.dead_ends = kw.get("dead_ends", [])
+
+
+def test_research_policy():
+    """Stage D: the category must REACT to evidence, be explainable, and be
+    guarded against its own pathologies in both directions."""
+    print("\n[stage D: evidence-reactive research policy]")
+    from agent.research_policy import (ABLATION, CONFIRMATION, EXPLOITATION,
+                                       EXPLORATION, INTEGRATION,
+                                       MAX_ABLATION_SHARE, decide_category,
+                                       render_decision)
+
+    def node(cat, ok=True):
+        return {"status": "success" if ok else "error", "research_category": cat,
+                "metrics": {"primary": 0.6} if ok else None}
+
+    # untested components -> ablation
+    st = _FakeState(component_evidence={
+        "loss": {"value": "bpr", "status": "untested_assumption"},
+        "model": {"value": "fm", "status": "untested_assumption"}})
+    d = decide_category(st, [node(EXPLOITATION)] * 4)
+    check("untested components in the best config drive ABLATION",
+          d["category"] == ABLATION)
+    check("the decision names the specific untested entries",
+          any("loss" in e for e in d["evidence"]))
+    check("alternatives each carry a stated reason for losing",
+          set(d["alternatives"]) == {EXPLORATION, EXPLOITATION, CONFIRMATION,
+                                     INTEGRATION})
+
+    # GUARD: ablation cannot eat the whole run
+    many = [node(ABLATION)] * 9 + [node(EXPLOITATION)]
+    d2 = decide_category(st, many)
+    check("ablation is SUPPRESSED once it exceeds its budget share",
+          d2["category"] != ABLATION and "suppressed" in d2["alternatives"][ABLATION])
+
+    # single-run incumbent -> confirmation
+    st2 = _FakeState(best_config_evidence={"level": "observed_once", "n_runs": 1})
+    d3 = decide_category(st2, [node(EXPLORATION)] * 3)
+    check("a single-run incumbent drives CONFIRMATION", d3["category"] == CONFIRMATION)
+    check("confirmation cites the incumbent's weakness",
+          any("SINGLE run" in e for e in d3["evidence"]))
+
+    # GUARD: nothing to confirm -> confirmation scores zero
+    st3 = _FakeState()
+    d4 = decide_category(st3, [node(EXPLOITATION)])
+    check("confirmation is not chosen when everything is already verified",
+          d4["scores"][CONFIRMATION] == 0.0)
+
+    # integration only when eligible; blocked otherwise
+    st4 = _FakeState(integration_candidates=[{"candidate": "A+B", "status": "eligible"}])
+    d5 = decide_category(st4, [node(EXPLOITATION)])
+    check("eligible independent improvements drive INTEGRATION",
+          d5["category"] == INTEGRATION)
+    st5 = _FakeState(integration_candidates=[
+        {"candidate": "A+B", "status": "blocked: needs confirmation"}])
+    d6 = decide_category(st5, [node(EXPLOITATION)])
+    check("blocked candidates do NOT trigger integration",
+          d6["category"] != INTEGRATION and "blocked" in d6["alternatives"][INTEGRATION])
+
+    # GUARD: saturation damps exploration
+    st6 = _FakeState(branches=[{"status": "dead-end (explored)"}] * 3,
+                     dead_ends=["x"] * 14)
+    d7 = decide_category(st6, [node(EXPLORATION)] * 6)
+    check("repeated fruitless exploration is damped",
+          "damped" in d7["alternatives"].get(EXPLORATION, "")
+          or d7["category"] != EXPLORATION)
+
+    # budget end -> consolidate
+    d8 = decide_category(st6, [node(EXPLOITATION)], iteration_budget_left=2)
+    check("near budget exhaustion the policy consolidates rather than explores",
+          d8["scores"][EXPLORATION] < 1.2)
+
+    # explainability
+    txt = render_decision(d)
+    check("decision renders an explainable block for the prompt",
+          "Research objective" in txt and "Alternatives considered" in txt
+          and "category scores" in txt)
+    check("the agent is told its proposal must match the objective",
+          "MUST match this research_category" in txt)
+
+    # policy is pure: no side effects on state
+    before = dict(st.component_evidence)
+    decide_category(st, [node(EXPLOITATION)])
+    check("policy is read-only w.r.t. the research state",
+          st.component_evidence == before)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1684,7 +1779,8 @@ if __name__ == "__main__":
               test_compute_budget_prompt_section, test_lambdarank,
               test_new_axes_and_snapshot, test_parallel_worker_diversity,
               test_data_tools_and_proposals, test_stage_b_path_freedom,
-              test_research_state, test_research_state_no_side_effects):
+              test_research_state, test_research_state_no_side_effects,
+              test_research_policy):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -103,6 +103,12 @@ def main():
                          "get_within_user_auc / get_user_history_stats) before "
                          "hypothesizing. Sandboxed, train/valid only, capped "
                          "per iteration. See agent/inspect.py.")
+    ap.add_argument("--research-state", action="store_true",
+                    help="give the agent a compact derived research state "
+                         "(agent/research_state.py) plus an evidence-reactive "
+                         "research objective (agent/research_policy.py) instead "
+                         "of raw history. Objectives: exploration / exploitation "
+                         "/ ablation / confirmation / integration.")
     ap.add_argument("--min-branching-iterations", type=int, default=0,
                     help="convergence cannot fire until the policy has actually "
                          "executed improve/debug/crossover at least this many "
@@ -181,6 +187,7 @@ def main():
         parallel_k=a.parallel_k,
         min_branching_iterations=a.min_branching_iterations,
         enable_data_tools=a.data_tools,
+        enable_research_state=a.research_state,
     )
     summary = loop.run()
 

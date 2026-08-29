@@ -24,6 +24,8 @@ from .pricing import SpendTracker
 from .prompts import build_merge_prompt, build_prompt
 from . import inspect as inspect_tools
 from . import propose_axis
+from .research_policy import decide_category, render_decision
+from .research_state import ResearchState
 
 EPSILON = 0.002
 N_CONVERGE = 3
@@ -40,7 +42,8 @@ class AgentLoop:
                  max_spend_usd: float = 2.0, draft_count: int | None = None,
                  test_model: bool = False, parallel_k: int | None = None,
                  min_branching_iterations: int = 0,
-                 enable_data_tools: bool = False):
+                 enable_data_tools: bool = False,
+                 enable_research_state: bool = False):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
@@ -85,6 +88,7 @@ class AgentLoop:
         # convergence stop, never overrun a real budget.
         self.min_branching_iterations = int(min_branching_iterations or 0)
         self.enable_data_tools = bool(enable_data_tools)
+        self.enable_research_state = bool(enable_research_state)
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -166,6 +170,26 @@ class AgentLoop:
         if dev:
             self.device_seen.add(str(dev))
 
+    def _research_block(self, events: list) -> str:
+        """Stage C+D: compact research state + the explained category choice.
+        Non-fatal -- if it cannot be built the iteration proceeds without it."""
+        if not getattr(self, "enable_research_state", False):
+            return ""
+        try:
+            st = ResearchState(self.root)
+            nodes = [__import__("dataclasses").asdict(n) for n in self.tree.nodes]
+            left = max(0, self.max_iterations - len(self.tree.nodes))
+            d = decide_category(st, nodes, iteration_budget_left=left)
+            events.append({"type": "research_category", "category": d["category"],
+                           "scores": d["scores"], "reason": d["reason"]})
+            print(f"  [research policy] objective={d['category']} "
+                  f"({d['reason']})", flush=True)
+            return st.render() + "\n\n" + render_decision(d)
+        except Exception as e:
+            events.append({"type": "research_state_skipped",
+                           "error": f"{type(e).__name__}: {str(e)[:200]}"})
+            return ""
+
     # ---------- agent-driven data inspection (two-phase) ----------
     def _inspect_phase(self, events: list) -> str:
         """Phase 1: let the agent choose measurements; run them; return a text
@@ -215,7 +239,7 @@ class AgentLoop:
         code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
         run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
         events = []
-        extra = self._inspect_phase(events)
+        extra = self._research_block(events) + "\n\n" + self._inspect_phase(events)
         prompt = build_prompt(action, target, reason, self.tree, self.menu,
                              exec_timeout_s=self.exec_timeout_s,
                              data_block=extra)
@@ -385,7 +409,7 @@ class AgentLoop:
         saw_success = False
         sibling_choices: list = []
         round_events: list = []
-        extra = self._inspect_phase(round_events)
+        extra = self._research_block(round_events) + "\n\n" + self._inspect_phase(round_events)
         for _w in range(self.parallel_k):
             w_prompt = build_prompt(action, target, reason, self.tree, self.menu,
                                     exec_timeout_s=self.exec_timeout_s,
