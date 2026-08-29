@@ -2041,6 +2041,36 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_budget_phase_awareness():
+    """The planner was told WHICH objective to pursue but never how much runway
+    it had, so a speculative probe and a closing-out confirmation looked equally
+    affordable at iteration 48."""
+    print("\n[budget / phase awareness]")
+    from agent.research_policy import decide_category, render_decision
+    from agent.research_state import ResearchState
+
+    nodes = []
+    for ln in open(os.path.join(_ROOT, "logs", "journal.jsonl")):
+        if ln.strip():
+            nodes.append(json.loads(ln))
+    st = ResearchState(_ROOT)
+    early = decide_category(st, nodes, iteration_budget_left=40)
+    late = decide_category(st, nodes, iteration_budget_left=2)
+
+    check("the decision carries iterations used and left",
+          early["iterations_left"] == 40 and early["iterations_used"] == len(nodes))
+    check("early and late runway map to different phases",
+          early["phase"].startswith("EARLY") and late["phase"].startswith("LATE"),
+          f"{early['phase'][:12]} / {late['phase'][:12]}")
+    check("the phase reaches the rendered prompt",
+          "Phase:" in render_decision(early) and "Budget:" in render_decision(early))
+    check("the LATE phase warns against unaffordable probes",
+          "not affordable" in late["phase"])
+    check("the planner is told the best score so far",
+          "Best scored so far" in render_decision(early)
+          or early["best_primary"] is None)
+
+
 def test_lesson_grading_uses_noise_floor():
     """The agent's own memory was recording seed noise as findings: HELPED
     fired above 1e-9 and DEAD_END below 1e-4, while the noise floor is 0.0008.
@@ -2475,6 +2505,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
+              test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,

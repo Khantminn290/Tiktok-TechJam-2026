@@ -155,16 +155,45 @@ def decide_category(state, nodes: list, iteration_budget_left: int = 50) -> dict
     alts = {c: why.get(c, f"scored lower ({scores.get(c, 0):.2f} vs "
                           f"{scores[best]:.2f})")
             for c in CATEGORIES if c != best}
+    used = len(nodes)
+    total = used + max(0, iteration_budget_left)
     return {"category": best, "reason": reason,
             "evidence": evidence.get(best, []),
             "scores": {c: round(scores.get(c, 0.0), 2) for c in CATEGORIES},
-            "alternatives": alts}
+            "alternatives": alts,
+            "iterations_used": used,
+            "iterations_left": max(0, iteration_budget_left),
+            "phase": _phase(iteration_budget_left, total),
+            "best_primary": (round(max(n["metrics"]["primary"] for n in scored), 5)
+                             if scored else None)}
+
+
+def _phase(left: int, total: int) -> str:
+    """What the remaining budget is FOR. The planner was told which objective to
+    pursue but never how much runway it had, so a speculative probe and a
+    closing-out confirmation looked equally affordable at iteration 48."""
+    if total <= 0:
+        return "unknown"
+    frac = left / total
+    if frac > 0.6:
+        return ("EARLY -- runway to explore; a probe that resolves an open "
+                "direction is worth more than a marginal tweak")
+    if frac > 0.25:
+        return ("MIDDLE -- explore and exploit; prefer mechanisms with isolated "
+                "evidence, but open questions are still affordable")
+    return ("LATE -- confirm, combine and stabilise; a speculative probe that "
+            "cannot pay off within the remaining runs is not affordable")
 
 
 def render_decision(d: dict) -> str:
     """Human/LLM-readable explanation of the category choice."""
     L = [f"## Research objective for this iteration: {d['category'].upper()}",
          f"Why: {d['reason']}"]
+    if d.get("phase"):
+        L.append(f"Budget: iteration {d.get('iterations_used', 0) + 1}, "
+                 f"{d.get('iterations_left', 0)} left. Phase: {d['phase']}")
+    if d.get("best_primary") is not None:
+        L.append(f"Best scored so far: {d['best_primary']}")
     if d.get("evidence"):
         L.append("Relevant research-state entries:")
         L += [f"  - {e}" for e in d["evidence"][:5]]
