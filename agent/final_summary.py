@@ -88,11 +88,16 @@ def build(root: str = ROOT) -> dict:
                 "delta_vs_baseline": round(d, 5),
                 "sigma": round(d / SIGMA, 2)}
     if ens:
-        d = (ens.get("mean") or 0) - BASELINE
+        # "primary" is the current schema written by agent.final_ensemble;
+        # "mean" is the older key, kept readable so archived runs still render.
+        p = ens.get("primary", ens.get("mean")) or 0
+        d = p - BASELINE
         s["submitted_ensemble"] = {
-            "mean_primary": ens.get("mean"), "std": ens.get("std"),
+            "mean_primary": p, "std": ens.get("single_seed_std", ens.get("std")),
             "k": ens.get("k"), "delta_vs_baseline": round(d, 5),
-            "sigma": round(d / SIGMA, 2), "config": ens.get("config")}
+            "sigma": round(d / SIGMA, 2), "config": ens.get("config"),
+            "members_dir": ens.get("members_dir"),
+            "reproduce": ens.get("reproduce")}
 
     # research process
     cats, paths, families, fails = {}, {}, set(), {}

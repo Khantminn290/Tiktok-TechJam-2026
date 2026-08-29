@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "source": "Authored from kuairand-starter-kit/README.md '从哪里开始改' (tested dead-ends + ranked unexplored directions) and the challenge problem statement.",
+  "source": "Authored from kuairand-starter-kit/README.md '\u4ece\u54ea\u91cc\u5f00\u59cb\u6539' (tested dead-ends + ranked unexplored directions) and the challenge problem statement.",
   "axes": {
     "loss": {
       "priority": 1,
-      "description": "Training objective. Baseline is pointwise logloss but the metrics (GAUC/nDCG@5) are within-user ranking metrics — organizers rank aligning the loss with the metric as the single most promising unexplored direction.",
+      "description": "Training objective. Baseline is pointwise logloss but the metrics (GAUC/nDCG@5) are within-user ranking metrics \u2014 organizers rank aligning the loss with the metric as the single most promising unexplored direction.",
       "options": {
         "pointwise_logloss": {
           "description": "Baseline: per-impression binary cross-entropy on long_view."
@@ -19,7 +19,7 @@
           "description": "Weighted hybrid: listwise softmax + pointwise logloss. Keeps calibrated head while aligning with ranking."
         },
         "lambdarank_ndcg": {
-          "description": "LambdaRank: the same within-user (positive, negative) pairs as bpr_pairwise, but each pair is weighted by |delta nDCG@5| — how much swapping those two items would actually change that user's nDCG@5 — instead of BPR's uniform weight of 1.0. Motivation: BPR treats a swap at ranks 1<->2 as worth exactly as much as one at 50<->51, but nDCG@5 does not; it applies a log2(rank+2) discount and ignores everything past rank 5 entirely. This concentrates gradient on the top of each user's list, which is the only part the metric reads. Measured on this dataset: 36.3% of validation users have >5 impressions (holding 69.9% of all rows) and 31.9% have both >5 impressions and >=1 positive — that subset is where the weighting diverges most sharply from BPR, though the discount reweights ordering for every user with a (pos, neg) pair. Refs: Burges et al., 'Learning to Rank with Nonsmooth Cost Functions' (NIPS 2006); Burges, 'From RankNet to LambdaRank to LambdaMART' (2010); Wang et al., 'The LambdaLoss Framework for Ranking Metric Optimization' (CIKM 2018), which shows this optimizes a bound on nDCG. The |delta nDCG| computation is verified pair-by-pair against the official evaluate.py, and with the weight forced to 1.0 it reproduces bpr_pairwise exactly.",
+          "description": "LambdaRank: the same within-user (positive, negative) pairs as bpr_pairwise, but each pair is weighted by |delta nDCG@5| \u2014 how much swapping those two items would actually change that user's nDCG@5 \u2014 instead of BPR's uniform weight of 1.0. Motivation: BPR treats a swap at ranks 1<->2 as worth exactly as much as one at 50<->51, but nDCG@5 does not; it applies a log2(rank+2) discount and ignores everything past rank 5 entirely. This concentrates gradient on the top of each user's list, which is the only part the metric reads. Measured on this dataset: 36.3% of validation users have >5 impressions (holding 69.9% of all rows) and 31.9% have both >5 impressions and >=1 positive \u2014 that subset is where the weighting diverges most sharply from BPR, though the discount reweights ordering for every user with a (pos, neg) pair. Refs: Burges et al., 'Learning to Rank with Nonsmooth Cost Functions' (NIPS 2006); Burges, 'From RankNet to LambdaRank to LambdaMART' (2010); Wang et al., 'The LambdaLoss Framework for Ranking Metric Optimization' (CIKM 2018), which shows this optimizes a bound on nDCG. The |delta nDCG| computation is verified pair-by-pair against the official evaluate.py, and with the weight forced to 1.0 it reproduces bpr_pairwise exactly.",
           "requires": {
             "model": [
               "fm_numpy"
@@ -30,13 +30,13 @@
     },
     "neg_sampling": {
       "priority": 4,
-      "description": "How NEGATIVE impressions are sampled for pairwise training. This is separable from the loss SHAPE — BPR's objective and BPR's sampler are independent choices, and only the objective has ever been varied on this project. Measured on this dataset: each train user averages 14.7 positives and 28.9 negatives, but the default samples exactly ONE negative per positive per epoch, touching ~1/29 of the available negatives. Rendle & Freudenthaler (WSDM 2014) argue explicitly that uniform sampling — not the objective — is the weak point of BPR-style training. Extra relevance here: the measured cause of the lambdarank_ndcg failure was too little effective gradient signal, which points at the sampler rather than the loss. Only applies to pairwise losses.",
+      "description": "How NEGATIVE impressions are sampled for pairwise training. This is separable from the loss SHAPE \u2014 BPR's objective and BPR's sampler are independent choices, and only the objective has ever been varied on this project. Measured on this dataset: each train user averages 14.7 positives and 28.9 negatives, but the default samples exactly ONE negative per positive per epoch, touching ~1/29 of the available negatives. Rendle & Freudenthaler (WSDM 2014) argue explicitly that uniform sampling \u2014 not the objective \u2014 is the weak point of BPR-style training. Extra relevance here: the measured cause of the lambdarank_ndcg failure was too little effective gradient signal, which points at the sampler rather than the loss. Only applies to pairwise losses.",
       "options": {
         "uniform_1": {
           "description": "Baseline / current behaviour: one uniformly-random in-user negative per positive per epoch (Rendle et al., BPR, UAI 2009)."
         },
         "uniform_2": {
-          "description": "Two uniform negatives per positive per epoch — 2x the pair signal at ~2x epoch cost.",
+          "description": "Two uniform negatives per positive per epoch \u2014 2x the pair signal at ~2x epoch cost.",
           "requires": {
             "loss": [
               "bpr_pairwise",
@@ -46,7 +46,7 @@
           }
         },
         "uniform_4": {
-          "description": "Four uniform negatives per positive per epoch — 4x the pair signal at ~4x epoch cost. Watch the runtime budget.",
+          "description": "Four uniform negatives per positive per epoch \u2014 4x the pair signal at ~4x epoch cost. Watch the runtime budget.",
           "requires": {
             "loss": [
               "bpr_pairwise",
@@ -79,7 +79,7 @@
     },
     "user_history": {
       "priority": 2,
-      "description": "Behavior-sequence features. Baseline uses zero history; each user has hundreds of train interactions. Second-ranked unexplored direction (DIN/SIM family). NOTE: purely user-side features only work through interaction with item-side features — first-order user terms are constant within a user and cannot change within-user ranking.",
+      "description": "Behavior-sequence features. Baseline uses zero history; each user has hundreds of train interactions. Second-ranked unexplored direction (DIN/SIM family). NOTE: purely user-side features only work through interaction with item-side features \u2014 first-order user terms are constant within a user and cannot change within-user ranking.",
       "options": {
         "none": {
           "description": "Baseline: no history."
@@ -138,7 +138,7 @@
     },
     "model": {
       "priority": 6,
-      "description": "Scoring model / architecture. IMPORTANT — do not confuse two different claims: what was actually measured is that raising FM *capacity* (embedding dim k=8/16/32) does not help. Swapping the *architecture* (DeepFM, DCN, DIN-style attention) has NEVER been tested, by the organizers or by this agent — every accepted node so far has used fm_numpy. A cross layer or an attention head is a different function class, not more parameters, so the capacity result does not carry over to it. This axis is OPEN and unexplored; treat it as a live hypothesis, not a documented dead end. Torch 2.3 (CPU) is available.",
+      "description": "Scoring model / architecture. IMPORTANT \u2014 do not confuse two different claims: what was actually measured is that raising FM *capacity* (embedding dim k=8/16/32) does not help. Swapping the *architecture* (DeepFM, DCN, DIN-style attention) has NEVER been tested, by the organizers or by this agent \u2014 every accepted node so far has used fm_numpy. A cross layer or an attention head is a different function class, not more parameters, so the capacity result does not carry over to it. This axis is OPEN and unexplored; treat it as a live hypothesis, not a documented dead end. Torch 2.3 (CPU) is available.",
       "options": {
         "fm_numpy": {
           "description": "Baseline: numpy Factorization Machine."
@@ -161,7 +161,7 @@
     },
     "temporal": {
       "priority": 7,
-      "description": "Time features and train→eval distribution shift (hourmin, date). Sixth-ranked direction. Remember: a time feature only matters through interaction with item-side features.",
+      "description": "Time features and train\u2192eval distribution shift (hourmin, date). Sixth-ranked direction. Remember: a time feature only matters through interaction with item-side features.",
       "options": {
         "none": {
           "description": "Baseline: no time features."
@@ -176,7 +176,7 @@
     },
     "training": {
       "priority": 8,
-      "description": "Optimization schedule. Measured: raising embedding dim k=8/16/32 barely moves the score, so prefer schedule changes that serve the loss/architecture axes over raw embedding width. (This is a statement about embedding CAPACITY only — it says nothing about architecture choice, which is a separate, untested axis.)",
+      "description": "Optimization schedule. Measured: raising embedding dim k=8/16/32 barely moves the score, so prefer schedule changes that serve the loss/architecture axes over raw embedding width. (This is a statement about embedding CAPACITY only \u2014 it says nothing about architecture choice, which is a separate, untested axis.)",
       "options": {
         "default": {
           "description": "Baseline: k=16, lr=1e-3, batch 8192, max 40 epochs, patience 4."
@@ -200,15 +200,15 @@
           "description": "Standard logs only."
         },
         "video_stats_features": {
-          "description": "video_features_statistic_pure.csv aggregate counters (show_cnt, play_cnt, ...). LOCKED: statistics are aggregated over a window that overlaps the validation/test dates — using them as features risks target leakage from the evaluation period.",
+          "description": "video_features_statistic_pure.csv aggregate counters (show_cnt, play_cnt, ...). LOCKED: statistics are aggregated over a window that overlaps the validation/test dates \u2014 using them as features risks target leakage from the evaluation period.",
           "locked": true
         },
         "random_log_test_period": {
-          "description": "Rows of log_random_4_22_to_5_08_pure.csv with date in the test window (20220429–20220508). LOCKED: direct test-period exposure.",
+          "description": "Rows of log_random_4_22_to_5_08_pure.csv with date in the test window (20220429\u201320220508). LOCKED: direct test-period exposure.",
           "locked": true
         },
         "random_log_valid_unbiased_check": {
-          "description": "Rows of the random-exposure log restricted to the VALIDATION window (20220422–20220428), used as an extra unbiased evaluation diagnostic only — never as training data. Allowed (organizers suggest it)."
+          "description": "Rows of the random-exposure log restricted to the VALIDATION window (20220422\u201320220428), used as an extra unbiased evaluation diagnostic only \u2014 never as training data. Allowed (organizers suggest it)."
         }
       }
     },
@@ -260,8 +260,8 @@
   },
   "notes": {
     "tested_dead_ends": [
-      "Adding static features (all 13 CWM fields + user-side coarse buckets): primary 0.5940 vs 0.5950 — no gain.",
-      "Raising FM embedding dim k=8/16/32: 0.5895/0.5902/0.5887 — no gain. NOTE: this is about embedding CAPACITY only. It is NOT evidence against changing the model architecture (DeepFM/DCN/DIN), which is a different function class and has never been measured.",
+      "Adding static features (all 13 CWM fields + user-side coarse buckets): primary 0.5940 vs 0.5950 \u2014 no gain.",
+      "Raising FM embedding dim k=8/16/32: 0.5895/0.5902/0.5887 \u2014 no gain. NOTE: this is about embedding CAPACITY only. It is NOT evidence against changing the model architecture (DeepFM/DCN/DIN), which is a different function class and has never been measured.",
       "Pure user-side first-order terms contribute exactly 0 to within-user ranking.",
       "LambdaRank (|delta nDCG@5| pair weighting, loss=lambdarank_ndcg): MEASURED HERE, decisively worse than bpr_pairwise. 5 paired seeds, identical config: 0.5927 vs BPR's 0.6037 (paired t=-20.4). Root cause measured: the TRAIN split averages 43.5 impressions/user (median 31) while the EVAL split averages 5.6 (median 4) -- 7.8x longer lists -- so an @5 truncation zeroes 78.6% of training pairs and cuts effective gradient magnitude to 0.042x BPR's, causing severe underfitting. Removing the truncation (lambdarank_ndcg_fulllist) recovers only +0.0043 and is still 0.5970 (paired t=-15.5 vs BPR, and 5.8 sigma BELOW the official 0.6016 baseline). It lost on nDCG@5 itself (0.5305 vs 0.5375), not just GAUC, so this is not a metric tradeoff -- uniform pair weighting is simply better conditioned on this data. Do NOT propose position-discounted pairwise losses again.",
       "Model ARCHITECTURE swaps (DeepFM / DCN / DIN-attention): MEASURED HERE, statistically tied with numpy FM. Best neural 5-seed mean 0.60377 +/- 0.00030 vs FM's 0.60366 +/- 0.00027 (t=+0.57, difference is 1/8 of the baseline's own seed noise). The torch path also crashed on 4 of 8 generated iterations vs 0 of 8 for FM. Architecture is not the bottleneck on this dataset.",
@@ -273,7 +273,8 @@
       "Negative-sampling variants (neg_sampling axis): MEASURED HERE, none beat the uniform_1 default. uniform_2 0.60356 and uniform_4 0.60316 vs uniform_1's 0.60367 over 5 paired seeds (paired t -0.67 and -1.96) -- more negatives per positive is neutral-to-slightly-negative, NOT an improvement. hard_negatives 0.57179 (t=-27.7) and popularity_biased 0.56676 (t=-118.7) are catastrophic. Do not re-propose any neg_sampling option; uniform_1 is already correct.",
       "GENERAL PATTERN across all of the above: every intervention that CONCENTRATED or REWEIGHTED the training signal lost (LambdaRank position discount, hard negatives, popularity-biased negatives, per-user weighting), and every ensemble whose members were not BOTH independent AND comparably good lost (snapshots, bagging). Broad, uniform, unweighted signal keeps winning on this dataset. Weigh this pattern before proposing anything that narrows what the model trains on.",
       "Listwise losses (loss=listwise_softmax / listwise_softmax_plus_pointwise): MEASURED HERE, both lose to bpr_pairwise -- 0.5986 and 0.5985 vs BPR's 0.6032 on matched drafts. Pairwise BPR is the correct loss on this dataset; the only unambiguously real jump in the whole project was pointwise -> BPR (+0.0046, ~5.75 sigma). Do not re-propose a listwise objective.",
-      "Exposure debiasing / IPS reweighting using log_random_4_22_to_5_08_pure.csv: RULED OUT ON ANALYSIS (no run spent). long_view rate is 8.50% under random exposure vs 33.66% under the logged policy, but EVALUATION IS ON THE LOGGED DISTRIBUTION (valid 31.33%), so train and eval are already distribution-matched and debiasing would optimise the wrong objective. The random log also exists only from 2022-04-22 onward -- the evaluation period -- so using it as training data is period leakage. The valid-window slice remains allowed as an unbiased DIAGNOSTIC only (data_extras=random_log_valid_unbiased_check)."
+      "Exposure debiasing / IPS reweighting using log_random_4_22_to_5_08_pure.csv: RULED OUT ON ANALYSIS (no run spent). long_view rate is 8.50% under random exposure vs 33.66% under the logged policy, but EVALUATION IS ON THE LOGGED DISTRIBUTION (valid 31.33%), so train and eval are already distribution-matched and debiasing would optimise the wrong objective. The random log also exists only from 2022-04-22 onward -- the evaluation period -- so using it as training data is period leakage. The valid-window slice remains allowed as an unbiased DIAGNOSTIC only (data_extras=random_log_valid_unbiased_check).",
+      "gru4rec_seq as an ENSEMBLE member with fm_numpy: MEASURED HERE. Rank-correlation is genuinely low (0.9338 vs 0.983 for same-config seeds), but gru4rec is 2.1 sigma weaker (0.60345 vs 0.60511), and the quality gap cancels the decorrelation gain. Best blend over a weight sweep was +0.00012 (+0.15 sigma), inside the noise floor -- and that weight was itself chosen on validation, so the true value is lower still. Do not propose sequential-model blending as a score lever."
     ],
     "hidden_test_discipline": "Generated solutions may WRITE test-split scores to disk (scores_test.npy) but must never read test labels or compute test metrics; only the harness scores test once at the very end."
   }
