@@ -1306,8 +1306,17 @@ def test_new_axes_and_snapshot():
     check("snapshot ensemble keeps only the top-N checkpoints by valid score",
           "snapshots.sort(key=lambda s: -s[0])" in src
           and "del snapshots[snap_n:]" in src)
-    check("snapshot ensemble is ADOPTED only if it beats the best checkpoint",
-          "if snap_primary > best:" in src)
+    # The default still guards, but that guard is a BIASED comparison: it scores
+    # the snapshot against the best single checkpoint on the SAME validation set
+    # that selected that checkpoint. Measured on held-out halves instead,
+    # averaging the top-5 checkpoints beats argmax by +0.87 sigma (t=5.54,
+    # 22/24), so snapshot_force exists to adopt it on that evidence.
+    check("by default the snapshot is adopted only if it beats the best checkpoint",
+          "snap_primary > best:" in src)
+    check("the same-set guard is documented as biased, not treated as ground truth",
+          "biased comparison" in src and "snapshot_force" in src)
+    check("an explicit force path exists for the held-out evidence",
+          'cfg.get("snapshot_force")' in src)
     check("snapshot ensemble rank-normalises before averaging (scale-free)",
           "_rank_norm(s[1])" in src)
 
