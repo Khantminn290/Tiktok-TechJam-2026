@@ -2256,6 +2256,39 @@ def test_research_frontier():
                            m1, best_config={"x": "b"}).directions[0]
     check("a direction whose recent returns collapsed IS saturated",
           collapsed["status"] == F.SATURATED, collapsed["status"])
+    # Disagreement must be measured over TRUE REPLICATES. Nodes that merely
+    # share one option differ on every other axis, and that spread is not
+    # evidence the option is contradictory.
+    m3 = {"axes": {"a": {"options": ["v"]}, "b": {"options": ["p", "q"]}},
+          "notes": {"tested_dead_ends": []}}
+    varied = [node(0, {"a": "v", "b": "p"}, 0.6050),
+              node(1, {"a": "v", "b": "q"}, 0.5900)]      # spread from axis b
+    fv = F.Frontier(varied, m3, best_config={"a": "v", "b": "p"})
+    av = {d["direction"]: d for d in fv.directions}["a=v"]
+    check("spread caused by OTHER axes is not called contradictory",
+          av["status"] != F.CONTRADICTORY and av["replicate_spread"] == 0.0,
+          f"{av['status']} spread={av['replicate_spread']}")
+    repl = [node(0, {"a": "v", "b": "p"}, 0.6050),
+            node(1, {"a": "v", "b": "p"}, 0.5900)]        # same config, disagrees
+    fr2 = F.Frontier(repl, m3, best_config={"a": "v", "b": "q"})
+    ar = {d["direction"]: d for d in fr2.directions}["a=v"]
+    check("replicates that disagree beyond noise ARE contradictory",
+          ar["status"] == F.CONTRADICTORY, ar["status"])
+    check("a CONTRADICTORY direction DOES carry information value",
+          C._information_value(mk(6, {"a": "v"}, 0.001), fr2)
+          == C.INFO_CONTRADICTORY)
+
+    # accumulated knowledge must survive --fresh
+    fsrc = open(os.path.join(_ROOT, "agent", "frontier.py")).read()
+    check("the frontier aggregates archived runs, not just the current journal",
+          "include_archives" in fsrc and "archive_" in fsrc)
+    live_f = F.from_root(_ROOT)
+    check("aggregation actually finds more than one run",
+          len({n.get("_run", "") for n in live_f.nodes}) > 1,
+          f"{len({n.get('_run','') for n in live_f.nodes})} runs")
+    check("node ids are namespaced so runs cannot collide",
+          any(":" in str(n["iteration_id"]) for n in live_f.nodes))
+
     check("the frontier renders without an LLM",
           "RESEARCH FRONTIER" in f.render() and "UNEXPLORED" in f.render())
 
@@ -2286,9 +2319,6 @@ def test_research_frontier():
           by["temporal=hour_plus_dow"]["status"] == F.KNOWN_GOOD
           and C._information_value(mk(2, {"temporal": "hour_plus_dow"}, 0.001), f) == 0.0,
           by["temporal=hour_plus_dow"]["status"])
-    check("a CONTRADICTORY direction DOES carry information value",
-          C._information_value(mk(6, {"loss": "bpr_pairwise"}, 0.001), f)
-          == C.INFO_CONTRADICTORY)
     check("information value takes the MAX over axes, not the sum",
           C._information_value(mk(3, {"loss": "listwise_softmax",
                                       "multitask": "aux_click_like_forward"}, 0.001),

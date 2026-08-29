@@ -183,6 +183,18 @@ class Frontier:
                      "failure_rate": round(len(fails) / max(1, len(runs) + len(fails)), 2),
                      "in_best_config": self.best_config.get(axis) == value}
                 prim = [n["metrics"]["primary"] for n in runs]
+                # Disagreement must be measured over TRUE REPLICATES -- nodes
+                # sharing the whole configuration -- not over every node that
+                # merely used this option. Across 92 experiments spanning many
+                # configs, the spread for one option is dominated by the OTHER
+                # axes varying, which made almost everything look
+                # CONTRADICTORY, including the options carrying the best result.
+                reps = {}
+                for n in runs:
+                    reps.setdefault(_sig(n.get("menu_choices")), []).append(
+                        n["metrics"]["primary"])
+                d["replicate_spread"] = round(max(
+                    (max(v) - min(v)) for v in reps.values()), 5) if reps else 0.0
                 if prim:
                     d["best_primary"] = round(max(prim), 5)
                     d["mean_primary"] = round(statistics.mean(prim), 5)
@@ -247,7 +259,7 @@ class Frontier:
                 return KNOWN_BAD, MEDIUM
             if ab["strength"] == INCONCLUSIVE:
                 return UNCERTAIN, LOW
-        if len(prim) > 1 and (max(prim) - min(prim)) > 3 * BASELINE_SEED_STD:
+        if d.get("replicate_spread", 0.0) > 3 * BASELINE_SEED_STD:
             return CONTRADICTORY, LOW
         if d["in_best_config"]:
             return PROMISING, LOW
@@ -264,7 +276,12 @@ class Frontier:
                 if (d.get("ablation") or {}).get("metric_conflict")]
 
     def render(self, limit: int = 26) -> str:
-        L = ["## RESEARCH FRONTIER (derived from the journal; no LLM)",
+        runs = len({n.get("_run", "") for n in self.nodes})
+        L = [f"## RESEARCH FRONTIER ({len(self.scored)} scored experiments across "
+             f"{runs} run(s); derived, no LLM)",
+             "Scores from different runs share one training library and are "
+             "compared directly; treat cross-run deltas as indicative and "
+             "confirm anything decisive with a paired single-axis sweep.",
              f"{'direction':<40}{'status':<15}{'conf':<7}{'n':>3} {'best':>8} "
              f"{'GAUC':>8} {'nDCG@5':>8}"]
         for d in self.directions[:limit]:
@@ -293,17 +310,50 @@ _STATUS_ORDER = {KNOWN_GOOD: 0, PROMISING: 1, CONTRADICTORY: 2, UNCERTAIN: 3,
                  UNEXPLORED: 4, SATURATED: 5, KNOWN_BAD: 6}
 
 
-def from_root(root: str) -> Frontier:
-    nodes = []
-    jp = os.path.join(root, "logs", "journal.jsonl")
-    if os.path.exists(jp):
-        with open(jp) as fh:
-            for ln in fh:
-                if ln.strip():
-                    try:
-                        nodes.append(json.loads(ln))
-                    except json.JSONDecodeError:
-                        pass
+def _read_journal(path: str, tag: str) -> list:
+    out = []
+    if not os.path.exists(path):
+        return out
+    with open(path) as fh:
+        for ln in fh:
+            if not ln.strip():
+                continue
+            try:
+                n = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            # iteration_id restarts at 0 in every run, so namespace it or nodes
+            # from different runs collide and overwrite each other in reporting.
+            n["_run"] = tag
+            n["iteration_id"] = f"{tag}:{n.get('iteration_id')}" if tag else \
+                n.get("iteration_id")
+            out.append(n)
+    return out
+
+
+def from_root(root: str, include_archives: bool = True) -> Frontier:
+    """Frontier over EVERY experiment on disk, not just the current run.
+
+    --fresh archives the journal, so a frontier reading only logs/journal.jsonl
+    forgets everything the moment a new search starts: options carrying the
+    submitted result (temporal=hour_plus_dow, user_history=recency_weighted_pool)
+    showed UNEXPLORED purely because the newest run had not used them. Recorded
+    dead ends survive in config/, but positive evidence did not. Archived runs
+    are included so accumulated knowledge persists across runs.
+    """
+    logs = os.path.join(root, "logs")
+    nodes = _read_journal(os.path.join(logs, "journal.jsonl"), "")
+    if include_archives and os.path.isdir(logs):
+        for name in sorted(os.listdir(logs)):
+            if name.startswith("archive_"):
+                nodes += _read_journal(
+                    os.path.join(logs, name, "journal.jsonl"), name[8:])
+        ab = os.path.join(logs, "ab_test")
+        if os.path.isdir(ab):
+            for name in sorted(os.listdir(ab)):
+                if name.endswith(".jsonl"):
+                    nodes += _read_journal(os.path.join(ab, name),
+                                           name.replace(".jsonl", ""))
     menu = {}
     mp = os.path.join(root, "config", "modification_menu.json")
     if os.path.exists(mp):
