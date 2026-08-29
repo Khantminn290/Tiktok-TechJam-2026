@@ -43,9 +43,14 @@ TASK (fixed, do not reinterpret):
 YOUR OUTPUT — exactly ONE JSON object, nothing else (no prose before or after):
 {
   "hypothesis": "<what you try and WHY it should raise valid GAUC/nDCG@5 — judged text>",
-  "menu_choices": {"loss": "...", "user_history": "...", "multitask": "...",
-                    "model": "...", "temporal": "...", "training": "...",
-                    "data_extras": "..."},
+  "implementation_path": "A" | "B",
+  "research_category": "exploration" | "exploitation" | "ablation"
+                       | "confirmation" | "integration",
+  // Path A ONLY -- one option per axis:
+  "menu_choices": {"loss": "...", "user_history": "...", ...},
+  // Path B ONLY -- instead of menu_choices:
+  "code_summary": "<the mechanism you implemented, and why the existing menu
+                    primitives cannot express it>",
   "code": "<the COMPLETE runnable python solution script — full file, not a diff>",
   "expected_effect": "<your quantitative expectation, e.g. '+0.003 primary from ...'>",
   "rationale": {
@@ -78,10 +83,25 @@ SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
   into --output-dir, exits 0. On failure: non-zero exit, readable stderr.
 - Score with the official evaluate (import from train_lib) — NEVER reimplement metrics.
 - NEVER read test labels or compute test metrics. Early stopping uses valid only.
-- The simplest valid script is seed_solution.py: parse args, call
-  train_lib.run(menu_choices, output_dir, seed). Use custom code (train_lib Path B)
-  only when your hypothesis needs something the menu-driven path can't express;
-  custom code must still start from the documented train_lib building blocks.
+
+CHOOSING AN IMPLEMENTATION PATH — decide from your HYPOTHESIS, not from which
+path looks safer or more normal. Neither is the default; they are different
+tools.
+- Path A (implementation_path "A"): the hypothesis is about a mechanism the
+  existing primitives ALREADY express — a hyperparameter, a regularization
+  strength, an implemented loss or architecture, an ablation of a component,
+  or a combination of validated components. Give menu_choices; your script can
+  simply call train_lib.run(menu_choices, output_dir, seed).
+- Path B (implementation_path "B"): the hypothesis needs a mechanism the menu
+  CANNOT express — a new training objective, a new data representation, a new
+  feature transformation, a different way of forming training examples, a new
+  ensembling or ranking strategy. Give code_summary instead of menu_choices,
+  and implement the mechanism in your script using the train_lib building
+  blocks (load_cache, encode_features, RankFM, evaluate, ...).
+  Path B does NOT mean "write complicated code because I can". Always ask:
+  what is the SIMPLEST experiment that could test this hypothesis? If a menu
+  option already tests it, that is Path A and Path A is the right answer.
+  Choosing Path B for an idea the menu already covers wastes an iteration.
 """
 
 
@@ -177,7 +197,7 @@ def render_sibling_section(sibling_choices: list) -> str:
 def build_prompt(action: str, target: Node | None, reason: str,
                  tree: ExperimentTree, menu, exec_timeout_s: int = 1200,
                  sibling_choices: list | None = None,
-                 data_block: str = "") -> str:
+                 data_block: str = "", compact_menu: bool = False) -> str:
     parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
     if data_block:
         parts.append(data_block)
@@ -193,8 +213,21 @@ def build_prompt(action: str, target: Node | None, reason: str,
     with open(_API_MD) as fh:
         parts.append("## train_lib API available to your script\n" + fh.read())
 
-    parts.append("## Modification menu (pick exactly one option per axis)\n"
-                 + menu.render_for_prompt())
+    # Menu volume was measured at 20,863 chars vs 2,906 for Path B guidance
+    # (7.2x). That imbalance is itself a cause of menu-shaped thinking, so the
+    # full menu is sent only when a detailed Path A selection is actually
+    # likely; exploration turns get a compact index plus the dead-ends (which
+    # must never be dropped -- they are what prevents re-deriving known nulls).
+    if compact_menu:
+        parts.append("## Modification menu (COMPACT INDEX -- axes and options "
+                     "only)\nIf your hypothesis needs the full option "
+                     "descriptions to make a precise Path A selection, say so "
+                     "in your hypothesis and choose a menu option you already "
+                     "understand.\n" + menu.render_compact()
+                     + "\n\n" + menu.render_dead_ends())
+    else:
+        parts.append("## Modification menu (pick exactly one option per axis)\n"
+                     + menu.render_for_prompt())
 
     parts.append(
         "## Experience memory (curated lessons from past iterations -- read this "

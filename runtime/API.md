@@ -75,3 +75,29 @@ Torch 2.3 (CPU) and numpy are available. No other ML deps are guaranteed.
    FM baseline takes ~1 min.
 4. No external data beyond the KuaiRand-Pure files (and locked files are off
    the menu entirely).
+
+## Path B worked examples (illustrative, NOT templates to copy)
+
+These show the *kind* of hypothesis that needs custom code. Do not reproduce
+them verbatim — they are examples of the reasoning, not a menu of new options.
+
+**Not Path B** — "stronger L2 might help." The `regularization` axis already
+expresses this. That is Path A with `regularization=l2_1e4`. Writing custom
+code for it wastes an iteration and tests nothing new.
+
+**Path B example 1 — a training-example formation the menu cannot express.**
+Hypothesis: "pairs should be formed only between items shown in the same
+session (same hour), because cross-session pairs compare items under different
+user intent." No axis controls *how pairs are grouped*; `neg_sampling` only
+controls which negative is drawn. Custom code: group train rows by
+(user, hour), form BPR pairs within groups only, reuse `RankFM` and
+`evaluate` unchanged.
+
+**Path B example 2 — a data representation the menu cannot express.**
+Hypothesis: "an item's embedding should be initialised from the mean of the
+users who long-viewed it, so rare items start near their audience instead of
+at random." No axis touches initialisation. Custom code: build the mapping
+from `load_cache()`, seed `RankFM.V` accordingly, train normally.
+
+The test for Path B is a question, not a feeling: *which existing axis would
+express this?* If you can name one, it is Path A.

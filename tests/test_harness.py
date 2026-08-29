@@ -770,8 +770,11 @@ def test_rationale_schema():
     from agent.llm import LLMClient
 
     def base_obj(rationale):
+        # Path A shape: implementation_path/research_category are now required
+        # on every response, and menu_choices is required for Path A only.
         return {"hypothesis": "try X because Y", "menu_choices": {"loss": "bpr_pairwise"},
-                "code": "x" * 60, "expected_effect": "+0.003", "rationale": rationale}
+                "code": "x" * 60, "expected_effect": "+0.003", "rationale": rationale,
+                "implementation_path": "A", "research_category": "exploration"}
 
     good = base_obj({
         "idea": "Switch loss to bpr_pairwise",
@@ -1442,6 +1445,76 @@ def test_data_tools_and_proposals():
               AgentLoop._branching_unfinished(loop) is None)
 
 
+def test_stage_b_path_freedom():
+    """Stage B: the menu must stop being the boundary of what can be proposed.
+
+    The measured cause of ~0 Path B usage in 54 nodes was structural, not an
+    LLM limitation: menu_choices was required on EVERY response and
+    validate_choices ran unconditionally, so the model had to commit to a menu
+    selection before it could even consider custom code.
+    """
+    print("\n[stage B: path freedom]")
+    from agent.llm import (PATH_A_EXTRA, PATH_B_EXTRA, RESEARCH_CATEGORIES,
+                           RESPONSE_SCHEMA, LLMClient)
+
+    check("menu_choices is NO LONGER unconditionally required",
+          "menu_choices" not in RESPONSE_SCHEMA)
+    check("implementation_path and research_category are required of every response",
+          "implementation_path" in RESPONSE_SCHEMA and "research_category" in RESPONSE_SCHEMA)
+    check("menu_choices is required for Path A only", "menu_choices" in PATH_A_EXTRA)
+    check("code_summary is required for Path B instead", "code_summary" in PATH_B_EXTRA)
+
+    base = {"hypothesis": "h", "code": "x" * 60, "expected_effect": "e",
+            "rationale": {"idea": "i" * 20, "why_expected_to_help": "w" * 20,
+                          "grounded_in": "menu axis loss: bpr_pairwise"},
+            "research_category": "exploration"}
+    A = {**base, "implementation_path": "A", "menu_choices": {"loss": "bpr_pairwise"}}
+    B = {**base, "implementation_path": "B",
+         "code_summary": "forms BPR pairs only within the same (user, hour) session, "
+                         "which no menu axis can express"}
+    check("Path A validates", LLMClient._schema_problems(A) == [])
+    check("Path B validates WITHOUT any menu_choices", LLMClient._schema_problems(B) == [])
+    check("Path A still requires menu_choices",
+          any("menu_choices" in p for p in
+              LLMClient._schema_problems({**base, "implementation_path": "A"})))
+    check("Path B requires a substantive code_summary",
+          any("code_summary" in p for p in
+              LLMClient._schema_problems({**base, "implementation_path": "B"})))
+    check("a too-thin code_summary is rejected",
+          any("code_summary" in p for p in
+              LLMClient._schema_problems({**B, "code_summary": "custom"})))
+    check("invalid research_category rejected",
+          any("research_category" in p for p in
+              LLMClient._schema_problems({**A, "research_category": "vibes"})))
+    check("invalid implementation_path rejected",
+          any("implementation_path" in p for p in
+              LLMClient._schema_problems({**A, "implementation_path": "C"})))
+
+    # THE DOWNSTREAM COERCION: a schema fix alone is not enough if a later
+    # validator still demands a menu selection.
+    src = open(os.path.join(_ROOT, "agent", "llm.py")).read()
+    check("validate_choices is NOT applied to Path B responses",
+          'str(obj.get("implementation_path", "A")).upper() != "B"' in src)
+
+    # prompt framing + menu compression
+    psrc = open(os.path.join(_ROOT, "agent", "prompts.py")).read()
+    check("Path A is no longer described as the default/simplest",
+          "The simplest valid script is seed_solution.py" not in psrc)
+    check("path choice is framed as hypothesis-driven",
+          "decide from your HYPOTHESIS" in psrc)
+    check("Path B is explicitly warned against gratuitous complexity",
+          "what is the SIMPLEST experiment" in psrc)
+    m = Menu(MENU_PATH)
+    full, comp = m.render_for_prompt(), m.render_compact() + m.render_dead_ends()
+    check("compact menu is materially smaller than the full menu",
+          len(comp) < 0.5 * len(full), f"{len(comp)} vs {len(full)} chars")
+    check("dead-ends survive compression (never dropped)",
+          "LambdaRank" in comp and "GENERAL PATTERN" in comp)
+    check("Node records the path so usage can be MEASURED, not assumed",
+          all(f in open(os.path.join(_ROOT, "agent", "contracts.py")).read()
+              for f in ("implementation_path", "research_category", "code_summary")))
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1454,7 +1527,7 @@ if __name__ == "__main__":
               test_standing_override_survives_reload,
               test_compute_budget_prompt_section, test_lambdarank,
               test_new_axes_and_snapshot, test_parallel_worker_diversity,
-              test_data_tools_and_proposals):
+              test_data_tools_and_proposals, test_stage_b_path_freedom):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

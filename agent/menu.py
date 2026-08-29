@@ -106,6 +106,27 @@ class Menu:
         return "\n".join(lines)
 
 
+    def render_compact(self) -> str:
+        """Axis/option index without the long descriptions. Used on exploration
+        turns to stop the menu's sheer volume from dominating the prompt."""
+        lines = []
+        for axis in self.priority_order():
+            opts = [o for o in self.options(axis)
+                    if self.allow_locked_options or not self.is_locked(axis, o)]
+            lines.append(f"- {axis} (priority {self.axes[axis].get('priority')}): "
+                         + ", ".join(opts))
+        return "\n".join(lines)
+
+    def render_dead_ends(self) -> str:
+        """The measured dead-ends, always sent in full regardless of menu
+        compression -- dropping them would let the agent re-derive known nulls."""
+        d = self.raw.get("notes", {}).get("tested_dead_ends", [])
+        if not d:
+            return ""
+        return ("### Measured dead ends (do NOT respend iterations here):\n"
+                + "\n".join(f"- {x}" for x in d))
+
+
 def load_agent_config(path: str) -> dict:
     if os.path.exists(path):
         with open(path) as fh:

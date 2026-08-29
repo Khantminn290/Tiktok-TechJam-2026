@@ -283,7 +283,10 @@ class AgentLoop:
                     code_path=code_path, expected_effect=obj["expected_effect"],
                     decide_reason=reason, token_breakdown=usage, events=events,
                     diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"],
-                    seed=self.seed, rationale=obj.get("rationale", {}))
+                    seed=self.seed, rationale=obj.get("rationale", {}),
+                    implementation_path=str(obj.get("implementation_path","")).upper(),
+                    research_category=str(obj.get("research_category","")).lower(),
+                    code_summary=obj.get("code_summary",""))
         self.tree.add(node)
         self._record_experience(node, best_before)
         if res.ok:
@@ -495,6 +498,9 @@ class AgentLoop:
                        decide_reason=reason, token_breakdown=p["usage"], events=events,
                        diff_path=diff_info["diff_path"], diff_sha256=diff_info["diff_sha256"],
                        seed=self.seed, rationale=obj.get("rationale", {}),
+                    implementation_path=str(obj.get("implementation_path","")).upper(),
+                    research_category=str(obj.get("research_category","")).lower(),
+                    code_summary=obj.get("code_summary",""),
                        round_id=round_id)
             self.tree.add(node)
             self._record_experience(node, best_before)

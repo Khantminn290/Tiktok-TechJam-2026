@@ -50,6 +50,12 @@ class Node:
     # axis/option description, a baseline_scores.json number, a named paper),
     # enforced by agent/llm.py's schema check, not left to the model's discretion.
     rationale: dict = field(default_factory=dict)
+    # Stage B: which implementation path the agent chose and why, plus the
+    # research category. Recorded so Path B usage can be MEASURED rather than
+    # assumed -- a schema field saying "B" is not evidence of real custom code.
+    implementation_path: str = ""
+    research_category: str = ""
+    code_summary: str = ""
     # Phase 3 item 3 (parallel exploration): "" for sequential-mode nodes.
     # Shared by every node (workers + merge attempt, if any) produced by the
     # SAME parallel round, purely so a reader can group them in the journal.

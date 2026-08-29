@@ -28,13 +28,24 @@ ENV_PATH = os.path.join(_ROOT, ".env")
 PROVIDERS = ("openai", "anthropic")
 
 # The response contract every downstream consumer depends on.
+# Keys required of EVERY response, regardless of implementation path.
 RESPONSE_SCHEMA = {
     "hypothesis": str,       # what to try and why (judged text — be specific)
-    "menu_choices": dict,    # one option id per menu axis
     "code": str,             # FULL solution script (not a diff)
     "expected_effect": str,  # predicted effect on valid GAUC/nDCG@5
     "rationale": dict,       # {idea, why_expected_to_help, grounded_in} — problem insight
+    "implementation_path": str,   # "A" (menu/template) or "B" (custom mechanism)
+    "research_category": str,     # exploration|exploitation|ablation|confirmation|integration
 }
+
+# Path A additionally requires menu_choices; Path B requires code_summary instead.
+# menu_choices was previously mandatory for EVERY response, which forced the
+# model to commit to a menu selection before it could even consider custom
+# code -- a measured cause of Path B being chosen ~0 times in 54 nodes.
+PATH_A_EXTRA = {"menu_choices": dict}
+PATH_B_EXTRA = {"code_summary": str}
+RESEARCH_CATEGORIES = ("exploration", "exploitation", "ablation",
+                       "confirmation", "integration")
 
 # grounded_in must name something concrete; reject generic non-answers for free
 # (no retry cost for the model, no verification of TRUTH — just laziness).
@@ -44,14 +55,19 @@ _GENERIC_GROUNDING_PHRASES = (
 )
 
 SYSTEM_PROMPT = (
-    "You are the modeling brain of an autonomous ML research agent. "
+    "You are the research brain of an autonomous ML research agent. "
     "Respond with exactly ONE JSON object and nothing else — no prose before or "
-    "after it, no markdown fences. Required keys: hypothesis (string), "
-    "menu_choices (object), code (string containing the COMPLETE runnable python "
-    "script), expected_effect (string), rationale (object with idea, "
-    "why_expected_to_help, grounded_in — grounded_in must name a SPECIFIC menu axis/"
-    "option description, a baseline_scores.json/organizer-measured number, or a named "
-    "paper/method, not a generic appeal to 'ML intuition')."
+    "after it, no markdown fences. Always required: hypothesis (string), code "
+    "(string containing the COMPLETE runnable python script), expected_effect "
+    "(string), rationale (object with idea, why_expected_to_help, grounded_in), "
+    "implementation_path ('A' or 'B'), research_category (one of exploration, "
+    "exploitation, ablation, confirmation, integration). "
+    "If implementation_path is 'A' you must also give menu_choices (object). "
+    "If it is 'B' you must instead give code_summary (string) describing the "
+    "mechanism you implemented and why existing primitives cannot express it. "
+    "grounded_in must name something SPECIFIC — a measurement, a recorded "
+    "result, a menu option description, or a named paper/method — never a "
+    "generic appeal to 'ML intuition'."
 )
 
 
@@ -323,12 +339,32 @@ class LLMClient:
     @staticmethod
     def _schema_problems(obj: dict) -> list[str]:
         probs = []
-        for key, typ in RESPONSE_SCHEMA.items():
+        required = dict(RESPONSE_SCHEMA)
+        path = str(obj.get("implementation_path", "")).strip().upper()
+        # Path-conditional requirements. Critically, Path B does NOT require
+        # menu_choices -- the model must be able to choose custom code without
+        # first committing to a menu selection.
+        if path == "B":
+            required.update(PATH_B_EXTRA)
+        else:
+            required.update(PATH_A_EXTRA)
+        for key, typ in required.items():
             if key not in obj:
                 probs.append(f"missing required key '{key}'")
             elif not isinstance(obj[key], typ):
                 probs.append(f"'{key}' must be {typ.__name__}, "
                              f"got {type(obj[key]).__name__}")
+        if path not in ("A", "B"):
+            probs.append("implementation_path must be exactly 'A' or 'B'")
+        cat = str(obj.get("research_category", "")).strip().lower()
+        if cat not in RESEARCH_CATEGORIES:
+            probs.append(f"research_category must be one of {list(RESEARCH_CATEGORIES)}")
+        if path == "B":
+            cs = str(obj.get("code_summary", "")).strip()
+            if len(cs) < 40:
+                probs.append("Path B requires a code_summary (>=40 chars) naming the "
+                             "mechanism implemented and why existing primitives "
+                             "cannot express it")
         if isinstance(obj.get("code"), str) and len(obj["code"].strip()) < 50:
             probs.append("'code' must be a complete runnable script, not a stub")
         if isinstance(obj.get("rationale"), dict):
@@ -370,8 +406,14 @@ class LLMClient:
                 probs = self._schema_problems(obj)
                 if probs:
                     raise LLMError("response schema violations: " + "; ".join(probs))
-                if validate_choices is not None:
+                # Menu validation applies ONLY to Path A. For Path B the menu
+                # is not the contract -- running this unconditionally is the
+                # downstream coercion that made custom code effectively
+                # unreachable even after the schema allowed it.
+                if validate_choices is not None and \
+                        str(obj.get("implementation_path", "A")).upper() != "B":
                     obj["menu_choices"] = validate_choices(obj["menu_choices"])
+                obj.setdefault("menu_choices", {})
                 return obj, node_usage, events
             except (LLMError, ValueError, json.JSONDecodeError) as e:
                 last_err = str(e)
