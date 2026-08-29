@@ -26,6 +26,15 @@ from agent.loop import AgentLoop  # noqa: E402
 from agent.pricing import RateTable  # noqa: E402
 
 
+# Artifacts backing the SUBMITTED result. These survive --fresh deliberately:
+# a previous headline became unreproducible precisely because --fresh archived
+# the member arrays while the summary JSON quoting them stayed behind, leaving
+# a number on the deliverable that could no longer be recomputed. The submitted
+# ensemble is a separate, later artifact from any single search run, so a new
+# search must not carry it off.
+SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json")
+
+
 def archive_logs(log_dir: str) -> None:
     """Move a previous run's logs aside so the next run starts at iteration 0."""
     import shutil
@@ -34,11 +43,17 @@ def archive_logs(log_dir: str) -> None:
         return
     dest = os.path.join(log_dir, f"archive_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(dest, exist_ok=True)
+    kept = []
     for name in os.listdir(log_dir):
         if name.startswith("archive_"):
             continue
+        if name in SUBMISSION_ARTIFACTS:
+            kept.append(name)
+            continue
         shutil.move(os.path.join(log_dir, name), os.path.join(dest, name))
     print(f"archived previous run to {dest}")
+    if kept:
+        print(f"kept submission artifacts in place: {', '.join(sorted(kept))}")
 
 
 def main():
@@ -109,6 +124,13 @@ def main():
                          "research objective (agent/research_policy.py) instead "
                          "of raw history. Objectives: exploration / exploitation "
                          "/ ablation / confirmation / integration.")
+    ap.add_argument("--n-candidates", type=int, default=0,
+                    help="multi-candidate planning: generate N candidate "
+                         "experiments in ONE call, score them deterministically "
+                         "(agent/candidates.py) and implement the winner. 0/1 "
+                         "keeps the old single-proposal behaviour. This is what "
+                         "makes Path B a scoreable option rather than something "
+                         "the planner never generates.")
     ap.add_argument("--min-branching-iterations", type=int, default=0,
                     help="convergence cannot fire until the policy has actually "
                          "executed improve/debug/crossover at least this many "
@@ -188,6 +210,7 @@ def main():
         min_branching_iterations=a.min_branching_iterations,
         enable_data_tools=a.data_tools,
         enable_research_state=a.research_state,
+        n_candidates=a.n_candidates,
     )
     summary = loop.run()
 

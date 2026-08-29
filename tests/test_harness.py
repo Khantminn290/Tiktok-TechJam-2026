@@ -2031,6 +2031,38 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_submission_artifacts_survive_fresh():
+    """Regression: a previous headline became unreproducible because --fresh
+    archived the ensemble member arrays while the JSON quoting them stayed
+    behind. A new SEARCH run must never carry off the SUBMITTED result."""
+    print("\n[submission artifacts survive --fresh]")
+    import shutil
+    import tempfile
+    sys.path.insert(0, _ROOT)
+    import run_agent
+
+    d = tempfile.mkdtemp()
+    try:
+        open(os.path.join(d, "journal.jsonl"), "w").write('{"iteration_id": 0}\n')
+        open(os.path.join(d, "best_metrics.json"), "w").write("{}")
+        open(os.path.join(d, "ensemble_results.json"), "w").write('{"k": 16}')
+        os.makedirs(os.path.join(d, "final_ensemble", "seed_00"))
+        open(os.path.join(d, "final_ensemble", "seed_00", "metrics.json"), "w").write("{}")
+        run_agent.archive_logs(d)
+
+        check("the search journal IS archived (run really does start fresh)",
+              not os.path.exists(os.path.join(d, "journal.jsonl")))
+        check("ensemble_results.json survives --fresh",
+              os.path.exists(os.path.join(d, "ensemble_results.json")))
+        check("ensemble member arrays survive --fresh",
+              os.path.exists(os.path.join(d, "final_ensemble", "seed_00",
+                                          "metrics.json")))
+        check("the surviving result still matches its surviving members",
+              json.load(open(os.path.join(d, "ensemble_results.json")))["k"] == 16)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -2046,7 +2078,8 @@ if __name__ == "__main__":
               test_data_tools_and_proposals, test_stage_b_path_freedom,
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
-              test_leakage_and_ensemble, test_candidate_policy):
+              test_leakage_and_ensemble, test_candidate_policy,
+              test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -17,6 +17,10 @@ runtime/cache_sandbox/
 # as needed; never a place that holds anything to commit
 .worktrees/
 
+# ensemble member prediction arrays: large, and exactly reproducible from the
+# recorded seeds via `python3 -m agent.final_ensemble --seeds 16`. The result
+# JSON and each member's metrics.json/solution.py stay committed.
+logs/final_ensemble/*/scores_*.npy
 # per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
 logs/runs/
 logs/archive_*/
