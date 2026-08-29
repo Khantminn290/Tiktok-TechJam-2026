@@ -1,20 +1,20 @@
 {
-  "iteration_id": 5,
+  "iteration_id": 7,
   "menu_choices": {
     "loss": "bpr_pairwise",
-    "user_history": "recency_weighted_pool",
-    "multitask": "aux_click_like_forward",
-    "model": "fm_numpy",
+    "user_history": "din_attention",
+    "multitask": "aux_click",
+    "model": "deepfm_mlp",
     "temporal": "hour_plus_dow",
-    "training": "default",
+    "training": "lower_lr_longer",
     "data_extras": "none"
   },
-  "hypothesis": "Add hour-of-day and day-of-week interaction fields to the current best BPR + recency-weighted-history + auxiliary-feedback FM. This is a fresh, single-axis extension of the strongest recipe: if user preference for certain videos/authors/tabs shifts systematically by time context, FM can exploit time×item interactions to improve within-user ordering, especially top-5 placement, without changing the already-successful ranking loss or history signal.",
+  "hypothesis": "Test whether DIN-style candidate-conditioned history attention can convert the hundreds of train-period user interactions into a sharper within-user relevance signal than global recency pooling, while keeping the strongest stable DeepFM recipe otherwise fixed. For short-video ranking, not all past positives are equally relevant to a candidate impression; weighting history items by similarity to the current item should help top-5 ordering and may also slightly improve GAUC.",
   "valid_metrics": {
-    "GAUC": 0.6702887760884274,
-    "nDCG@5": 0.5375056574713676,
-    "primary": 0.6038972167798975
+    "GAUC": 0.6702496844002527,
+    "nDCG@5": 0.5370140069045856,
+    "primary": 0.6036318456524191
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_005.py",
-  "timestamp": 1787928350.150254
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_007.py",
+  "timestamp": 1787934425.360786
 }

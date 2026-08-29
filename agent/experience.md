@@ -29,3 +29,27 @@ menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "
 ### [HELPED] iter 5 -- Add hour-of-day and day-of-week interaction fields to the current best BPR + recency-weighted-histor
 menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"} raised valid primary to 0.6039 (previous best 0.6038).
 
+### [CRASHED] iter 0 -- The strongest measured recipe so far is BPR + recency-weighted history + auxiliary feedback + hour/d
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"}. KeyError: "attribute 'forward' already exists"
+
+### [HELPED] iter 1 -- The prior DeepFM attempt failed because train_lib's torch multitask head stores auxiliary tasks in a
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"} raised valid primary to 0.6034 (previous best n/a).
+
+### [NEUTRAL] iter 2 -- Try the still-untested architecture alternative dcn_lite while keeping the strongest non-crashing ra
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click", "model": "dcn_lite", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"} scored 0.6034, no clear change vs the running best.
+
+### [CRASHED] iter 3 -- Test whether the stronger auxiliary-supervision option that already helped on fm_numpy also transfer
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"}. KeyError: "attribute 'forward' already exists"
+
+### [CRASHED] iter 4 -- Fix the DeepFM + aux_click_like_forward crash without changing the intended recipe: the failure is n
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"}. TypeError: History.batch_vectors() missing 2 required positional arguments: 'users' and 'split_is_train'
+
+### [CRASHED] iter 5 -- Fix the custom DeepFM debug script for the exact same recipe by calling train_lib.History through it
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none"}. TypeError: '>' not supported between instances of 'NoneType' and 'int'
+
+### [HELPED] iter 6 -- Test whether the untried lower_lr_longer schedule can unlock a small gain for the strongest stable a
+menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "multitask": "aux_click", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none"} raised valid primary to 0.6036 (previous best 0.6034).
+
+### [HELPED] iter 7 -- Test whether DIN-style candidate-conditioned history attention can convert the hundreds of train-per
+menu_choices={"loss": "bpr_pairwise", "user_history": "din_attention", "multitask": "aux_click", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none"} raised valid primary to 0.6036 (previous best 0.6036).
+
