@@ -73,6 +73,12 @@ def _calls(tree) -> set:
 # configuration -- the script is a generic pass-through. Auditing only the
 # source would flag every menu-driven experiment as "mechanism not evidenced",
 # which is a systematic false positive, so the chosen config counts as evidence.
+# Pipeline overrides that evidence a mechanism when set literally in a script.
+PIPELINE_MECHANISM = {
+    "ensembling": ("snapshot_ensemble", "snapshot_force"),
+    "new_feature": ("hist_tau_days",),
+}
+
 CONFIG_EVIDENCE = {
     "auxiliary_task": ("multitask",),
     "new_loss": ("loss",),
@@ -115,6 +121,15 @@ def audit(src: str, hypothesis: str = "", declared_path: str = "A",
         if re.search(claim_pat, h):
             claimed.append(name)
             in_code = bool(re.search(code_pat, src, re.I))
+            # A Path B script can invoke a mechanism by passing a pipeline
+            # override in a dict literal it hands to train_lib.run -- the agent
+            # did exactly this for snapshot_ensemble, and auditing the source
+            # patterns alone called a working experiment "not evidenced".
+            if not in_code and any(
+                    re.search(rf'["\']{re.escape(ax)}["\']\s*:', src)
+                    for ax in CONFIG_EVIDENCE.get(name, ()) + tuple(
+                        PIPELINE_MECHANISM.get(name, ()))):
+                in_code = True
             # a non-default choice on a relevant axis selects the mechanism
             in_cfg = any(str(mc.get(ax, "none")).lower() not in ("none", "default", "")
                          for ax in CONFIG_EVIDENCE.get(name, ()))

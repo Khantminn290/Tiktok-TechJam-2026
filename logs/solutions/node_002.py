@@ -1,194 +1,50 @@
+#!/usr/bin/env python3
 import argparse
 import json
 import os
 import sys
-import tempfile
 import traceback
-from collections import defaultdict
-
-import numpy as np
 
 import train_lib
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument('--menu-choices', type=str, required=True)
-    p.add_argument('--output-dir', type=str, required=True)
-    p.add_argument('--seed', type=int, default=0)
-    return p.parse_args()
-
-
-def load_base_scores(base_menu, output_dir, seed):
-    with tempfile.TemporaryDirectory(prefix='kuairand_base_') as tmpdir:
-        train_lib.run(base_menu, tmpdir, seed=seed)
-        valid_scores = np.load(os.path.join(tmpdir, 'scores_valid.npy'))
-        test_scores = np.load(os.path.join(tmpdir, 'scores_test.npy'))
-    return valid_scores.astype(np.float64), test_scores.astype(np.float64)
-
-
-def build_user_positive_histories(splits):
-    train = splits['train']
-    user_hist = defaultdict(list)
-    users = train['user']
-    videos = train['video']
-    labels = train['long_view']
-    times = train['time_ms']
-    dates = train['date']
-
-    order = np.lexsort((times, dates, users))
-    for idx in order:
-        if labels[idx] > 0:
-            user_hist[int(users[idx])].append(int(videos[idx]))
-    return user_hist
-
-
-def build_affinity(splits, min_count=2, topk=200):
-    train = splits['train']
-    users = train['user']
-    videos = train['video']
-    labels = train['long_view']
-
-    pos_by_user = defaultdict(list)
-    for u, v, y in zip(users, videos, labels):
-        if y > 0:
-            pos_by_user[int(u)].append(int(v))
-
-    item_count = defaultdict(int)
-    pair_count = defaultdict(int)
-
-    for vids in pos_by_user.values():
-        uniq = sorted(set(vids))
-        m = len(uniq)
-        if m == 0:
-            continue
-        for v in uniq:
-            item_count[v] += 1
-        for i in range(m):
-            vi = uniq[i]
-            for j in range(i + 1, m):
-                vj = uniq[j]
-                pair_count[(vi, vj)] += 1
-
-    neigh = defaultdict(list)
-    for (i, j), cij in pair_count.items():
-        if cij < min_count:
-            continue
-        denom = np.sqrt(item_count[i] * item_count[j])
-        if denom <= 0:
-            continue
-        w = cij / denom
-        neigh[i].append((j, w))
-        neigh[j].append((i, w))
-
-    aff = {}
-    for i, lst in neigh.items():
-        lst.sort(key=lambda x: x[1], reverse=True)
-        if topk is not None and len(lst) > topk:
-            lst = lst[:topk]
-        aff[i] = dict(lst)
-    return aff, item_count
-
-
-def affinity_scores(split, user_hist, aff):
-    users = split['user']
-    videos = split['video']
-    out = np.zeros(len(users), dtype=np.float64)
-    cache_user = {}
-
-    for idx, (u, v) in enumerate(zip(users, videos)):
-        u = int(u)
-        v = int(v)
-        hist = cache_user.get(u)
-        if hist is None:
-            raw = user_hist.get(u, [])
-            hist = list(dict.fromkeys(raw[-50:]))
-            cache_user[u] = hist
-        s = 0.0
-        for h in hist:
-            if h == v:
-                s += 1.0
-            else:
-                s += aff.get(h, {}).get(v, 0.0)
-        out[idx] = s
-    return out
-
-
-def zscore(x):
-    x = x.astype(np.float64)
-    m = float(np.mean(x))
-    s = float(np.std(x))
-    if s < 1e-12:
-        return np.zeros_like(x)
-    return (x - m) / s
-
-
-def choose_alpha(base_valid, aff_valid, valid_user_raw, valid_labels):
-    alphas = [0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30]
-    best_alpha = 0.0
-    best_metrics = None
-    best_primary = -1e18
-    for a in alphas:
-        scores = base_valid + a * aff_valid
-        metrics = train_lib.evaluate(valid_user_raw, valid_labels, scores)
-        primary = float(metrics['primary'])
-        if primary > best_primary:
-            best_primary = primary
-            best_alpha = a
-            best_metrics = metrics
-    return best_alpha, best_metrics
-
-
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--menu-choices", type=str, required=True,
+                        help="JSON string accepted for contract compatibility; ignored by this custom Path B script.")
+    parser.add_argument("--output-dir", type=str, required=True)
+    parser.add_argument("--seed", type=int, default=0)
+    args = parser.parse_args()
+
     os.makedirs(args.output_dir, exist_ok=True)
+
+    # Confirmation target: incumbent config + validation-safe snapshot averaging.
+    menu_choices = {
+        "loss": "bpr_pairwise",
+        "neg_sampling": "uniform_1",
+        "user_history": "mean_pool_positives",
+        "multitask": "none",
+        "model": "fm_numpy",
+        "temporal": "hour_plus_dow",
+        "training": "lower_lr_longer",
+        "data_extras": "none",
+        "sample_weighting": "per_row",
+        "regularization": "l2_default",
+        "snapshot_ensemble": 5,
+        "snapshot_force": True,
+    }
+
+    metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
+
+    metrics_path = os.path.join(args.output_dir, "metrics.json")
+    with open(metrics_path, "w", encoding="utf-8") as f:
+        json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+
+if __name__ == "__main__":
     try:
-        if args.menu_choices:
-            _ = json.loads(args.menu_choices)
-
-        base_menu = {
-            'loss': 'bpr_pairwise',
-            'neg_sampling': 'uniform_1',
-            'user_history': 'none',
-            'multitask': 'none',
-            'model': 'fm_numpy',
-            'temporal': 'hour_plus_dow',
-            'training': 'lower_lr_longer',
-            'data_extras': 'none',
-            'sample_weighting': 'per_row',
-            'regularization': 'l2_default',
-        }
-
-        base_valid, base_test = load_base_scores(base_menu, args.output_dir, args.seed)
-        splits, meta = train_lib.load_cache()
-
-        user_hist = build_user_positive_histories(splits)
-        aff, _ = build_affinity(splits, min_count=2, topk=200)
-
-        aff_valid_raw = affinity_scores(splits['valid'], user_hist, aff)
-        aff_test_raw = affinity_scores(splits['test'], user_hist, aff)
-        aff_valid = zscore(aff_valid_raw)
-        aff_test = zscore(aff_test_raw)
-
-        alpha, metrics = choose_alpha(
-            base_valid,
-            aff_valid,
-            splits['valid']['user_raw'],
-            splits['valid']['long_view'],
-        )
-
-        final_valid = base_valid + alpha * aff_valid
-        final_test = base_test + alpha * aff_test
-
-        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_valid)
-        np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test)
-        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-            json.dump({k: float(v) for k, v in metrics.items()}, f)
+        main()
     except Exception as e:
+        sys.stderr.write("ERROR: %s\n" % str(e))
         traceback.print_exc(file=sys.stderr)
-        sys.stderr.write(f'ERROR: {e}\n')
         sys.exit(1)
-
-
-if __name__ == '__main__':
-    main()
