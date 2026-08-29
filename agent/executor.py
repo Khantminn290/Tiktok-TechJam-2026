@@ -41,6 +41,9 @@ if RUNTIME_DIR not in sys.path:
     sys.path.insert(0, RUNTIME_DIR)
 import data_boundary  # noqa: E402
 
+sys.path.insert(0, ROOT)
+from agent import leakage_check  # noqa: E402
+
 # ---- the real, labeled data the generated subprocess must never reach ----
 REAL_DATA_DIR = os.path.join(KIT_DIR, "KuaiRand-Pure", "data")
 REAL_CACHE_DIR = os.path.join(RUNTIME_DIR, "cache")
@@ -195,6 +198,19 @@ def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
     os.makedirs(run_dir, exist_ok=True)
     with open(code_path, "w") as fh:
         fh.write(code)
+
+    # --- pre-execution leakage review (static, never executes the code) ---
+    # The sandbox stops a script READING test labels; it cannot stop a script
+    # building a feature out of labels it is allowed to see. Only clear
+    # violations block -- a checker that rejects legitimate work is worse than
+    # none, so everything else is advisory and surfaced to the agent.
+    leak = leakage_check.check_file(code_path)
+    if leak["block"]:
+        return ExecResult(False, error_trace=(
+            "BLOCKED BEFORE EXECUTION by the leakage review — the experiment "
+            "was not run, so the hypothesis is still untested.\n"
+            + leakage_check.render_for_agent(leak)),
+            wall_clock_seconds=0.0, run_dir=run_dir)
 
     cmd = [sys.executable, code_path,
            "--menu-choices", json.dumps(menu_choices),

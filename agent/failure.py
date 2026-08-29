@@ -35,11 +35,13 @@ TIMEOUT = "timeout"
 INVALID_PREDICTIONS = "invalid_predictions"
 EVALUATION = "evaluation_failure"
 LLM_RESPONSE = "invalid_llm_response"
+LEAKAGE_BLOCKED = "leakage_blocked"
 HYPOTHESIS_DISPROVED = "hypothesis_disproved"   # NOT a failure of the code
 UNKNOWN = "unknown"
 
 # Ordered: first match wins, so specific patterns precede generic ones.
 _PATTERNS = [
+    (LEAKAGE_BLOCKED, r"BLOCKED BEFORE EXECUTION by the leakage review"),
     (LLM_RESPONSE, r"LLM stage failed|response schema violations|no JSON object"),
     (TIMEOUT, r"\bTIMEOUT\b|exceeded \d+s and was killed"),
     (CUDA, r"CUDA|cuDNN|device-side assert|MPS backend|torch\.cuda"),
@@ -90,6 +92,10 @@ _GUIDANCE = {
                            "support the hypothesis. This is a RESULT, not a bug. "
                            "Do not retry it -- record it and move to a different "
                            "mechanism."),
+    LEAKAGE_BLOCKED: ("The experiment was refused before running because the "
+                      "code appeared to use evaluation-split labels. Rebuild the "
+                      "feature so it uses only information available BEFORE the "
+                      "row being scored. The hypothesis is still untested."),
     UNKNOWN: ("Cause unclear. Reduce the experiment to the smallest version that "
               "still tests the hypothesis and re-run to localise the fault."),
 }
@@ -98,7 +104,7 @@ _GUIDANCE = {
 # justified. A disproved hypothesis and a hard ceiling are excluded.
 _RETRY_WORTHWHILE = {SYNTAX, IMPORT, API_MISUSE, DATA_CONTRACT, NUMERICAL,
                      DIVERGENCE, INVALID_PREDICTIONS, EVALUATION, LLM_RESPONSE,
-                     UNKNOWN}
+                     LEAKAGE_BLOCKED, UNKNOWN}
 # Classes needing the experiment made materially cheaper/smaller, not just fixed.
 _NEEDS_SHRINK = {TIMEOUT, RESOURCE}
 

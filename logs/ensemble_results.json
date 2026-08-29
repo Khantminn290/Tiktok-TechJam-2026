@@ -1,10 +1,18 @@
 {
-  "mean": 0.60539,
-  "std": 0.00018,
-  "k": 5,
+  "mean": 0.60545,
+  "std": 0.0,
+  "k": 10,
   "n_seeds_pool": 10,
   "best_individual_seed": 0.60516,
   "single_seed_mean": 0.60465,
-  "config": "agent-found (lower_lr_longer, multitask=none)",
-  "note": "mean over all 252 five-seed subsets of 10 trained seeds; adopted on expected value and variance reduction, NOT on beating the best individual draw (+0.00023, inside noise)"
+  "config": "agent-found: bpr_pairwise + recency_weighted_pool + multitask=none + fm_numpy + hour_plus_dow + lower_lr_longer",
+  "selection_bias": "NONE - k=10 uses ALL available seeds, so there is exactly one subset and no selection was performed. Greedy/best-subset selection was measured to carry +0.00081 optimistic bias and was rejected.",
+  "k_curve_unbiased": {
+    "2": 0.60507,
+    "3": 0.60524,
+    "5": 0.60539,
+    "7": 0.60538,
+    "10": 0.60545
+  },
+  "heterogeneous_rejected": "distinct-config ensembling scored 0.60504 at k=5 vs 0.60539 homogeneous, despite lower correlation (0.879 vs 0.983) - independence without comparable member quality loses, same failure as bagging"
 }

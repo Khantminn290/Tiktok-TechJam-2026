@@ -1831,6 +1831,57 @@ def test_failure_taxonomy():
           "repair_brief(_fc" in psrc)
 
 
+def test_leakage_and_ensemble():
+    """Leakage checker (P0 gap) + ensemble/selection-bias guards."""
+    print("\n[leakage checker + ensemble infrastructure]")
+    from agent.leakage_check import check_source, verdict, render_for_agent
+
+    fatal = verdict(check_source(
+        "s,m=train_lib.load_cache()\ny=s['test']['long_view']\nz=y.mean()\n"))
+    check("using TEST labels is FATAL and blocks execution", fatal["block"])
+    warn = verdict(check_source(
+        "rate = tr.groupby('user')['long_view'].mean()\nX_feat = rate[tr['user']]\n"))
+    check("the classic target-leak aggregation is flagged", warn["n_warn"] >= 1)
+    check("...but is advisory, not a hard block (avoids false blocking)",
+          not warn["block"])
+    safe = verdict(check_source(
+        "# leave_one_out causal history\nh=train_lib.History(s,n,mode)\n"
+        "v=h.batch_vectors(S,users,split_is_train=True)\n"))
+    check("legitimate leave-one-out code produces NO findings",
+          len(safe["findings"]) == 0)
+    seed = verdict(check_source(open(
+        os.path.join(_ROOT, "runtime", "seed_solution.py")).read()))
+    check("the real seed_solution.py yields no false positives",
+          not seed["block"] and seed["n_warn"] == 0)
+    check("blocked feedback explains the rule and says the hypothesis is untested",
+          "available BEFORE" in render_for_agent(fatal)
+          and "not run" in render_for_agent(fatal).lower())
+
+    esrc = open(os.path.join(_ROOT, "agent", "executor.py")).read()
+    check("executor runs the leakage gate BEFORE launching the subprocess",
+          "BLOCKED BEFORE EXECUTION" in esrc
+          and esrc.index("leakage_check.check_file") < esrc.index("subprocess.run"))
+    from agent.failure import LEAKAGE_BLOCKED, classify
+    check("a leakage block is its own failure class, and retryable after fixing",
+          classify("BLOCKED BEFORE EXECUTION by the leakage review")["class"]
+          == LEAKAGE_BLOCKED)
+
+    # ensemble: rank-normalisation and the selection-bias guard
+    import numpy as np
+    from agent.ensemble import NOISE_FLOOR, rank_normalise
+    r = rank_normalise(np.array([5.0, 1.0, 3.0]))
+    check("rank_normalise is scale-free and order-preserving",
+          list(np.argsort(r)) == [1, 2, 0] and r.min() == 0.0 and r.max() == 1.0)
+    check("a huge-scale model cannot dominate after rank-normalisation",
+          np.allclose(rank_normalise(np.array([1e9, 1.0, 5e8])),
+                      rank_normalise(np.array([3.0, 1.0, 2.0]))))
+    ens = json.load(open(os.path.join(_ROOT, "logs", "ensemble_results.json")))
+    check("adopted ensemble records that it carries NO selection bias",
+          "NONE" in ens["selection_bias"])
+    check("heterogeneous ensembling was measured and rejected, not assumed",
+          "0.60504" in ens["heterogeneous_rejected"])
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1845,7 +1896,8 @@ if __name__ == "__main__":
               test_new_axes_and_snapshot, test_parallel_worker_diversity,
               test_data_tools_and_proposals, test_stage_b_path_freedom,
               test_research_state, test_research_state_no_side_effects,
-              test_research_policy, test_failure_taxonomy):
+              test_research_policy, test_failure_taxonomy,
+              test_leakage_and_ensemble):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
