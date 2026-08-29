@@ -535,7 +535,12 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     hist = None
     Htr = Hva = Hte = None
     if cfg["history"] in ("mean_pool_positives", "recency_weighted_pool"):
-        hist = History(splits, meta["field_dims"]["user"], cfg["history"])
+        # tau_days was hardcoded at 3.0 -- a strong recency emphasis over a
+        # 14-day train window, never tuned, and invisible to the menu even
+        # though recency_weighted_pool is part of the incumbent. Now a config
+        # knob so it can be swept like any other modelling choice.
+        hist = History(splits, meta["field_dims"]["user"], cfg["history"],
+                       tau_days=float(cfg.get("hist_tau_days", 3.0)))
 
     # AUX_MAP is module-level: this table was duplicated here and in run(), and
     # adding an option to one copy silently broke the other with a KeyError at
@@ -878,6 +883,9 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
             refresh_pooled()
             sv = model.predict(Xva, Hva)
             va = evaluate(uva_raw, yva, sv)
+            if cfg.get("capture_epoch_scores") is not None:
+                cfg["capture_epoch_scores"].append((ep, float(va["primary"]),
+                                                    sv.copy()))
             log(f"  [{loss_name}] epoch {ep:2d} | valid primary {va['primary']:.4f} "
                 f"(GAUC {va['GAUC']:.4f} nDCG@5 {va['nDCG@5']:.4f}) | {time.time()-t0:.1f}s")
             if snap_n:
