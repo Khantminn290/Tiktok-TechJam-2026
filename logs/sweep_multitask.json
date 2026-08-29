@@ -1,0 +1,45 @@
+{
+  "axis": "multitask",
+  "incumbent": "none",
+  "seeds": 5,
+  "results": {
+    "aux_social4": {
+      "primary": {
+        "n_paired": 5,
+        "usable": true,
+        "base_mean": 0.60448,
+        "arm_mean": 0.60406,
+        "mean_delta": -0.00043,
+        "sigma": -0.53,
+        "paired_sd": 0.00018,
+        "paired_t": -5.43,
+        "wins": 0,
+        "verdict": "INSIDE the noise floor -- says nothing either way"
+      },
+      "GAUC": {
+        "n_paired": 5,
+        "usable": true,
+        "base_mean": 0.67127,
+        "arm_mean": 0.67063,
+        "mean_delta": -0.00064,
+        "sigma": -0.8,
+        "paired_sd": 0.00016,
+        "paired_t": -9.12,
+        "wins": 0,
+        "verdict": "INSIDE the noise floor -- says nothing either way"
+      },
+      "nDCG@5": {
+        "n_paired": 5,
+        "usable": true,
+        "base_mean": 0.53769,
+        "arm_mean": 0.53748,
+        "mean_delta": -0.00021,
+        "sigma": -0.26,
+        "paired_sd": 0.00023,
+        "paired_t": -2.06,
+        "wins": 1,
+        "verdict": "INSIDE the noise floor -- says nothing either way"
+      }
+    }
+  }
+}

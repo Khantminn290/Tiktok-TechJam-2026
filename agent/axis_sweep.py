@@ -90,9 +90,18 @@ def compare(base: dict, arm: dict, key: str = "primary") -> dict:
             "paired_sd": round(sd, 5),
             "paired_t": round(t, 2),
             "wins": sum(1 for d in diffs if d > 0),
+            # MAGNITUDE and DIRECTION are separate questions. A small effect
+            # that loses on every paired seed with a large t is not "nothing
+            # either way" -- its size is under the promotion bar, but its sign
+            # is certain, and reporting only the size hides that.
             "verdict": ("BETTER beyond the noise floor" if mean_d >= NOISE else
                         "WORSE beyond the noise floor" if mean_d <= -NOISE else
-                        "INSIDE the noise floor -- says nothing either way")}
+                        (f"sub-noise in SIZE ({mean_d / NOISE:+.2f} sigma) but "
+                         f"CONSISTENT in direction: "
+                         f"{sum(1 for x in diffs if x > 0)}/{len(diffs)} wins, "
+                         f"t={t:.2f}. Not promotable; also not a positive lever."
+                         if abs(t) > 2.0 else
+                         "INSIDE the noise floor -- says nothing either way"))}
 
 
 def main() -> None:

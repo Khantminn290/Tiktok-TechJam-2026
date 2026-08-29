@@ -467,9 +467,25 @@ def test_data_boundary():
         check(f"'{col}' stripped from the redacted test split", col not in redacted)
     check("non-label feature columns survive redaction",
           {"user", "video", "author", "user_raw"} <= set(redacted))
-    check("known outcome columns are exactly what's declared",
-          set(data_boundary.TEST_LABEL_COLUMNS) ==
-          {"long_view", "is_click", "is_like", "is_forward", "play_time_ms"})
+    # Pinned as an INVARIANT, not a frozen literal. The original list was an
+    # equality check, so ADDING the four auxiliary outcome columns -- which
+    # strengthens the boundary -- failed the test exactly as removing one
+    # would. What must never happen is a column LEAVING the list, or an
+    # outcome column existing in the cache without being redacted.
+    ORIGINAL_OUTCOMES = {"long_view", "is_click", "is_like", "is_forward",
+                         "play_time_ms"}
+    declared = set(data_boundary.TEST_LABEL_COLUMNS)
+    check("the original outcome columns are never dropped from the boundary",
+          ORIGINAL_OUTCOMES <= declared,
+          f"missing: {ORIGINAL_OUTCOMES - declared}")
+    sys.path.insert(0, os.path.join(_ROOT, "runtime"))
+    import train_lib as _tl
+    check("every auxiliary outcome column the cache stores is also redacted",
+          set(_tl._AUX_SOCIAL_COLS) <= declared,
+          f"unredacted: {set(_tl._AUX_SOCIAL_COLS) - declared}")
+    check("the boundary contains only outcome columns, no features",
+          not (declared & {"user", "video", "author", "tab", "duration_ms",
+                           "hourmin", "date", "time_ms", "user_raw"}))
 
 
 def test_restricted_access():
@@ -1667,9 +1683,9 @@ def test_research_state_no_side_effects():
            if before_exp else "") == before_exp)
     check("ResearchState does not mutate the journal",
           open(os.path.join(_ROOT, "logs", "journal.jsonl")).read() == before_journal)
-    check("data boundary redaction still intact",
-          set(db.TEST_LABEL_COLUMNS) == {"long_view", "is_click", "is_like",
-                                         "is_forward", "play_time_ms"})
+    check("data boundary redaction still intact (never shrinks)",
+          {"long_view", "is_click", "is_like", "is_forward",
+           "play_time_ms"} <= set(db.TEST_LABEL_COLUMNS))
     from agent.executor import PROTECTED_PATHS, REAL_DATA_DIR
     check("sandbox protections unchanged",
           any("journal.jsonl" in p for p in PROTECTED_PATHS) and os.path.isdir(REAL_DATA_DIR))
