@@ -322,7 +322,16 @@ class AgentLoop:
         from . import feature_lab as FL
         try:
             state = self._last_state_block or ""
+            # Accumulated evidence, not just this run's: the frontier aggregates
+            # every archived journal, so on a --fresh run (where the state block
+            # is nearly empty) the agent still reasons from what the project has
+            # actually measured instead of declining for lack of evidence.
             err = self._last_error_block or ""
+            try:
+                from .frontier import from_root as _frontier
+                err = (err + "\n\n" + _frontier(self.root).render(limit=18)).strip()
+            except Exception:
+                pass
             prompt = FL.build_feature_prompt(state, err, FL.render_for_prompt())
             obj, usage = self.llm.json_call(prompt)
             self.spend.record(usage)
