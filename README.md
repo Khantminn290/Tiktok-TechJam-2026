@@ -228,7 +228,7 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        387 checks, no model calls, no training
+tests/test_harness.py        400 checks, no model calls, no training
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
 

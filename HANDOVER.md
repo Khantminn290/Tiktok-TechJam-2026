@@ -75,6 +75,51 @@ progress against the ceiling, not against 1.0.
 
 ---
 
+## 1b. Does the agent's research policy actually work?
+
+Measured, not asserted. `logs/ab_test/` holds both arms and the analysis.
+
+**The audit finding was that Path B (writing custom code) was never *generated*
+— not that it was rejected.** The planner made one call returning one proposal,
+so there was no candidate set, no scoring, and no answer to "why not Path B?".
+Multi-candidate planning (`--n-candidates 4`) fixes the generation problem:
+
+| | A: single proposal | B: multi-candidate |
+|---|---|---|
+| Path B declared | 0 | 6 (3 genuine, 3 fake) |
+| decision points recorded | 0 | 10 |
+| candidates generated / gated | 0 / 0 | 40 / 18 |
+| decisions auditable | no | yes |
+| best primary | 0.60497 | 0.60367 |
+
+**The strongest evidence needs no outcome at all.** Replaying the same 10
+recorded decisions under a single-proposal policy (`python3 -m agent.policy_eval`):
+
+- it would have picked a **gated** candidate — a duplicate, a recorded dead end,
+  or an unfalsifiable proposal — **7 times out of 10**. The deployed policy
+  picked 0.
+- it agrees with the deployed choice only **10%** of the time.
+- it opens 3 branches instead of 5, and picks Path B **0%** of the time —
+  reproducing arm A's pathology exactly.
+
+None of those rows depends on a training outcome, so none depends on luck.
+
+**Two things this does NOT show, stated plainly:**
+
+1. **It did not improve the score.** Arm B's best was 0.60367 vs arm A's 0.60497,
+   and it spent 3 iterations on failed custom code. One run against one run,
+   against seed noise of 0.0008, supports no causal claim in either direction.
+2. **Only 3 of 6 Path B declarations are genuine.** The other 3 declare Path B
+   and then call `train_lib.run()` — Path A wearing a Path B label
+   (`python3 -m agent.capability_report` measures this from the scripts on
+   disk). *Selecting* Path B is fixed; *writing* it is not.
+
+The counterfactual harness refuses to score work that was never run: every
+replayed decision is labelled OBSERVED / COUNTERFACTUAL_KNOWN /
+COUNTERFACTUAL_UNKNOWN, and unknown outcomes are never imputed or averaged.
+
+---
+
 ## 2. What NOT to re-try
 
 These are all recorded in `config/modification_menu.json` under
@@ -137,7 +182,7 @@ locked: its counters span the evaluation window and risk target leakage.
 Full detail is in `README.md` — this is just the map.
 
 ```bash
-python3 tests/test_harness.py                      # 379 checks, no LLM, no training
+python3 tests/test_harness.py                      # 400 checks, no LLM, no training
 cd kuairand-starter-kit && python3 baseline.py --model fm && cd ..   # reproduce 0.6016
 python3 -m agent.baseline_repro                    # durable baseline artifact
 
@@ -153,6 +198,8 @@ python3 -m agent.report                            # readable run summary
 python3 -m agent.final_summary                     # the competition deliverable
 python3 -m agent.final_ensemble --seeds 16         # rebuild the submitted number
 python3 -m agent.policy_eval                       # counterfactual decision replay
+python3 -m agent.ab_report                         # A vs B research-process comparison
+python3 -m agent.capability_report                 # genuine vs fake Path B, from disk
 python3 -m agent.make_submission --split valid --score --ensemble
 ```
 
