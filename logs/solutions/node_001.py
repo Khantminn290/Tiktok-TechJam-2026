@@ -8,11 +8,11 @@ import train_lib
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--menu-choices', required=True)
-    parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--seed', type=int, default=0)
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--menu-choices', required=True)
+    ap.add_argument('--output-dir', required=True)
+    ap.add_argument('--seed', type=int, default=0)
+    args = ap.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -24,7 +24,8 @@ def main():
             json.dump({k: float(v) for k, v in metrics.items()}, f)
     except Exception as e:
         traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+        sys.stderr.flush()
+        raise
 
 
 if __name__ == '__main__':

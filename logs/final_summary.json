@@ -1,27 +1,27 @@
 {
   "stop_reason": "converged: running-best valid primary improved only 0.0000 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
-  "iterations_used": 4,
+  "iterations_used": 11,
   "iteration_cap": 40,
-  "best_node": 0,
+  "best_node": 5,
   "best_valid_metrics": {
-    "GAUC": 0.6702887760884274,
-    "nDCG@5": 0.5375056574713676,
-    "primary": 0.6038972167798975
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
   },
-  "delta_valid_primary_over_baseline": 0.0023,
+  "delta_valid_primary_over_baseline": 0.0034,
   "total_llm_tokens": {
-    "input_tokens": 11057,
-    "output_tokens": 1951,
+    "input_tokens": 117444,
+    "output_tokens": 14447,
     "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 17920,
-    "calls": 3,
+    "cache_read_input_tokens": 81152,
+    "calls": 22,
     "provider": "openai",
     "model": "gpt-5.4",
-    "input_plus_output": 30928
+    "input_plus_output": 213043
   },
-  "total_training_wall_clock_s": 1514.2,
-  "delta_in_baseline_seed_sigmas": 2.87,
-  "total_agent_wall_clock_s": 505.0,
+  "total_training_wall_clock_s": 1745.0,
+  "delta_in_baseline_seed_sigmas": 4.21,
+  "total_agent_wall_clock_s": 996.8,
   "gpu_hours": 0.0,
   "gpu_seconds_measured": 0.0,
   "devices_used": [
@@ -30,14 +30,14 @@
   "spend": {
     "provider": "openai",
     "model": "gpt-5.4",
-    "total_usd": 0.061387,
-    "ceiling_usd": 2.0,
-    "iterations_billed": 3,
-    "mean_usd_per_iteration": 0.020462,
-    "max_usd_per_iteration": 0.033702,
+    "total_usd": 0.530603,
+    "ceiling_usd": 1.5,
+    "iterations_billed": 14,
+    "mean_usd_per_iteration": 0.0379,
+    "max_usd_per_iteration": 0.054503,
     "rate_card": "$2.50/1M in, $15.00/1M out"
   },
-  "draft_count": 4,
+  "draft_count": 5,
   "manual_interventions": 0,
   "convergence_rule": {
     "epsilon": 0.002,

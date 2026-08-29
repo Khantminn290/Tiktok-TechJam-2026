@@ -1,23 +1,23 @@
 {
-  "iteration_id": 0,
+  "iteration_id": 5,
   "menu_choices": {
     "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
     "user_history": "recency_weighted_pool",
-    "multitask": "aux_click_like_forward",
+    "multitask": "none",
     "model": "fm_numpy",
     "temporal": "hour_plus_dow",
-    "training": "default",
+    "training": "lower_lr_longer",
     "data_extras": "none",
-    "neg_sampling": "uniform_1",
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "Seeded baseline: the validated best configuration from the prior search phase (BPR pairwise + recency-weighted positive history + click/like/forward auxiliary heads + hour/day-of-week temporal fields on the numpy FM backbone). This is the score to beat.",
+  "hypothesis": "Test whether the strongest proven broad-signal recipe improves further by replacing auxiliary click/like/forward heads with no multitask supervision, isolating whether the current gain is really coming from recency-weighted history + temporal context + lower_lr_longer BPR rather than auxiliary-task gradient interference. This is meaningfully different from the sibling proposal and all prior attempts because it changes the multitask axis while keeping the current best FM/BPR/history/schedule stack intact.",
   "valid_metrics": {
-    "GAUC": 0.6702887760884274,
-    "nDCG@5": 0.5375056574713676,
-    "primary": 0.6038972167798975
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
-  "timestamp": 1787972869.9167202
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_005.py",
+  "timestamp": 1787992088.381043
 }

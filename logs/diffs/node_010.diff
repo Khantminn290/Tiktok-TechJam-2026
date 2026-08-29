@@ -1,0 +1,15 @@
+--- logs/solutions/node_005.py
++++ logs/solutions/node_010.py
+@@ -18,10 +18,9 @@
+         menu_choices = json.loads(args.menu_choices)
+         os.makedirs(args.output_dir, exist_ok=True)
+         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
+-        metrics_path = os.path.join(args.output_dir, 'metrics.json')
+-        with open(metrics_path, 'w') as f:
++        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
+             json.dump({k: float(v) for k, v in metrics.items()}, f)
+-    except Exception as e:
++    except Exception:
+         traceback.print_exc(file=sys.stderr)
+         sys.exit(1)
+ 

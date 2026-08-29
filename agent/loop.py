@@ -176,7 +176,7 @@ class AgentLoop:
         from .experience import render_for_prompt as _exp
         try:
             iprompt = inspect_tools.build_inspect_prompt(self.menu, self.tree, _exp())
-            obj, usage, _ = self.llm.structured_call(iprompt)
+            obj, usage = self.llm.json_call(iprompt)
             reqs = inspect_tools.parse_requests(obj)
         except LLMError as e:
             events.append({"type": "inspect_skipped", "error": str(e)[:200]})
@@ -483,6 +483,7 @@ class AgentLoop:
                           "provider": self.llm.provider, "model": self.llm.model,
                           "round_id": round_id, "worker": j["slot"]})
             events.append(diversity_event)
+            events.extend(round_events)
             node = Node(iteration_id=it,
                        parent_id=None if target is None else target.iteration_id,
                        action=action, menu_choices=obj["menu_choices"],

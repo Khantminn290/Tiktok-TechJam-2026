@@ -9,8 +9,8 @@ import train_lib
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--menu-choices', type=str, required=True)
-    parser.add_argument('--output-dir', type=str, required=True)
+    parser.add_argument('--menu-choices', required=True)
+    parser.add_argument('--output-dir', required=True)
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
@@ -21,11 +21,10 @@ def main():
         metrics_path = os.path.join(args.output_dir, 'metrics.json')
         with open(metrics_path, 'w') as f:
             json.dump({k: float(v) for k, v in metrics.items()}, f)
-        return 0
-    except Exception as e:
+    except Exception:
         traceback.print_exc(file=sys.stderr)
-        return 1
+        sys.exit(1)
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()

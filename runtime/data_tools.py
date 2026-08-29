@@ -37,6 +37,24 @@ if _HERE not in sys.path:
 FEATURES = ("duration_ms", "hourmin", "date", "time_ms", "long_view",
             "is_click", "is_like", "is_forward", "play_time_ms",
             "user", "video", "author", "tab")
+
+# Columns observed only AFTER the impression happened. They are legitimate
+# TRAINING TARGETS (that is what the multitask axis uses) but must NEVER be
+# used as INPUT features at scoring time -- at ranking time they do not exist.
+# This matters because the tools report them as spectacular predictors: a live
+# measurement gives play_time_ms a within-user AUC of 0.992 and is_click 0.880,
+# versus the FM baseline's 0.670. An agent shown those numbers without this
+# warning could reasonably conclude they are the best features available and
+# propose catastrophic leakage. Flagged loudly in every result instead.
+POST_HOC_OUTCOMES = ("long_view", "is_click", "is_like", "is_forward",
+                     "play_time_ms")
+_LEAK_WARNING = (
+    "*** POST-HOC OUTCOME -- NOT USABLE AS AN INPUT FEATURE. This column is "
+    "recorded AFTER the user has already watched, so it does not exist at "
+    "ranking time. A high score here is NOT an opportunity; using it as a "
+    "model input would be label leakage and the result would be invalid. It "
+    "may legitimately be used only as a TRAINING TARGET (see the multitask "
+    "axis). ***")
 LABEL = "long_view"
 ALLOWED_SPLITS = ("train", "valid")     # never "test"
 MAX_BINS = 20
@@ -52,6 +70,10 @@ def _load(cache_dir):
     return splits, meta
 
 
+def _leak_note(feature):
+    return {"WARNING": _LEAK_WARNING} if feature in POST_HOC_OUTCOMES else {}
+
+
 def _check(feature, split):
     if feature not in FEATURES:
         raise ToolError(f"unknown feature {feature!r}; allowed: {list(FEATURES)}")
@@ -65,7 +87,7 @@ def get_feature_stats(feature: str, split: str = "train", cache_dir=None) -> dic
     _check(feature, split)
     splits, _ = _load(cache_dir)
     x = np.asarray(splits[split][feature], dtype=np.float64)
-    return {"tool": "get_feature_stats", "feature": feature, "split": split,
+    return {**_leak_note(feature), "tool": "get_feature_stats", "feature": feature, "split": split,
             "n": int(len(x)), "distinct": int(len(np.unique(x))),
             "mean": round(float(x.mean()), 6), "std": round(float(x.std()), 6),
             "min": round(float(x.min()), 4),
@@ -98,7 +120,7 @@ def get_label_rate_by_segment(feature: str, n_bins: int = 10,
                     "hi": round(float(qs[b + 1]), 4), "n": int(m.sum()),
                     "label_rate": round(float(y[m].mean()), 4)})
     rates = [o["label_rate"] for o in out]
-    return {"tool": "get_label_rate_by_segment", "feature": feature,
+    return {**_leak_note(feature), "tool": "get_label_rate_by_segment", "feature": feature,
             "split": split, "overall_label_rate": round(float(y.mean()), 4),
             "bins": out,
             "spread": round(float(max(rates) - min(rates)), 4) if rates else 0.0,
@@ -139,7 +161,7 @@ def get_within_user_auc(feature: str, split: str = "valid", cache_dir=None) -> d
         centred.append(auc(labs, [v - m for v in vals]))
     if not raw:
         raise ToolError("no users with both a positive and a negative label")
-    return {"tool": "get_within_user_auc", "feature": feature, "split": split,
+    return {**_leak_note(feature), "tool": "get_within_user_auc", "feature": feature, "split": split,
             "n_users_scored": len(raw),
             "within_user_auc": round(float(np.mean(raw)), 4),
             "within_user_auc_user_centred": round(float(np.mean(centred)), 4),
@@ -191,6 +213,9 @@ def describe_tools() -> str:
         "get_within_user_auc(feature)                  -> DECISIVE: does it order WITHIN a user?\n"
         "get_user_history_stats()                      -> per-user counts, train-vs-valid list lengths\n"
         f"allowed features: {list(FEATURES)}\n"
+        f"POST-HOC OUTCOMES (targets only, NEVER inputs): {list(POST_HOC_OUTCOMES)}\n"
+        "  -- these score extremely well because they encode the answer; they do\n"
+        "     not exist at ranking time and using them as inputs is leakage.\n"
         "All read-only, train/valid only; the test split is never inspectable.")
 
 

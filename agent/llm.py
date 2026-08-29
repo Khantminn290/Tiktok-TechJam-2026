@@ -386,6 +386,25 @@ class LLMClient:
         raise LLMError(f"LLM failed schema/menu validation after "
                        f"{1 + self.max_repair_retries} attempts: {last_err}")
 
+    def json_call(self, prompt: str) -> tuple[dict, dict]:
+        """A single JSON call WITHOUT the solution-script schema.
+
+        structured_call enforces RESPONSE_SCHEMA (hypothesis/menu_choices/code/
+        expected_effect/rationale). Any other JSON shape -- e.g. the data-
+        inspection phase's {"requests": [...]} -- fails that schema, exhausts
+        the repair retries and raises. That is exactly what happened on the
+        first run with --data-tools: the inspect phase silently failed every
+        round and the agent never saw a single measurement.
+        """
+        text, usage = self._call_raw(
+            [{"role": "system", "content":
+              "Respond with exactly ONE JSON object and nothing else."},
+             {"role": "user", "content": prompt}])
+        try:
+            return self._extract_json(text), usage
+        except LLMError:
+            return {}, usage
+
     def tokens_for_report(self) -> dict:
         u = self.total_usage
         return {**u, "provider": self.provider, "model": self.model,
