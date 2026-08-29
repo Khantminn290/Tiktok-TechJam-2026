@@ -1909,11 +1909,26 @@ def test_leakage_and_ensemble():
     check("k is ALL seeds, not the best-scoring k on the curve",
           int(argmax_k) != ens["k"] or len(curve) == ens["k"],
           f"argmax k={argmax_k} reported k={ens['k']}")
+    dead = json.load(open(os.path.join(_ROOT, "config",
+                                       "modification_menu.json")))["notes"]["tested_dead_ends"]
     check("heterogeneous ensembling was measured and rejected, not assumed",
-          any("gru4rec_seq as an ENSEMBLE member" in d and "0.15 sigma" in d
-              for d in json.load(open(os.path.join(
-                  _ROOT, "config", "modification_menu.json")))
-              ["notes"]["tested_dead_ends"]))
+          any("gru4rec_seq" in d and "0.15 sigma" in d for d in dead))
+    check("the gru4rec finding is scoped to ensemble MEMBERSHIP, not the model",
+          any("ensemble MEMBERSHIP only" in d for d in dead))
+    # The stronger test: BOTH halves of the rule satisfied, and still nothing.
+    ht_path = os.path.join(_ROOT, "logs", "hetero_test.json")
+    if os.path.exists(ht_path):
+        ht = json.load(open(ht_path))
+        check("the comparable-quality ensemble test was pre-registered",
+              ht["design_fixed_before_result"]
+              and ht["validation_comparisons_for_this_hypothesis"] == 1)
+        check("its members really were comparable in quality",
+              abs(ht["quality_gap_sigma"]) < 1.0, f"{ht['quality_gap_sigma']} sigma")
+        check("its members really were more decorrelated than same-config seeds",
+              ht["corr_across_configs"] < ht["corr_within_config_seeds"],
+              f"{ht['corr_across_configs']} vs {ht['corr_within_config_seeds']}")
+        check("and it was still REJECTED against a pre-set threshold",
+              not ht["adopt"] and ht["delta_vs_base"] <= ht["adopt_threshold"])
 
 
 def test_candidate_policy():
@@ -2154,6 +2169,7 @@ def test_research_frontier():
     model was (loss, model), which could not represent 'is temporal useful?'
     at all."""
     print("\n[research frontier]")
+    from agent import candidates as C
     from agent import frontier as F
 
     menu = {"axes": {"loss": {"options": ["bpr_pairwise", "lambdarank_ndcg",
@@ -2274,9 +2290,6 @@ def test_research_frontier():
     ar = {d["direction"]: d for d in fr2.directions}["a=v"]
     check("replicates that disagree beyond noise ARE contradictory",
           ar["status"] == F.CONTRADICTORY, ar["status"])
-    check("a CONTRADICTORY direction DOES carry information value",
-          C._information_value(mk(6, {"a": "v"}, 0.001), fr2)
-          == C.INFO_CONTRADICTORY)
 
     # accumulated knowledge must survive --fresh
     fsrc = open(os.path.join(_ROOT, "agent", "frontier.py")).read()
@@ -2294,8 +2307,6 @@ def test_research_frontier():
 
     # value of information: resolving an open question is worth an iteration
     # even when its expected score gain is not the largest on offer.
-    from agent import candidates as C
-
     def mk(i, choices, gain):
         return C.Candidate({"hypothesis": f"idea {i}",
                             "mechanism": "a stated mechanism long enough to pass",
@@ -2319,6 +2330,11 @@ def test_research_frontier():
           by["temporal=hour_plus_dow"]["status"] == F.KNOWN_GOOD
           and C._information_value(mk(2, {"temporal": "hour_plus_dow"}, 0.001), f) == 0.0,
           by["temporal=hour_plus_dow"]["status"])
+    # fr2 above is contradictory for a real reason (replicates disagreeing),
+    # not because other axes varied.
+    check("a CONTRADICTORY direction DOES carry information value",
+          C._information_value(mk(7, {"a": "v"}, 0.001), fr2)
+          == C.INFO_CONTRADICTORY)
     check("information value takes the MAX over axes, not the sum",
           C._information_value(mk(3, {"loss": "listwise_softmax",
                                       "multitask": "aux_click_like_forward"}, 0.001),

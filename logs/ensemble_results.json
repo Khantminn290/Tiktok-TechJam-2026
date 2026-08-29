@@ -1,5 +1,7 @@
 {
   "primary": 0.60541,
+  "GAUC": 0.67212,
+  "nDCG@5": 0.5387,
   "k": 16,
   "seeds_used": [
     0,
@@ -78,5 +80,14 @@
   "source_node": 4,
   "members_dir": "logs/final_ensemble",
   "selection_bias": "NONE -- k=16 is ALL seeds trained, fixed before any score was seen. No subset search was performed. k_curve is diagnostic only; best-subset selection was measured to carry +0.00081 optimistic bias.",
-  "reproduce": "python3 -m agent.final_ensemble --seeds 16"
+  "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+  "extra_member_dirs": [],
+  "code_version": "c378e05f497aa37fc0772c86c5246b4868bdf5e4",
+  "timestamp_utc": "2026-08-29T14:36:25Z",
+  "data_version": {
+    "cache": "cache_sandbox",
+    "valid_rows": 124909
+  },
+  "evaluator": "kuairand-starter-kit/evaluate.py (never modified)",
+  "hidden_test_used": false
 }
