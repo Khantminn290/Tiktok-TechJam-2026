@@ -2041,6 +2041,25 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_lesson_grading_uses_noise_floor():
+    """The agent's own memory was recording seed noise as findings: HELPED
+    fired above 1e-9 and DEAD_END below 1e-4, while the noise floor is 0.0008.
+    Every later decision then read those back as evidence."""
+    print("\n[experience lessons graded vs the noise floor]")
+    src = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    seg = src.split("def _record_lesson")[-1] if "_record_lesson" in src else src
+    check("the old sub-noise thresholds are gone",
+          "+ 1e-9" not in seg and "- 1e-4" not in seg)
+    check("HELPED requires clearing the noise floor",
+          "delta >= BASELINE_SEED_STD" in seg)
+    check("DEAD_END requires clearing it in the other direction",
+          "delta <= -BASELINE_SEED_STD" in seg)
+    check("a sub-noise result is recorded as saying nothing either way",
+          "says nothing either way" in seg and "Treat as" in seg)
+    check("lessons quote the effect size in sigma, not just a raw delta",
+          "sigma" in seg and "BASELINE_SEED_STD" in seg)
+
+
 def test_error_analysis():
     """The loop saw only two scalars per experiment. These are the properties
     that make per-segment analysis trustworthy rather than suggestive."""
@@ -2456,6 +2475,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
+              test_lesson_grading_uses_noise_floor,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,

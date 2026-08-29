@@ -457,21 +457,39 @@ class AgentLoop:
             outcome, _title, body = failure_mod.as_knowledge(
                 fc, node.iteration_id, node.menu_choices)
         else:
+            # Graded against the NOISE FLOOR, not against zero. The thresholds
+            # here were 1e-9 for HELPED and 1e-4 for DEAD_END while seed noise
+            # on this benchmark is 0.0008 -- so a 0.00001 difference was written
+            # into the agent's own memory as "HELPED", and a 0.125-sigma dip as
+            # "DEAD_END". The memory was recording noise as findings, and every
+            # later decision read it back as evidence.
             primary = node.metrics["primary"]
-            if best_before is None or primary > best_before.metrics["primary"] + 1e-9:
+            if best_before is None:
                 outcome = "HELPED"
-                prev = f"{best_before.metrics['primary']:.4f}" if best_before else "n/a"
-                body = (f"menu_choices={choices_s} raised valid primary to "
-                       f"{primary:.4f} (previous best {prev}).")
-            elif primary < best_before.metrics["primary"] - 1e-4:
-                outcome = "DEAD_END"
-                body = (f"menu_choices={choices_s} scored {primary:.4f}, below the "
-                       f"then-current best {best_before.metrics['primary']:.4f} -- "
-                       f"not worth repeating as-is.")
+                body = (f"menu_choices={choices_s} scored {primary:.4f} as the "
+                        f"first scored node (no prior best to compare against).")
             else:
-                outcome = "NEUTRAL"
-                body = (f"menu_choices={choices_s} scored {primary:.4f}, no clear "
-                       f"change vs the running best.")
+                prev = best_before.metrics["primary"]
+                delta = primary - prev
+                sigma = delta / BASELINE_SEED_STD
+                if delta >= BASELINE_SEED_STD:
+                    outcome = "HELPED"
+                    body = (f"menu_choices={choices_s} raised valid primary to "
+                            f"{primary:.4f} from {prev:.4f} "
+                            f"({delta:+.5f} = {sigma:+.1f} sigma).")
+                elif delta <= -BASELINE_SEED_STD:
+                    outcome = "DEAD_END"
+                    body = (f"menu_choices={choices_s} scored {primary:.4f} vs the "
+                            f"then-best {prev:.4f} ({delta:+.5f} = {sigma:+.1f} "
+                            f"sigma) -- worse beyond seed noise, not worth "
+                            f"repeating as-is.")
+                else:
+                    outcome = "NEUTRAL"
+                    body = (f"menu_choices={choices_s} scored {primary:.4f} vs the "
+                            f"then-best {prev:.4f} ({delta:+.5f} = {sigma:+.1f} "
+                            f"sigma) -- INSIDE the {BASELINE_SEED_STD} noise "
+                            f"floor, so this says nothing either way. Treat as "
+                            f"untested, not as evidence.")
         title = (node.hypothesis or f"{node.action} node {node.iteration_id}")[:100]
         append_entry(node.iteration_id, outcome, title, body)
 
