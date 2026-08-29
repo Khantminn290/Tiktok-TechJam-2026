@@ -22,6 +22,8 @@ from .menu import Menu
 from .policy import MIN_DRAFTS, decide_action
 from .pricing import SpendTracker
 from .prompts import build_merge_prompt, build_prompt
+from . import inspect as inspect_tools
+from . import propose_axis
 
 EPSILON = 0.002
 N_CONVERGE = 3
@@ -36,7 +38,9 @@ class AgentLoop:
                  inject_error_at: int | None = None,
                  allow_locked_options: bool = False,
                  max_spend_usd: float = 2.0, draft_count: int | None = None,
-                 test_model: bool = False, parallel_k: int | None = None):
+                 test_model: bool = False, parallel_k: int | None = None,
+                 min_branching_iterations: int = 0,
+                 enable_data_tools: bool = False):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
@@ -70,6 +74,17 @@ class AgentLoop:
         # proposals per round via iterate_parallel(). Default stays sequential.
         self.parallel_k = parallel_k if (parallel_k and parallel_k >= 2) else None
         self._round_counter = 0
+        # Measured structural gap this exists to fix: across every run of this
+        # project only `draft` (and one `merge`) ever fired on real LLM output.
+        # The convergence rule is correct -- the starting conditions simply
+        # never gave branching a chance, because the score plateaus before the
+        # policy leaves the drafting phase. When set, convergence is BLOCKED
+        # until the policy has actually executed an improve AND a debug (or
+        # established that no errored node exists to debug). The iteration,
+        # wall-clock and spend caps are NOT affected -- this can only delay a
+        # convergence stop, never overrun a real budget.
+        self.min_branching_iterations = int(min_branching_iterations or 0)
+        self.enable_data_tools = bool(enable_data_tools)
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -105,8 +120,36 @@ class AgentLoop:
                     f"{getattr(self, 'last_llm_error', '')[:200]}")
         conv, msg = self.converged()
         if conv:
+            blocked = self._branching_unfinished()
+            if blocked:
+                return None          # budget caps above still apply
             return msg
         return None
+
+    def _branching_unfinished(self) -> str | None:
+        """Reason branching is still owed, or None. Only gates convergence."""
+        if not self.min_branching_iterations:
+            return None
+        acted = {n.action for n in self.tree.nodes}
+        n_branch = sum(1 for n in self.tree.nodes
+                       if n.action in ('improve', 'debug', 'crossover', 'merge'))
+        need = []
+        if 'improve' not in acted:
+            need.append('improve')
+        # debug is only meaningful if something actually failed; if nothing has
+        # errored, the requirement is satisfied as 'not applicable' rather than
+        # forcing the run to manufacture a failure.
+        if 'debug' not in acted and any(n.status == 'error' for n in self.tree.nodes):
+            need.append('debug')
+        if n_branch < self.min_branching_iterations:
+            need.append(f'{self.min_branching_iterations - n_branch} more branching iteration(s)')
+        if not need:
+            return None
+        msg = 'branching not yet exercised: still owed ' + ', '.join(need)
+        if not getattr(self, '_branch_msg_shown', None) == msg:
+            print(f'[branching gate] convergence deferred -- {msg}', flush=True)
+            self._branch_msg_shown = msg
+        return msg
 
     # ---------- measured GPU time (written by the training script, if any) ----------
     def _collect_resources(self, run_dir: str) -> None:
@@ -122,6 +165,36 @@ class AgentLoop:
         dev = r.get("device")
         if dev:
             self.device_seen.add(str(dev))
+
+    # ---------- agent-driven data inspection (two-phase) ----------
+    def _inspect_phase(self, events: list) -> str:
+        """Phase 1: let the agent choose measurements; run them; return a text
+        block for the hypothesis prompt. Failures are non-fatal -- inspection
+        is an aid, never a prerequisite for making progress."""
+        if not self.enable_data_tools:
+            return ""
+        from .experience import render_for_prompt as _exp
+        try:
+            iprompt = inspect_tools.build_inspect_prompt(self.menu, self.tree, _exp())
+            obj, usage, _ = self.llm.structured_call(iprompt)
+            reqs = inspect_tools.parse_requests(obj)
+        except LLMError as e:
+            events.append({"type": "inspect_skipped", "error": str(e)[:200]})
+            return ""
+        except Exception as e:
+            events.append({"type": "inspect_skipped", "error": f"{type(e).__name__}"})
+            return ""
+        self.spend.record(usage)
+        if not reqs:
+            events.append({"type": "inspect", "requests": 0})
+            return ""
+        results = inspect_tools.execute(reqs)
+        events.append({"type": "inspect", "requests": len(reqs),
+                       "tools": [r["tool"] for r in reqs],
+                       "errors": sum(1 for x in results if "error" in x)})
+        print(f"  [data tools] agent requested {len(reqs)}: "
+              f"{[r['tool'] for r in reqs]}", flush=True)
+        return inspect_tools.render_results(results)
 
     # ---------- one iteration ----------
     def iterate(self) -> Node:
@@ -142,8 +215,10 @@ class AgentLoop:
         code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
         run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
         events = []
+        extra = self._inspect_phase(events)
         prompt = build_prompt(action, target, reason, self.tree, self.menu,
-                             exec_timeout_s=self.exec_timeout_s)
+                             exec_timeout_s=self.exec_timeout_s,
+                             data_block=extra)
 
         try:
             obj, usage, llm_events = self.llm.structured_call(
@@ -167,6 +242,7 @@ class AgentLoop:
             return node
 
         self.consecutive_llm_failures = 0   # a successful call clears the abort counter
+        self._maybe_record_axis_proposal(obj, it, events)
         code = obj["code"]
         if self.inject_error_at is not None and it == self.inject_error_at:
             code += "\nraise RuntimeError('injected failure (harness robustness test)')\n"
@@ -221,6 +297,23 @@ class AgentLoop:
                   f"{error_headline(res.error_trace)}")
         self._print_spend(it)
         return node
+
+    def _maybe_record_axis_proposal(self, obj: dict, it: int, events: list) -> None:
+        """The agent may attach `proposed_axis` to any response. It is recorded
+        as PENDING only -- never added to the live menu, which requires an
+        explicit human `python3 -m agent.propose_axis --approve <id>`."""
+        p = obj.get("proposed_axis")
+        if not p:
+            return
+        try:
+            pid = propose_axis.append_proposal(p, iteration_id=it)
+            events.append({"type": "axis_proposed", "id": pid,
+                           "axis_name": p.get("axis_name")})
+            print(f"  [axis proposal #{pid}] '{p.get('axis_name')}' recorded as "
+                  f"PENDING (needs human approval to become selectable)", flush=True)
+        except Exception as e:
+            events.append({"type": "axis_proposal_rejected", "error": str(e)[:300]})
+            print(f"  [axis proposal REJECTED as malformed] {str(e)[:120]}", flush=True)
 
     def _record_experience(self, node: Node, best_before: Node | None) -> None:
         """One curated lesson per iteration, into agent/experience.md -- distinct
@@ -288,10 +381,13 @@ class AgentLoop:
         proposals = []
         saw_success = False
         sibling_choices: list = []
+        round_events: list = []
+        extra = self._inspect_phase(round_events)
         for _w in range(self.parallel_k):
             w_prompt = build_prompt(action, target, reason, self.tree, self.menu,
                                     exec_timeout_s=self.exec_timeout_s,
-                                    sibling_choices=sibling_choices)
+                                    sibling_choices=sibling_choices,
+                                    data_block=extra)
             try:
                 obj, usage, llm_events = self.llm.structured_call(
                     w_prompt, validate_choices=self.menu.validate_choices)

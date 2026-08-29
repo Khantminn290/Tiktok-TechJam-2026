@@ -107,6 +107,13 @@ def render() -> str:
                      f"cache reads {tb.get('cache_read_input_tokens', 0):,d}, "
                      f"output {tb.get('output_tokens', 0):,d}")
     lines.append(f"total training wall-clock: {train_s/60:.1f} min")
+    lines.append(
+        "NOTE on token accounting: the figure above is the AGENT's own LLM "
+        "usage, measured from real API responses. It does NOT include tokens "
+        "spent by any human-driven development session (e.g. a Claude Code "
+        "session authoring/debugging this harness), which is not instrumented "
+        "here and is typically far larger. Quote this number as 'agent "
+        "inference cost', not 'total project LLM cost'.")
 
     baseline_metrics_path = os.path.join(LOGS, "baseline", "metrics.json")
     if os.path.exists(baseline_metrics_path):

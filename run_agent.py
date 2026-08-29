@@ -97,6 +97,18 @@ def main():
                          "happens after a run has already finished and costs no LLM "
                          "spend, only training time (default: config/agent_config.json "
                          "wall_clock_limit_h).")
+    ap.add_argument("--data-tools", action="store_true",
+                    help="let the agent request read-only data measurements "
+                         "(get_feature_stats / get_label_rate_by_segment / "
+                         "get_within_user_auc / get_user_history_stats) before "
+                         "hypothesizing. Sandboxed, train/valid only, capped "
+                         "per iteration. See agent/inspect.py.")
+    ap.add_argument("--min-branching-iterations", type=int, default=0,
+                    help="convergence cannot fire until the policy has actually "
+                         "executed improve/debug/crossover at least this many "
+                         "times (and an improve, plus a debug if any node "
+                         "errored). Budget caps still apply. Targets the "
+                         "measured gap that only `draft` ever fired.")
     ap.add_argument("--parallel-k", type=int, default=None,
                     help="opt-in parallel exploration: each iteration dispatches K "
                          "worker proposals simultaneously in isolated git worktrees "
@@ -167,6 +179,8 @@ def main():
         draft_count=a.draft_count,
         test_model=a.smoke,
         parallel_k=a.parallel_k,
+        min_branching_iterations=a.min_branching_iterations,
+        enable_data_tools=a.data_tools,
     )
     summary = loop.run()
 

@@ -16,6 +16,17 @@ from .experience import render_for_prompt as render_experience
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _API_MD = os.path.join(os.path.dirname(_HERE), "runtime", "API.md")
 
+AXIS_PROPOSAL_SECTION = (
+    "## Proposing a new axis\n"
+    "If the data measurements or the dead-end history point at a category of "
+    "intervention this menu cannot express, you may attach a `proposed_axis` "
+    "object to your response (schema in the task context above). It is "
+    "recorded as PENDING for human approval and is NOT usable this iteration, "
+    "so still make a normal, valid menu_choices proposal as well. Note the "
+    "measured pattern on this dataset: interventions that CONCENTRATE or "
+    "reweight the training signal have lost every time, and broad additive "
+    "signal has won -- state which yours is, honestly.")
+
 STATIC_CONTEXT = """You are the modeling brain of an autonomous ML research agent
 competing on KuaiRand-Pure (short-video recommendation, within-user ranking).
 
@@ -47,6 +58,18 @@ YOUR OUTPUT — exactly ONE JSON object, nothing else (no prose before or after)
       'general ML intuition' answer will be rejected and cost you a retry.>"
   }
 }
+
+OPTIONAL: you may also propose a genuinely NEW menu axis by adding a
+"proposed_axis" key. Use it only when the data or history suggests a category
+of intervention the menu cannot currently express -- not to restate an
+existing axis. It is recorded as PENDING and a human must approve it before it
+becomes selectable, so proposing one does NOT let you use it this iteration.
+  "proposed_axis": {"axis_name": "lower_snake_case", "description": "...",
+     "options": {"baseline_noop": {"description": "..."},
+                 "variant": {"description": "..."}},
+     "mechanism": "why this should change GAUC/nDCG@5, concretely",
+     "citation": "a real paper, or a measurement from this run",
+     "signal_breadth": "broad" | "concentrated"}
 
 SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
 - CLI: accepts --menu-choices '<json>' and --output-dir <path> (and optional --seed).
@@ -153,8 +176,17 @@ def render_sibling_section(sibling_choices: list) -> str:
 
 def build_prompt(action: str, target: Node | None, reason: str,
                  tree: ExperimentTree, menu, exec_timeout_s: int = 1200,
-                 sibling_choices: list | None = None) -> str:
+                 sibling_choices: list | None = None,
+                 data_block: str = "") -> str:
     parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
+    if data_block:
+        parts.append(data_block)
+    try:
+        from .propose_axis import render_for_prompt as _axes
+        _prev = _axes()
+    except Exception:
+        _prev = ""
+    parts.append(AXIS_PROPOSAL_SECTION + ("\n" + _prev if _prev else ""))
     if sibling_choices:
         parts.append(render_sibling_section(sibling_choices))
 

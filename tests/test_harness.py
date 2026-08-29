@@ -1356,6 +1356,92 @@ def test_parallel_worker_diversity():
           '"type": "worker_diversity"' in src and "diversity_event" in src)
 
 
+def test_data_tools_and_proposals():
+    """Phase: agent data tools, gated axis proposals, branching gate.
+    Hostile cases are asserted, not assumed -- same standard as the Phase 1
+    sandbox work."""
+    print("\n[agent data tools / axis proposals / branching gate]")
+    sys.path.insert(0, os.path.join(_ROOT, "runtime"))
+    from agent import inspect as I
+    from agent import propose_axis as PA
+    import data_tools as D
+
+    # ---- hostile: label leakage + arbitrary access ----
+    attacks = [
+        ("test-split feature stats", {"tool": "get_feature_stats",
+                                      "args": {"feature": "long_view", "split": "test"}}),
+        ("test-split within-user auc", {"tool": "get_within_user_auc",
+                                        "args": {"feature": "is_click", "split": "test"}}),
+        ("non-allowlisted feature", {"tool": "get_feature_stats",
+                                     "args": {"feature": "user_raw"}}),
+        ("dunder escape", {"tool": "get_feature_stats", "args": {"feature": "__class__"}}),
+        ("path traversal", {"tool": "get_feature_stats", "args": {"feature": "../../.env"}}),
+        ("unknown tool", {"tool": "os.system", "args": {}}),
+        ("kwarg injection", {"tool": "get_feature_stats",
+                             "args": {"feature": "long_view", "cache_dir": "/etc"}}),
+    ]
+    for label, req in attacks:
+        check(f"blocked: {label}", "error" in I.execute([req])[0])
+    check("test split is not in the inspectable allowlist",
+          "test" not in D.ALLOWED_SPLITS)
+    check("call cap enforced", len(I.execute([attacks[0][1]] * 20)) <= I.MAX_TOOL_CALLS)
+    check("parse_requests truncates over-long request lists",
+          len(I.parse_requests({"requests": [{"tool": "x", "args": {}}] * 20}))
+          <= I.MAX_TOOL_CALLS)
+    check("malformed phase-1 response degrades to no requests",
+          I.parse_requests("not a dict") == [] and I.parse_requests({}) == [])
+
+    # ---- axis proposals: validation + the human gate ----
+    good = {"axis_name": "test_axis_xyz", "description": "d" * 40,
+            "options": {"none": {"description": "baseline no-op"},
+                        "variant": {"description": "the alternative"}},
+            "mechanism": "m" * 40, "citation": "c" * 40, "signal_breadth": "broad"}
+    PA.validate(good)
+    check("well-formed proposal validates", True)
+    for bad, why in [({**good, "axis_name": "Bad Name"}, "bad axis_name"),
+                     ({**good, "options": {"only": {"description": "x"}}}, "needs >=2 options"),
+                     ({**good, "signal_breadth": "maybe"}, "invalid signal_breadth"),
+                     ({**good, "mechanism": "short"}, "mechanism too vague"),
+                     ({k: v for k, v in good.items() if k != "citation"}, "missing citation")]:
+        try:
+            PA.validate(bad)
+            check(f"rejected: {why}", False)
+        except PA.ProposalError:
+            check(f"rejected: {why}", True)
+    menu_before = json.load(open(MENU_PATH))
+    with tempfile.TemporaryDirectory() as td:
+        pth = os.path.join(td, "proposed.jsonl")
+        pid = PA.append_proposal(good, iteration_id=1, path=pth)
+        recs = PA.load_all(pth)
+        check("proposal recorded as PENDING, not applied",
+              recs[0]["status"] == "pending")
+        check("THE GATE: live menu is unchanged by a proposal",
+              json.load(open(MENU_PATH)) == menu_before)
+        check("agent cannot self-approve (approval is a separate human command)",
+              "test_axis_xyz" not in json.load(open(MENU_PATH))["axes"])
+        PA.reject(pid, "not grounded", path=pth)
+        check("rejection is recorded", PA.load_all(pth)[0]["status"] == "rejected")
+
+    # ---- branching gate ----
+    with tempfile.TemporaryDirectory() as td:
+        t = ExperimentTree(td)
+        for i in range(4):
+            t.add(_node(i, "success", 0.60))
+        loop = type("L", (), {})()
+        loop.tree = t
+        loop.min_branching_iterations = 1
+        from agent.loop import AgentLoop
+        blocked = AgentLoop._branching_unfinished(loop)
+        check("convergence deferred while only `draft` has fired", bool(blocked))
+        check("the reason names what is still owed", "improve" in (blocked or ""))
+        t.add(_node(4, "success", 0.60, action="improve", parent=0))
+        check("gate clears once improve actually executes",
+              AgentLoop._branching_unfinished(loop) is None)
+        loop.min_branching_iterations = 0
+        check("gate is a no-op when the flag is unset (default behaviour)",
+              AgentLoop._branching_unfinished(loop) is None)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1367,7 +1453,8 @@ if __name__ == "__main__":
               test_merge_acceptance_via_tree_ordering,
               test_standing_override_survives_reload,
               test_compute_budget_prompt_section, test_lambdarank,
-              test_new_axes_and_snapshot, test_parallel_worker_diversity):
+              test_new_axes_and_snapshot, test_parallel_worker_diversity,
+              test_data_tools_and_proposals):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
