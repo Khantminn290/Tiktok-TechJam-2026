@@ -2031,6 +2031,62 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_policy_replay():
+    """Counterfactual replay must never invent an outcome for work that was
+    never run. That restraint is the whole value of the harness."""
+    print("\n[policy replay / counterfactual honesty]")
+    from agent import policy_eval as P
+
+    def cand(i, util, path="A", gated=None, gain=0.001, cost=1.0, choices=None):
+        return {"index": i, "utility": util, "path": path, "category": "exploration",
+                "menu_choices": choices if choices is not None else {"loss": f"l{i}"},
+                "rejected_by": gated or [],
+                "parts": {"gain": gain, "cost": cost}}
+
+    # node 0 ran candidate 0; candidate 1 was never implemented; candidate 2's
+    # configuration happens to match node 9, which WAS run.
+    cands = [cand(0, 0.010), cand(1, 0.009, gain=0.02),
+             cand(2, 0.007, choices={"loss": "ran_elsewhere"}),
+             cand(3, 0.02, gated=["overlaps a recorded dead end"], gain=0.05)]
+    decisions = [{"node": 0, "candidates": cands, "actual": cand(0, 0.010)}]
+    outcomes = {P._sig({"loss": "l0"}): {"primary": 0.605, "node": 0},
+                P._sig({"loss": "ran_elsewhere"}): {"primary": 0.601, "node": 9}}
+
+    dep = P.replay(decisions, outcomes, P.policy_deployed)
+    check("the deployed policy's own choice is OBSERVED, not counterfactual",
+          dep["observed"] == 1 and dep["cf_unknown"] == 0)
+    check("a gated candidate never wins under the deployed policy",
+          dep["picked_gated"] == 0)
+
+    # greedy_gain prefers index 1 (gain .02, ungated) -> never implemented
+    gg = P.replay(decisions, outcomes, P.policy_greedy_gain)
+    check("an alternative picking never-run work is COUNTERFACTUAL_UNKNOWN",
+          gg["cf_unknown"] == 1 and gg["observed"] == 0,
+          f"{gg['cf_unknown']}/{gg['observed']}")
+    check("an unknown counterfactual carries NO score",
+          gg["detail"][0]["primary"] is None)
+    check("outcome coverage reports the unknown honestly", gg["outcome_coverage"] == 0.0)
+
+    # no_gates takes index 3 (utility .02) despite the dead-end gate
+    ng = P.replay(decisions, outcomes, P.policy_no_gates)
+    check("disabling gates lets a known dead end be selected",
+          ng["picked_gated"] == 1 and ng["gated_pick_rate"] == 1.0)
+    check("gates are therefore doing measurable work",
+          ng["picked_gated"] > dep["picked_gated"])
+
+    # a differing pick whose config WAS run elsewhere is a real measurement
+    borrowed = P.replay(decisions, outcomes, lambda cs: cs[2])
+    check("a differing pick that ran elsewhere is COUNTERFACTUAL_KNOWN",
+          borrowed["cf_known"] == 1 and borrowed["detail"][0]["primary"] == 0.601)
+
+    check("no policy reports an aggregate score over unknown outcomes",
+          not any(k in dep for k in ("mean_primary", "expected_primary", "score")))
+
+    src = open(os.path.join(_ROOT, "agent", "policy_eval.py")).read()
+    check("the replay reads only decision-time fields (no hindsight leak)",
+          "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
+
+
 def test_submission_artifacts_survive_fresh():
     """Regression: a previous headline became unreproducible because --fresh
     archived the ensemble member arrays while the JSON quoting them stayed
@@ -2079,6 +2135,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
+              test_policy_replay,
               test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
