@@ -1515,6 +1515,162 @@ def test_stage_b_path_freedom():
               for f in ("implementation_path", "research_category", "code_summary")))
 
 
+def _rs_fixture(td, nodes, reseed=None, best=None, ensemble=None):
+    """Build a fake logs/ + config/ tree for ResearchState."""
+    import shutil
+    os.makedirs(os.path.join(td, "logs"), exist_ok=True)
+    os.makedirs(os.path.join(td, "config"), exist_ok=True)
+    shutil.copyfile(MENU_PATH, os.path.join(td, "config", "modification_menu.json"))
+    with open(os.path.join(td, "logs", "journal.jsonl"), "w") as fh:
+        for n in nodes:
+            fh.write(json.dumps(n) + "\n")
+    for name, obj in (("reseed_results.json", reseed), ("best_metrics.json", best),
+                      ("ensemble_results.json", ensemble)):
+        if obj is not None:
+            with open(os.path.join(td, "logs", name), "w") as fh:
+                json.dump(obj, fh)
+    from agent.research_state import ResearchState
+    return ResearchState(td)
+
+
+def _rs_node(i, choices, primary, status="success"):
+    return {"iteration_id": i, "action": "draft", "status": status,
+            "menu_choices": choices,
+            "metrics": ({"GAUC": primary, "nDCG@5": primary, "primary": primary}
+                        if status == "success" else None),
+            "hypothesis": "h", "events": []}
+
+
+def test_research_state():
+    """Stage C: the state must remember what MATTERS, derived deterministically,
+    and must never let a single-seed win masquerade as knowledge."""
+    print("\n[stage C: research state]")
+    from agent.research_state import (OBSERVED_ONCE, RESEED_VERIFIED, VALIDATED,
+                                      ResearchState)
+    A = {"loss": "bpr_pairwise", "model": "fm_numpy", "multitask": "none"}
+
+    # 1 + 2: single-seed never validated; reseed-backed can be
+    with tempfile.TemporaryDirectory() as td:
+        rs = _rs_fixture(td, [_rs_node(0, A, 0.6100)])
+        check("a single-seed win does NOT become a confirmed finding",
+              rs.confirmed == [])
+        check("the incumbent best is explicitly marked single-run, not knowledge",
+              rs.best_config_evidence["level"] == OBSERVED_ONCE
+              and "SINGLE run" in rs.best_config_evidence["caveat"])
+        check("that caveat is surfaced in the rendered notebook",
+              "SINGLE run" in rs.render())
+        check("observed maximum is kept DISTINCT from expected performance",
+              "best_observed_single_run" in rs.facts
+              and "expected_ensemble_mean" not in rs.facts)
+    with tempfile.TemporaryDirectory() as td:
+        rsd = {"nodes": [{"iteration_id": 0, "mean_primary": 0.6100,
+                          "std_primary": 0.0003, "n_samples": 5,
+                          "original_single_seed_primary": 0.6100}]}
+        rs = _rs_fixture(td, [_rs_node(0, A, 0.6100)], reseed=rsd)
+        check("a reseed-confirmed result DOES become a confirmed finding",
+              len(rs.confirmed) == 1 and rs.confirmed[0]["level"] == VALIDATED)
+        check("confirmed finding carries evidence basis + uncertainty",
+              rs.confirmed[0]["n_runs"] == 5 and "uncertainty_std" in rs.confirmed[0])
+
+    # 3 + 4: untested assumptions tracked against the CURRENT best only
+    with tempfile.TemporaryDirectory() as td:
+        best = {"loss": "bpr_pairwise", "model": "fm_numpy", "multitask": "aux_click"}
+        alt = dict(best, multitask="none")
+        rs = _rs_fixture(td, [_rs_node(0, best, 0.6100), _rs_node(1, alt, 0.6050)],
+                         best={"iteration_id": 0, "menu_choices": best})
+        check("a component with an isolated counterfactual is NOT 'untested'",
+              rs.component_evidence["multitask"]["status"] != "untested_assumption")
+        check("components with no isolated experiment ARE flagged untested",
+              rs.component_evidence["loss"]["status"] == "untested_assumption")
+        # now the best changes and no longer contains that component
+        newbest = {"loss": "listwise_softmax", "model": "fm_numpy", "multitask": "none"}
+        rs2 = _rs_fixture(td, [_rs_node(0, best, 0.6100), _rs_node(1, alt, 0.6050),
+                               _rs_node(2, newbest, 0.6200)],
+                          best={"iteration_id": 2, "menu_choices": newbest})
+        check("a component dropped from the best is no longer reported as a "
+              "current assumption",
+              rs2.component_evidence["multitask"]["value"] == "none"
+              and all("aux_click" not in str(v["value"])
+                      for v in rs2.component_evidence.values()))
+        check("state tracks the NEW best after it changes",
+              rs2.best_config["loss"] == "listwise_softmax")
+
+    # 5: negative findings carry scope, not overgeneralisation
+    with tempfile.TemporaryDirectory() as td:
+        rs = _rs_fixture(td, [_rs_node(0, A, 0.6100)])
+        joined = " ".join(rs.dead_ends).lower()
+        check("dead ends are scoped to tested conditions, not sweeping claims",
+              "measured here" in joined and "deep learning does not work" not in joined)
+        check("dead ends are referenced, not duplicated into the state body",
+              "do not re-derive them" in rs.render())
+
+    # 6 + 7: branch status transitions; integration requires independence
+    with tempfile.TemporaryDirectory() as td:
+        rs = _rs_fixture(td, [_rs_node(0, A, 0.6100), _rs_node(1, A, 0.6099)])
+        check("an active branch is reported as awaiting confirmation",
+              rs.branches[0]["status"] == "awaiting confirmation")
+        rsd = {"nodes": [{"iteration_id": 0, "mean_primary": 0.6100,
+                          "std_primary": 0.0003, "n_samples": 5,
+                          "original_single_seed_primary": 0.6100}]}
+        rs2 = _rs_fixture(td, [_rs_node(0, A, 0.6100)], reseed=rsd)
+        check("branch transitions to confirmed once reseed-backed",
+              rs2.branches[0]["status"] == "confirmed")
+    with tempfile.TemporaryDirectory() as td:
+        best = {"loss": "bpr_pairwise", "model": "fm_numpy", "multitask": "none"}
+        c1 = dict(best, multitask="aux_click"); c2 = dict(best, model="deepfm_mlp")
+        rs = _rs_fixture(td, [_rs_node(0, best, 0.6000), _rs_node(1, c1, 0.6100),
+                              _rs_node(2, c2, 0.6090)],
+                         best={"iteration_id": 0, "menu_choices": best})
+        check("integration candidates pair DIFFERENT axes",
+              rs.integration_candidates and
+              all("+" in c["candidate"] for c in rs.integration_candidates))
+        check("unconfirmed components are BLOCKED from integration",
+              all(c["status"].startswith("blocked")
+                  for c in rs.integration_candidates))
+        check("integration candidates state the interaction risk",
+              "interaction may be negative" in rs.integration_candidates[0]["risk"])
+
+    # 9 + 10: compactness and no raw-log duplication
+    rs = ResearchState(_ROOT)
+    r = rs.render()
+    check("rendered state is compact (< 8k chars)", len(r) < 8000, f"{len(r)} chars")
+    check("raw journal is NOT dumped into the state",
+          "error_trace" not in r and "token_breakdown" not in r)
+    check("state distinguishes observed max from expected ensemble",
+          "NOT an expected value" in r)
+    check("open questions are surfaced for decision-making",
+          "Open questions" in r)
+
+
+def test_research_state_no_side_effects():
+    """Regression: Stage C must not perturb execution, evaluation, sandboxing,
+    data boundaries, reseeding or the existing memories."""
+    print("\n[stage C: no side effects on existing infrastructure]")
+    from agent.research_state import ResearchState
+    import runtime.data_boundary as db
+    before_menu = open(MENU_PATH).read()
+    before_exp = (open(os.path.join(_ROOT, "agent", "experience.md")).read()
+                  if os.path.exists(os.path.join(_ROOT, "agent", "experience.md")) else "")
+    before_journal = open(os.path.join(_ROOT, "logs", "journal.jsonl")).read()
+    rs = ResearchState(_ROOT); rs.render(); rs.as_dict()
+    check("ResearchState does not mutate the menu", open(MENU_PATH).read() == before_menu)
+    check("ResearchState does not mutate experience memory",
+          (open(os.path.join(_ROOT, "agent", "experience.md")).read()
+           if before_exp else "") == before_exp)
+    check("ResearchState does not mutate the journal",
+          open(os.path.join(_ROOT, "logs", "journal.jsonl")).read() == before_journal)
+    check("data boundary redaction still intact",
+          set(db.TEST_LABEL_COLUMNS) == {"long_view", "is_click", "is_like",
+                                         "is_forward", "play_time_ms"})
+    from agent.executor import PROTECTED_PATHS, REAL_DATA_DIR
+    check("sandbox protections unchanged",
+          any("journal.jsonl" in p for p in PROTECTED_PATHS) and os.path.isdir(REAL_DATA_DIR))
+    check("ResearchState is read-only by construction (no write calls)",
+          "open(" in open(os.path.join(_ROOT, "agent", "research_state.py")).read()
+          and ', "w"' not in open(os.path.join(_ROOT, "agent",
+                                               "research_state.py")).read())
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1527,7 +1683,8 @@ if __name__ == "__main__":
               test_standing_override_survives_reload,
               test_compute_budget_prompt_section, test_lambdarank,
               test_new_axes_and_snapshot, test_parallel_worker_diversity,
-              test_data_tools_and_proposals, test_stage_b_path_freedom):
+              test_data_tools_and_proposals, test_stage_b_path_freedom,
+              test_research_state, test_research_state_no_side_effects):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

@@ -1,0 +1,10 @@
+{
+  "mean": 0.60539,
+  "std": 0.00018,
+  "k": 5,
+  "n_seeds_pool": 10,
+  "best_individual_seed": 0.60516,
+  "single_seed_mean": 0.60465,
+  "config": "agent-found (lower_lr_longer, multitask=none)",
+  "note": "mean over all 252 five-seed subsets of 10 trained seeds; adopted on expected value and variance reduction, NOT on beating the best individual draw (+0.00023, inside noise)"
+}
