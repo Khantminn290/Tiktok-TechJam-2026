@@ -1406,6 +1406,16 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
         "bootstrap_seed": menu_choices.get("bootstrap_seed"),
     }
     cfg["aux_tasks"] = AUX_MAP[cfg["multitask"]]
+    # Agent-set pipeline overrides. These are parts of the pipeline the MENU
+    # cannot express -- embedding size, the history decay constant, the
+    # stopping rule -- and the Opus research run showed they are where the
+    # untested assumptions live. Validated at the menu boundary
+    # (agent/menu.py PIPELINE_OVERRIDES), applied here.
+    for _k in ("k", "lr", "epochs", "patience", "l2", "bs", "hist_tau_days",
+               "aux_weight", "snapshot_ensemble", "snapshot_force"):
+        if _k in menu_choices:
+            cfg[_k] = menu_choices[_k]
+            log(f"  pipeline override: {_k}={menu_choices[_k]}")
 
     t_train = time.time()
     if cfg["model"] == "fm_numpy":

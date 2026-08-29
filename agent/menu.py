@@ -48,6 +48,18 @@ class Menu:
     # feature_source carries an agent-written build_features() -- it is code,
     # not an option, so it is validated by rule rather than by membership.
     PASSTHROUGH_KEYS = ("feature_source",)
+    # Pipeline overrides the agent may set directly. Each is a part of the
+    # pipeline no menu axis can reach, and each was investigated in the Opus
+    # research run. Bounded so a typo cannot silently produce a 500-epoch run.
+    PIPELINE_OVERRIDES = {
+        "k": (int, 4, 128), "lr": (float, 1e-5, 1e-2),
+        "epochs": (int, 1, 120), "patience": (int, 1, 120),
+        "l2": (float, 0.0, 1e-2), "bs": (int, 256, 65536),
+        "hist_tau_days": (float, 0.25, 60.0),
+        "aux_weight": (float, 0.0, 2.0),
+        "snapshot_ensemble": (int, 0, 20),
+        "snapshot_force": (bool, 0, 1),
+    }
 
     def validate_choices(self, choices: dict) -> dict:
         """Returns normalized choices or raises MenuError with a readable message."""
@@ -74,6 +86,21 @@ class Menu:
         for axis in choices:
             if axis in self.PASSTHROUGH_KEYS:
                 continue
+            if axis in self.PIPELINE_OVERRIDES:
+                typ, lo, hi = self.PIPELINE_OVERRIDES[axis]
+                v = choices[axis]
+                try:
+                    v = bool(v) if typ is bool else typ(v)
+                except (TypeError, ValueError):
+                    problems.append(f"pipeline override '{axis}' must be "
+                                    f"{typ.__name__}, got {choices[axis]!r}")
+                    continue
+                if typ is not bool and not (lo <= v <= hi):
+                    problems.append(f"pipeline override '{axis}'={v} is outside "
+                                    f"the allowed range [{lo}, {hi}]")
+                    continue
+                normalized[axis] = v
+                continue
             if axis not in self.axes:
                 problems.append(f"unknown axis '{axis}' (valid axes: {list(self.axes)})")
         # An agent-written feature builder travels inside menu_choices, so the
@@ -93,8 +120,8 @@ class Menu:
         # cross-axis constraints: option-level "requires": {other_axis: [allowed…]}
         if not problems:
             for axis, opt in normalized.items():
-                if axis in self.PASSTHROUGH_KEYS:
-                    continue          # code, not an option -- no cross-axis rules
+                if axis in self.PASSTHROUGH_KEYS or axis in self.PIPELINE_OVERRIDES:
+                    continue          # not an option -- no cross-axis rules
                 req = self.options(axis)[opt].get("requires", {})
                 for other_axis, allowed in req.items():
                     if normalized.get(other_axis) not in allowed:

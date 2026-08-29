@@ -248,6 +248,21 @@ def render_for_prompt() -> str:
         "- free_recombination(): aggregation questions answered from stored "
         "predictions with no training. Refuted a +0.46 sigma median result "
         "(10/24 wins, -0.06 sigma).",
+        "",
+        "HOW TO USE THIS: put any of these keys directly in menu_choices "
+        "alongside the normal axes -- they are validated and range-checked, and "
+        "they change the actual training pipeline:",
+        "  " + ", ".join(f"{k}" for k in sorted(SAFE_OVERRIDES)),
+        "e.g. menu_choices with \"k\": 8 trains a half-width model; "
+        "\"patience\": 60 shows you the whole epoch curve instead of stopping "
+        "early; \"snapshot_ensemble\": 5 with \"snapshot_force\": true averages "
+        "the top-5 checkpoints instead of taking the single best epoch.",
+        "",
+        "MEASURED ALREADY -- do not re-run these: k=8 (-0.03 sigma) and k=32 "
+        "(-0.18 sigma); hist_tau_days 1/7/14 (-0.03/+0.01/-0.04 sigma); l2 1e-5 "
+        "and 1e-4 (null). Checkpoint averaging is +0.87 sigma for a SINGLE model "
+        "but redundant once 16 seeds are ensembled (-0.01 sigma), because seed "
+        "averaging removes the same variance.",
         "RULE OF THUMB, learned three separate times here: a score computed on "
         "the same data that selected it is not evidence. Prefer a held-out or "
         "resampled comparison before believing any improvement.",
