@@ -2031,6 +2031,65 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_error_analysis():
+    """The loop saw only two scalars per experiment. These are the properties
+    that make per-segment analysis trustworthy rather than suggestive."""
+    print("\n[error analysis]")
+    import numpy as np
+    from agent import error_analysis as EA
+
+    # 3 users x 4 rows. Perfect ranking within each user.
+    u = np.array([0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2])
+    y = np.array([1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0], float)
+    perfect = np.array([9, 8, 1, 0, 9, 1, 0, 0, 5, 5, 5, 5], float)
+    auc, ndcg = EA.per_user_metrics(u, y, perfect)
+    check("a perfect within-user ranking scores AUC 1.0",
+          all(abs(a - 1.0) < 1e-9 for a in auc.values()))
+    check("a zero-positive user is excluded from AUC and nDCG",
+          2 not in auc and 2 not in ndcg)
+    check("nDCG covers users with positives that AUC may exclude",
+          set(ndcg) == {0, 1})
+
+    inverted = -perfect
+    ainv, _ = EA.per_user_metrics(u, y, inverted)
+    check("an inverted ranking scores AUC 0.0", all(a < 1e-9 for a in ainv.values()))
+
+    # THE structural fact: a feature constant within a user cannot move GAUC.
+    const_per_user = np.array([5, 5, 5, 5, 9, 9, 9, 9, 1, 1, 1, 1], float)
+    check("a user-CONSTANT feature is at chance for GAUC by construction",
+          abs(EA.within_user_auc(u, y, const_per_user) - 0.5) < 1e-9,
+          f"{EA.within_user_auc(u, y, const_per_user)}")
+
+    # feature_probe must judge on RESIDUAL value, not standalone strength
+    p = EA.feature_probe(u, y, perfect, const_per_user, "user-constant")
+    check("a redundant feature is reported REDUNDANT despite any standalone score",
+          not p["adds_signal"] and "REDUNDANT" in p["verdict"])
+    check("the probe reports blend deltas, not just a standalone number",
+          set(p["blend_delta"]) == {0.99, 0.95, 0.90})
+
+    # Blend weights can only change an ORDERING, so this needs enough rows per
+    # user to be readable at all -- an 8-row fixture reports 0.0 at every weight
+    # simply because no pair ever swaps.
+    rng = np.random.default_rng(0)
+    n_users, per = 300, 8
+    bu = np.repeat(np.arange(n_users), per)
+    truth = rng.normal(size=n_users * per)
+    by = (truth + rng.normal(scale=0.5, size=n_users * per) > 0.5).astype(float)
+    weak = truth + rng.normal(scale=3.0, size=n_users * per)     # model: noisy
+    strong = truth + rng.normal(scale=0.3, size=n_users * per)   # feature: sharp
+    p2 = EA.feature_probe(bu, by, weak, strong, "the true signal")
+    check("a feature that DOES add signal is detected",
+          p2["adds_signal"] and p2["standalone_wAUC"] > p2["model_wAUC"],
+          f"{p2['blend_delta']} standalone={p2['standalone_wAUC']} "
+          f"model={p2['model_wAUC']}")
+
+    check("segments below the readability floor are dropped",
+          EA.segment(u, y, perfect, lambda k: k.astype(float),
+                     [(0, 10)], "tiny") == [])
+    check("the floor is documented as a number, not a vibe",
+          isinstance(EA.MIN_SEGMENT_USERS, int) and EA.MIN_SEGMENT_USERS >= 100)
+
+
 def test_research_frontier():
     """Directions are axis-options with evidence-based status. The old branch
     model was (loss, model), which could not represent 'is temporal useful?'
@@ -2316,7 +2375,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
-              test_research_frontier,
+              test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_submission_artifacts_survive_fresh):
