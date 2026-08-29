@@ -299,7 +299,11 @@ def main():
         comparison = {"single": _score(single_scores)}
         if ens_scores is not None:
             comparison["ensemble"] = _score(ens_scores)
-            comparison["ensemble_members"] = [m["iteration_id"] for m in members]
+            # `members` only exists on the legacy top-k path; the submitted
+            # ensemble identifies its members by SEED, not by journal node.
+            comparison["ensemble_members"] = (
+                [m["iteration_id"] for m in members] if a.legacy_topk_ensemble
+                else (ens_meta or {}).get("seeds_used"))
         print(f"\n  {'variant':<26} {'GAUC':>8} {'nDCG@5':>8} {'primary':>9} "
               f"{'Δ vs base':>10} {'Δ in σ':>8}")
         for name in ("single", "ensemble"):
@@ -308,7 +312,9 @@ def main():
             m = comparison[name]
             d = m["primary"] - base["primary"]
             label = (name if name == "single"
-                     else f"ensemble (top-{len(members)})")
+                     else (f"ensemble (top-{len(members)})"
+                           if a.legacy_topk_ensemble
+                           else f"ensemble (k={(ens_meta or {}).get('k')})"))
             print(f"  {label:<26} {m['GAUC']:>8.4f} {m['nDCG@5']:>8.4f} "
                   f"{m['primary']:>9.4f} {d:>+10.4f} "
                   f"{d / BASELINE_SEED_STD:>+7.1f}σ")
