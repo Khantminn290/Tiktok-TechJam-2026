@@ -71,7 +71,7 @@ the agent with no code changes.
 ### 1. Harness self-test (free, no model calls, seconds)
 
 ```bash
-python3 tests/test_harness.py        # 55 checks
+python3 tests/test_harness.py        # 400 checks
 ```
 
 Covers the safety gate, cross-axis validation, every search-policy branch
@@ -166,7 +166,7 @@ flattered by the thing being measured.
 
 `config/modification_menu.json` defines everything the agent is allowed to change.
 **Anything not in it is invisible to the search**, which makes it the
-highest-leverage file in the repo. Seven axes, priority-ordered from the organisers'
+highest-leverage file in the repo. Ten axes, priority-ordered from the organisers'
 own measured findings:
 
 | Priority | Axis | What it changes |
@@ -178,10 +178,14 @@ own measured findings:
 | 5 | `temporal` | hour-of-day, day-of-week |
 | 6 | `training` | schedules, two-stage fine-tuning |
 | 7 | `data_extras` | extra data sources — **two options here are locked** |
+| 8 | `neg_sampling` | uniform / popularity-biased / hard negatives |
+| 9 | `sample_weighting` | per-row vs per-user normalisation |
+| 10 | `regularization` | L2 strength, dropout |
 
-`config/modification_menu.md` records the reasoning and the two approaches the
-organisers already measured as dead ends (more static features; larger embedding
-dimension), so iterations aren't spent rediscovering them.
+`config/modification_menu.md` records the reasoning, and
+`notes.tested_dead_ends` holds **15 approaches measured and ruled out here or by
+the organisers** — each with its mechanism, injected verbatim into every planning
+prompt so iterations aren't spent rediscovering them.
 
 **The safety gate:** the two leakage-sensitive `data_extras` options are stripped
 from the prompt *and* rejected by the validator. They can only be enabled by a human
