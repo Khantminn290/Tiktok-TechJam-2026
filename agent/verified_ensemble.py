@@ -77,6 +77,35 @@ class EnsembleError(RuntimeError):
     """A member failed execution or could not satisfy the audit contract."""
 
 
+def _pin_canonical_environment() -> None:
+    """Make the publishable runner independent of caller path overrides."""
+    canonical = {
+        "KUAIRAND_KIT": ROOT / "kuairand-starter-kit",
+        "KUAIRAND_DATA": ROOT / "kuairand-starter-kit" / "KuaiRand-Pure" / "data",
+        "KUAIRAND_CACHE": ROOT / "runtime" / "cache",
+    }
+    for key, path in canonical.items():
+        os.environ[key] = str(path.resolve())
+
+    # Fail rather than silently reuse a module imported under an earlier,
+    # noncanonical environment in programmatic/in-notebook use.
+    expected_train = {
+        "KIT_DIR": canonical["KUAIRAND_KIT"],
+        "DATA_DIR": canonical["KUAIRAND_DATA"],
+        "CACHE_DIR": canonical["KUAIRAND_CACHE"],
+    }
+    for module_name in ("train_lib", "runtime.train_lib"):
+        module = sys.modules.get(module_name)
+        if module is None:
+            continue
+        for attribute, expected in expected_train.items():
+            actual = Path(getattr(module, attribute, "")).resolve()
+            if actual != expected.resolve():
+                raise EnsembleError(
+                    f"{module_name}.{attribute} was imported from noncanonical "
+                    f"path {actual}; restart before publishing")
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -327,6 +356,11 @@ def run_ensemble(seed_count: int = 5, fresh: bool = False) -> dict:
         raise ValueError(
             "the publishable ensemble is frozen to --seeds 5 (seeds 0..4); "
             "use a separate research script for exploratory seed counts")
+
+    _pin_canonical_environment()
+    # Hash the official raw sources before loading/reusing a derived cache.
+    from .make_submission import _verify_official_data
+    _verify_official_data()
 
     # This catches menu drift before spending any compute.
     Menu(str(ROOT / "config" / "modification_menu.json")).validate_choices(

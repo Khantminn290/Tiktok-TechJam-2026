@@ -18,6 +18,7 @@ parent). Data dir defaults to $KUAIRAND_KIT/KuaiRand-Pure/data.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -261,12 +262,25 @@ _CACHE_COLS = ["user", "video", "author", "tab", "duration_ms", "hourmin", "date
                "play_time_ms"]
 _TARGET_COLUMNS = frozenset(
     {"long_view", "is_click", "is_like", "is_forward", "play_time_ms"})
-_CACHE_SCHEMA_VERSION = 2
+_CACHE_SCHEMA_VERSION = 3
 _CACHE_SCHEMA_FILE = "cache_schema.json"
+_CACHE_SOURCE_FILES = ("video_features_basic_pure.csv", *LOG_FILES)
+
+
+def _cache_source_sha256(data_dir: str = DATA_DIR) -> dict[str, str]:
+    result = {}
+    for name in _CACHE_SOURCE_FILES:
+        digest = hashlib.sha256()
+        with open(os.path.join(data_dir, name), "rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        result[name] = digest.hexdigest()
+    return result
 
 
 def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
     os.makedirs(cache_dir, exist_ok=True)
+    source_sha256 = _cache_source_sha256(data_dir)
     schema_path = os.path.join(cache_dir, _CACHE_SCHEMA_FILE)
     # Version 0 marks an interrupted/incomplete rebuild. The ready version is
     # written only after every split and metadata file has been replaced.
@@ -367,25 +381,42 @@ def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
         json.dump(meta, fh)
     ready_path = schema_path + ".ready"
     with open(ready_path, "w") as fh:
-        json.dump({"version": _CACHE_SCHEMA_VERSION}, fh)
+        json.dump({"version": _CACHE_SCHEMA_VERSION,
+                   "source_sha256": source_sha256}, fh)
     os.replace(ready_path, schema_path)
 
 
-def load_cache(cache_dir: str = CACHE_DIR) -> tuple[dict, dict]:
+def load_cache(cache_dir: str = CACHE_DIR,
+               data_dir: str = DATA_DIR) -> tuple[dict, dict]:
     """Returns ({split: {col: array}}, meta). Builds the cache on first use."""
     meta_path = os.path.join(cache_dir, "meta.json")
     schema_path = os.path.join(cache_dir, _CACHE_SCHEMA_FILE)
     try:
         with open(schema_path) as fh:
-            cache_version = int(json.load(fh).get("version", -1))
+            cache_schema = json.load(fh)
+            cache_version = int(cache_schema.get("version", -1))
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        cache_schema = {}
         cache_version = -1
+    recorded_source = cache_schema.get("source_sha256")
+    if os.environ.get("KUAIRAND_GUARD_RUN_DIR"):
+        # The trusted parent verified the raw-source manifest before spawning
+        # this child; raw files are intentionally unavailable inside the guard.
+        source_matches = (
+            isinstance(recorded_source, dict)
+            and set(recorded_source) == set(_CACHE_SOURCE_FILES))
+    else:
+        try:
+            source_matches = recorded_source == _cache_source_sha256(data_dir)
+        except OSError as error:
+            raise RuntimeError(
+                f"cannot verify cache provenance from {data_dir}: {error}") from error
     required = [meta_path, os.path.join(cache_dir, "vocabs.json")]
     required.extend(os.path.join(cache_dir, f"{name}.npz") for name in SPLITS)
-    if cache_version != _CACHE_SCHEMA_VERSION \
+    if cache_version != _CACHE_SCHEMA_VERSION or not source_matches \
             or not all(os.path.isfile(path) for path in required):
         print("train_lib: building data cache (first run, ~1 min)...", flush=True)
-        build_cache(cache_dir=cache_dir)
+        build_cache(data_dir=data_dir, cache_dir=cache_dir)
     with open(meta_path) as fh:
         meta = json.load(fh)
     splits = {}
@@ -405,11 +436,13 @@ def load_cache(cache_dir: str = CACHE_DIR) -> tuple[dict, dict]:
     return splits, meta
 
 
-def load_validation_targets(cache_dir: str = CACHE_DIR) -> tuple[np.ndarray, np.ndarray]:
+def load_validation_targets(cache_dir: str = CACHE_DIR,
+                            data_dir: str = DATA_DIR) \
+        -> tuple[np.ndarray, np.ndarray]:
     """Trusted parent-only validation grouping/labels for authoritative scoring."""
     # load_cache also completes schema upgrades and old test-target migration
     # before the executor captures protected hashes.
-    splits, _ = load_cache(cache_dir=cache_dir)
+    splits, _ = load_cache(cache_dir=cache_dir, data_dir=data_dir)
     return (splits["valid"]["user_raw"].copy(),
             splits["valid"]["long_view"].copy())
 

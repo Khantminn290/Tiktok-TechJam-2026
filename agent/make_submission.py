@@ -109,6 +109,8 @@ def verified_ensemble_scores(root: str, split: str) -> tuple[np.ndarray, dict, P
     """Load the atomically published verified bundle and recheck its hashes."""
     if split not in ("valid", "test"):
         raise ValueError(f"unknown split: {split}")
+    from agent.verified_ensemble import _pin_canonical_environment
+    _pin_canonical_environment()
     verified_root = Path(root) / "results" / "verified_ensemble"
     latest_path = verified_root / "latest.json"
     with latest_path.open("r", encoding="utf-8") as handle:

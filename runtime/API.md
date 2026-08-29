@@ -54,6 +54,9 @@ Reusable pieces, all importable from `train_lib`:
   so per-row score arrays are submission-aligned by index.
   Train and validation also contain `long_view, is_click, is_like, is_forward,
   play_time_ms`. Test contains no outcome columns; it can only be scored blind.
+  Cache schema v3 records SHA-256 digests for its three raw source files; the
+  trusted parent rebuilds if that source manifest changes, while guarded child
+  runs reuse the already-verified cache without raw-file access.
   `meta` has exactly one key: `meta = {"field_dims": {"user": …, "video": …,
   "author": …, "tab": …}}`. Nothing else exists on it.
 - `enc, dim, offsets, dims = train_lib.encode_features(splits, meta, temporal)`

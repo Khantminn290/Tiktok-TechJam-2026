@@ -89,6 +89,9 @@ The disposable arrays and diagnostic scripts live under ignored `scratch/`.
   and protected-file before/after hashes. Reuse additionally binds all three
   split caches, cache metadata/vocabularies, and the Python/NumPy/platform
   fingerprint.
+- The publishable runner ignores caller path overrides, pins the canonical kit,
+  data, and cache locations, verifies the official raw-file hashes, and requires
+  cache schema v3 to record the same source digests.
 - The final ensemble is published as one immutable bundle; an atomic
   `results/verified_ensemble/latest.json` pointer prevents mixed-version output
   files after an interrupted write.

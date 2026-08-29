@@ -301,15 +301,20 @@ def test_executor():
 def test_hidden_test_boundary():
     print("\n[hidden-test data boundary]")
     from runtime.train_lib import (_CACHE_SCHEMA_FILE, _CACHE_SCHEMA_VERSION,
-                                   _TARGET_COLUMNS, build_cache, load_cache,
+                                   _CACHE_SOURCE_FILES, _TARGET_COLUMNS,
+                                   _cache_source_sha256, build_cache, load_cache,
                                    load_validation_targets)
     with tempfile.TemporaryDirectory() as td:
+        for name in _CACHE_SOURCE_FILES:
+            with open(os.path.join(td, name), "wb") as fh:
+                fh.write(b"source fixture")
         with open(os.path.join(td, "meta.json"), "w") as fh:
             json.dump({"field_dims": {}}, fh)
         with open(os.path.join(td, "vocabs.json"), "w") as fh:
             json.dump({}, fh)
         with open(os.path.join(td, _CACHE_SCHEMA_FILE), "w") as fh:
-            json.dump({"version": _CACHE_SCHEMA_VERSION}, fh)
+            json.dump({"version": _CACHE_SCHEMA_VERSION,
+                       "source_sha256": _cache_source_sha256(td)}, fh)
         base = {
             "user": np.array([0, 1], dtype=np.int32),
             "video": np.array([0, 1], dtype=np.int32),
@@ -320,7 +325,7 @@ def test_hidden_test_boundary():
                     for key in _TARGET_COLUMNS}
         for split in ("train", "valid", "test"):
             np.savez(os.path.join(td, f"{split}.npz"), **base, **outcomes)
-        splits, _ = load_cache(td)
+        splits, _ = load_cache(td, data_dir=td)
         check("train and validation retain their outcomes",
               all(key in splits["train"] and key in splits["valid"]
                   for key in _TARGET_COLUMNS))
@@ -330,7 +335,7 @@ def test_hidden_test_boundary():
             persisted_keys = set(z.files)
         check("old cache is physically migrated to a feature-only test file",
               not (persisted_keys & set(_TARGET_COLUMNS)))
-        users, labels = load_validation_targets(td)
+        users, labels = load_validation_targets(td, data_dir=td)
         check("trusted parent can load copied validation targets",
               list(users) == ["u0", "u1"]
               and np.array_equal(labels, outcomes["long_view"]))
@@ -355,7 +360,7 @@ def test_hidden_test_boundary():
         cache_dir = os.path.join(td, "cache")
         try:
             build_cache(data_dir=td, cache_dir=cache_dir)
-            fresh, _ = load_cache(cache_dir)
+            fresh, _ = load_cache(cache_dir, data_dir=td)
             built = True
         except (TypeError, ValueError) as error:
             built = False
