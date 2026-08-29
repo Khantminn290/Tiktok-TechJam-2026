@@ -71,7 +71,7 @@ the agent with no code changes.
 ### 1. Harness self-test (free, no model calls, seconds)
 
 ```bash
-python3 tests/test_harness.py        # 400 checks
+python3 tests/test_harness.py        # 457 checks
 ```
 
 Covers the safety gate, cross-axis validation, every search-policy branch
@@ -232,7 +232,7 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        400 checks, no model calls, no training
+tests/test_harness.py        457 checks, no model calls, no training
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
 
@@ -255,7 +255,7 @@ Harness sanity checks (these should match before trusting anything else):
   (mean irreducible error 0.100), and eight model families — FM, DeepFM, DCN, DIN,
   GRU4Rec, ItemCF, GBDT, item-popularity — all land in 0.55–0.605. Most of the
   apparent gap to the 0.8484 ceiling is label noise rather than signal, so
-  interventions are judged in σ, and 15 of them are recorded as dead ends with
+  interventions are judged in σ, and 23 of them are recorded as dead ends with
   mechanisms.
 - Crossover only combines menu choices, not code. Merging two scripts' actual
   implementations would be strictly more expressive.

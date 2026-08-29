@@ -163,14 +163,34 @@ Not ruled out — never tested. These are the real remaining options:
    never loads: `is_follow`, `is_comment`, `is_profile_enter` (2.5% of rows),
    `profile_stay_time`, `comment_stay_time`. Adding *breadth* of signal fits the
    pattern that keeps working here.
-3. ~~**Multi-config ensembling.**~~ **CLOSED — measured, negative.** Blending
-   `gru4rec_seq` with `fm_numpy` gives genuinely decorrelated members
-   (rank-correlation 0.9338 vs 0.983 for same-config seeds), but gru4rec is
-   2.1σ weaker and the quality gap cancels the whole decorrelation gain: the
-   best blend over a weight sweep was `+0.00012` (`+0.15σ`), inside the noise
-   floor — and that weight was itself picked on validation, so the honest value
-   is lower still. This is the cleanest data point yet for the standing rule
-   that ensemble members must be both independent **and** comparably good.
+3. ~~**Multi-config ensembling.**~~ **CLOSED — and the rule it rested on was
+   wrong.** The standing lesson was "members must be independent AND comparably
+   good", learned from three failures that each satisfied only one half
+   (snapshot: quality, no independence; bagging: independence, no quality;
+   gru4rec: independent but 2.1σ weaker). A **pre-registered** test finally ran
+   the open case — `multitask=aux_click_like_forward`, quality gap **0.28σ**
+   and cross-config correlation **0.9601 vs 0.9839** for same-config seeds, so
+   both halves genuinely satisfied. All 16+16 seeds, equal weights, no sweep,
+   no subset search, one validation comparison:
+
+   ```
+   base k=16   0.60541    combined k=32  0.60552   +0.00011 (+0.14σ)  REJECTED
+   ```
+
+   The corrected lesson: on this benchmark the residual error is **shared**, so
+   decorrelating the *configuration* does not decorrelate the *errors* enough
+   to matter — which is what 20.6% self-disagreement predicts. That closes the
+   mechanism, not just one instance of it. (`agent/hetero_test.py`,
+   `logs/hetero_test.json`.)
+
+4. **The menu search space is essentially exhausted.** Of 45 axis-options, 23
+   dead ends are recorded and the rest have been run. The only untried options
+   are two locked data sources, `training=k32` (embedding capacity — an
+   organiser-measured dead end), `multitask=censored_watch_time` (the
+   watch-time-as-auxiliary mechanism is already a measured null, t=−0.23), and
+   `temporal=hour_bucket` (a strict subset of the `hour_plus_dow` already in
+   the best config). Further gains must come from **outside** the menu.
+   `python3 -m agent.frontier` prints the current status of every option.
 
 `video_features_statistic_pure.csv` is **locked** in the menu and should stay
 locked: its counters span the evaluation window and risk target leakage.
@@ -182,7 +202,7 @@ locked: its counters span the evaluation window and risk target leakage.
 Full detail is in `README.md` — this is just the map.
 
 ```bash
-python3 tests/test_harness.py                      # 400 checks, no LLM, no training
+python3 tests/test_harness.py                      # 457 checks, no LLM, no training
 cd kuairand-starter-kit && python3 baseline.py --model fm && cd ..   # reproduce 0.6016
 python3 -m agent.baseline_repro                    # durable baseline artifact
 
@@ -200,6 +220,10 @@ python3 -m agent.final_ensemble --seeds 16         # rebuild the submitted numbe
 python3 -m agent.policy_eval                       # counterfactual decision replay
 python3 -m agent.ab_report                         # A vs B research-process comparison
 python3 -m agent.capability_report                 # genuine vs fake Path B, from disk
+python3 -m agent.frontier                          # status of every axis-option
+python3 -m agent.error_analysis                    # where the model fails, per segment
+python3 -m agent.axis_sweep --axis X --values a,b  # controlled paired-seed comparison
+python3 -m agent.hetero_test                       # the ensemble test above
 python3 -m agent.make_submission --split valid --score --ensemble
 ```
 
