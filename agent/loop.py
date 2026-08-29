@@ -332,7 +332,15 @@ class AgentLoop:
                 err = (err + "\n\n" + _frontier(self.root).render(limit=18)).strip()
             except Exception:
                 pass
-            prompt = FL.build_feature_prompt(state, err, FL.render_for_prompt())
+            key_block = ""
+            try:
+                from . import error_analysis as _EA
+                _sp, _mt = _EA.load_valid()
+                key_block = FL.key_diagnostics(_sp, _mt)
+            except Exception:
+                pass
+            prompt = FL.build_feature_prompt(state, err, FL.render_for_prompt(),
+                                             key_block)
             obj, usage = self.llm.json_call(prompt)
             self.spend.record(usage)
         except LLMError as e:

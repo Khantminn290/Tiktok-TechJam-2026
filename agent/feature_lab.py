@@ -55,6 +55,10 @@ REGISTRY = os.path.join(ROOT, "logs", "feature_registry.jsonl")
 PROPOSED, PROBED, PROMISING = "PROPOSED", "PROBED", "PROMISING"
 VALIDATED, REJECTED, RETIRED = "VALIDATED", "REJECTED", "RETIRED"
 
+# Ratio of train-side to eval-side within-user variation above which a feature
+# is refused. Both earlier failures measured ~6x.
+SKEW_LIMIT = 2.5
+
 REQUIRED_FIELDS = ("name", "hypothesis", "mechanism", "incremental_value",
                    "leakage_check", "source_columns", "source")
 
@@ -128,6 +132,71 @@ def validate_proposal(p: dict) -> list:
     return out
 
 
+def _within_user_variation(u, v) -> float:
+    """Fraction of multi-row users whose value is not constant."""
+    u = np.asarray(u); v = np.asarray(v, dtype=np.float64)
+    o = np.argsort(u, kind="stable")
+    ub, vb = u[o], v[o]
+    if not np.isfinite(vb).any():
+        return 0.0
+    starts = np.searchsorted(ub, np.unique(ub))
+    ends = np.r_[starts[1:], len(ub)]
+    scale = float(np.nanmax(vb) - np.nanmin(vb))
+    tol = max(1e-12, 1e-9 * scale)
+    out = []
+    for s_, e_ in zip(starts, ends):
+        if e_ - s_ <= 1:
+            continue
+        w = vb[s_:e_]
+        if not np.isfinite(w).any():
+            out.append(False)
+            continue
+        out.append(float(np.nanmax(w) - np.nanmin(w)) > tol)
+    return float(np.mean(out)) if out else 0.0
+
+
+def key_diagnostics(splits: dict, meta: dict) -> str:
+    """Which (user x KEY) features are even estimable, as prompt evidence.
+
+    Derived from the post-mortem on this project's first two feature failures.
+    Both were user-by-author, both measured within-user variation of ~0.165 on
+    valid, and the cause was not the idea: `author` varies across 99.1% of a
+    user's impressions, but only 3.4% of validation rows have that (user,
+    author) pair in train. The other 96.6% fall back to a user-constant value,
+    and a user-constant feature is worth exactly 0.5 AUC. A user-by-KEY feature
+    is only estimable when the KEY has low enough cardinality to be observed
+    per user.
+    """
+    va, tr = splits["valid"], splits["train"]
+    u, nU = va["user"], meta["field_dims"]["user"]
+    edges = np.quantile(tr["duration_ms"], np.linspace(0, 1, 11)[1:-1])
+    keys = {
+        "video": (va["video"], tr["video"]),
+        "author": (va["author"], tr["author"]),
+        "tab": (va["tab"], tr["tab"]),
+        "duration_bucket": (np.searchsorted(edges, va["duration_ms"]),
+                            np.searchsorted(edges, tr["duration_ms"])),
+        "hour": ((va["hourmin"] // 100), (tr["hourmin"] // 100)),
+    }
+    L = ["## (user x KEY) FEASIBILITY -- measured on this dataset",
+         "A user-by-KEY feature only works when the pair is actually OBSERVED in "
+         "train; otherwise it backs off to a user-constant value, which is worth "
+         "exactly 0.5 AUC.",
+         f"{'key':<18}{'varies within user':>20}{'(user,key) in train':>22}"]
+    for k, (vc, tc) in keys.items():
+        vc = np.asarray(vc); tc = np.asarray(tc)
+        var = _within_user_variation(u, vc.astype(float))
+        K = int(max(tc.max(), vc.max())) + 1
+        seen = np.zeros(nU * K, dtype=bool)
+        seen[tr["user"].astype(np.int64) * K + tc.astype(np.int64)] = True
+        cov = float(seen[u.astype(np.int64) * K + vc.astype(np.int64)].mean())
+        L.append(f"{k:<18}{var:>19.1%}{cov:>21.1%}")
+    L.append("Read this before proposing a user-by-KEY feature: author and video "
+             "are effectively UNESTIMABLE per user here (3.4% and 1.6%). Two "
+             "candidates have already failed exactly this way.")
+    return "\n".join(L)
+
+
 def probe(proposal: dict, splits: dict, meta: dict,
           incumbent_scores=None) -> dict:
     """Run one candidate through the screen. Never raises: a broken builder is
@@ -182,22 +251,36 @@ def probe(proposal: dict, splits: dict, meta: dict,
             d["verdict"] = "all values missing"
             per_feature[fname] = d
             continue
-        # 3. within-user variation -- the structural gate
-        order = np.argsort(u, kind="stable")
-        ub, vb = u[order], np.where(finite, v, np.nan)[order]
-        starts = np.searchsorted(ub, np.unique(ub))
-        ends = np.r_[starts[1:], len(ub)]
+        # 3. within-user variation -- the structural gate.
         # ptp (max-min), not std: np.nanstd over IDENTICAL float64 values
         # returns ~1e-17 rather than 0, which made a strictly user-constant
-        # feature look like it varied inside 17.8% of users -- silently
-        # defeating the most valuable check in this module. ptp is exact for
-        # identical values, and the tolerance is relative to the feature's own
-        # spread so it means the same thing whatever the units.
-        scale = float(np.nanmax(vb) - np.nanmin(vb)) if np.isfinite(vb).any() else 0.0
-        tol = max(1e-12, 1e-9 * scale)
-        varies = [float(np.nanmax(vb[s:e]) - np.nanmin(vb[s:e])) > tol
-                  for s, e in zip(starts, ends) if e - s > 1]
-        d["varies_within_user_frac"] = round(float(np.mean(varies)) if varies else 0.0, 4)
+        # feature look like it varied inside 17.8% of users.
+        d["varies_within_user_frac"] = round(
+            _within_user_variation(u, np.where(finite, v, np.nan)), 4)
+
+        # 3b. TRAIN/SERVE SKEW -- the defect that actually sank both earlier
+        # candidates. A user-by-author feature is fully populated on TRAIN
+        # (every pair is observed there by construction) but only 3.4% of
+        # validation rows have that pair, so it collapses to a user-constant
+        # value exactly where it is scored. Measured: within-user variation
+        # 1.000 on train against 0.167 on valid, a 6x skew -- the model learns
+        # to lean on information that is not there at evaluation, which is why
+        # that feature scored -16.5 sigma rather than merely nothing.
+        tr_var = _within_user_variation(splits["train"]["user"], cols["train"])
+        d["varies_within_user_TRAIN"] = round(tr_var, 4)
+        d["train_serve_skew"] = round(
+            tr_var / max(d["varies_within_user_frac"], 1e-9), 2)
+        if (d["varies_within_user_frac"] > 0.01
+                and d["train_serve_skew"] >= SKEW_LIMIT):
+            d["verdict"] = (
+                f"TRAIN/SERVE SKEW {d['train_serve_skew']}x -- varies within "
+                f"{tr_var:.1%} of users at TRAIN but only "
+                f"{d['varies_within_user_frac']:.1%} at EVALUATION. The model "
+                f"would learn to rely on information that is absent when it is "
+                f"scored. This is what sank the earlier user-by-author "
+                f"features at -16.5 sigma.")
+            per_feature[fname] = d
+            continue
         if d["varies_within_user_frac"] < 0.01:
             d["verdict"] = ("CONSTANT within users -- cannot move GAUC or nDCG@5 "
                             "by construction")
@@ -232,6 +315,11 @@ def probe(proposal: dict, splits: dict, meta: dict,
         res["status"] = REJECTED
         res["reason"] = ("constant within users, so it cannot move a within-user "
                          "ranking metric")
+    elif any(d.get("verdict", "").startswith("TRAIN/SERVE SKEW")
+             for d in per_feature.values()):
+        res["status"] = REJECTED
+        res["reason"] = next(d["verdict"] for d in per_feature.values()
+                             if d.get("verdict", "").startswith("TRAIN/SERVE"))
     else:
         res["status"] = PROBED
         res["reason"] = (f"no usable residual signal "
@@ -339,14 +427,24 @@ WHAT MAKES A FEATURE WORTH PROPOSING -- read this before writing code:
     yet HURTS at every blend weight tested. A strong standalone number is not
     evidence.
 
+  * It must vary within a user's list AT EVALUATION, not just during training.
+    Measured on the two candidates that already failed: both varied inside
+    ~100% of users on TRAIN and only ~16% on VALID, a 6x skew, because
+    (user, author) is observed for just 3.4% of validation rows and everything
+    else fell back to a user-constant value. The model then learned to lean on
+    information that is absent when it is scored, and the full experiment came
+    out at -16.5 sigma -- far worse than merely useless. Any candidate with a
+    train/serve skew above 2.5x is now refused before it costs a run.
+
 So the useful direction is a feature that varies within a user's list AND is not
-recoverable from the item identity alone -- typically a USER-BY-something
-interaction, or something about the impression's context.
+recoverable from the item identity alone AND is actually OBSERVABLE per user at
+evaluation time. The feasibility table below says which keys satisfy the last
+condition -- read it before choosing one.
 '''
 
 
 def build_feature_prompt(state_block: str, error_block: str,
-                         registry_block: str) -> str:
+                         registry_block: str, key_block: str = "") -> str:
     """Phase: propose ONE feature from the evidence, or decline."""
     from .prompts import STATIC_CONTEXT
     return "\n\n".join([
@@ -358,6 +456,7 @@ def build_feature_prompt(state_block: str, error_block: str,
         state_block or "",
         error_block or "",
         registry_block or "",
+        key_block or "",
         FEATURE_CONTRACT,
         "Reply with JSON only:\n"
         "{\n"
