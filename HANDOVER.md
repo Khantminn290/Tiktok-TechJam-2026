@@ -4,8 +4,7 @@ You're picking up an autonomous ML research agent competing on **KuaiRand-Pure**
 (TikTok TechJam 2026, Track 2). This document is for a human starting cold. Ten
 minutes here and you'll know where things stand and what to do next.
 
-Branch: **`search-phase-complete`** (branched from
-`hardening/deliverables-and-integrity`). Not merged to `main` yet.
+Branch: **`main`**.
 
 ---
 
@@ -21,26 +20,53 @@ multi-seed verification; several earlier "wins" did not.
 ```
 loss:             bpr_pairwise
 user_history:     recency_weighted_pool
-multitask:        aux_click_like_forward
+multitask:        none
 model:            fm_numpy
 temporal:         hour_plus_dow
-training:         default
+training:         lower_lr_longer
 neg_sampling:     uniform_1
 sample_weighting: per_row
 regularization:   l2_default
-+ 5-seed rank-averaged ensemble
+data_extras:      none
++ 16-seed rank-averaged ensemble
 ```
 
-**Score: `0.60515 ± 0.00022` validation primary** — mean and std over all 252
-possible 5-seed subsets of 10 trained seeds, not a single lucky run.
+Note `multitask: none`. An earlier version of this recipe carried
+`aux_click_like_forward` for a whole session on no isolated evidence; the
+agent's own ablation removed it. That episode is why component evidence is now
+graded against the noise floor (`agent/research_state.py: grade_evidence`).
 
-**Delta over the official baseline (0.6016): `+0.00355` = `+4.44σ`**, where
+**Score: `0.60541` validation primary** — a 16-seed rank-averaged ensemble of
+ONE configuration. Individual members average `0.60463 ± 0.00032`.
+
+**Delta over the official baseline (0.6016): `+0.00381` = `+4.76σ`**, where
 σ = 0.0008 is the baseline's own 5-seed standard deviation. Comfortably outside
 seed noise.
 
-A single (non-ensembled) model of this config scores **0.60367 ± 0.00027**, so
-roughly a third of the total gain comes from ensembling and the rest from the
-pointwise → BPR loss switch.
+**It is reproducible, and that mattered.** A previously reported `0.60545`
+turned out not to be: its member arrays had been archived away by `--fresh`
+while the JSON quoting them stayed behind, and the pool mixed several distinct
+configurations. Rebuild the current number end-to-end with:
+
+```bash
+python3 -m agent.final_ensemble --seeds 16
+```
+
+Members live in `logs/final_ensemble/seed_NN/`, and `--fresh` now refuses to
+archive them (`run_agent.py: SUBMISSION_ARTIFACTS`, with a regression test).
+
+**No selection bias.** `k=16` is *all* seeds trained, fixed before any score was
+seen. The k-curve is emitted as diagnostics only and shows exactly why that
+matters: it wanders 0.60491–0.60563 with no trend, so picking its argmax
+(k=14, 0.60563) would be selection, not a result. Best-subset selection was
+measured here at `+0.00081` of optimistic bias and rejected.
+
+**Two numbers to keep in perspective:** the metric ceiling is 0.8484, not 1.0
+(27% of users have zero positive labels, so nDCG can never reach 1 for them),
+and — more importantly — **20.6% of repeated (user, video) pairs disagree with
+themselves**, mean irreducible error 0.100. Most of the apparent headroom to
+0.8484 is label noise, not signal. Eight model families (FM, DeepFM, DCN, DIN,
+GRU4Rec, ItemCF, GBDT, item-popularity) all land in 0.55–0.605.
 
 **Two numbers to keep in perspective:** the metric ceiling is 0.8484, not 1.0
 (27% of users have zero positive labels, so nDCG can never reach 1 for them),
@@ -92,10 +118,14 @@ Not ruled out — never tested. These are the real remaining options:
    never loads: `is_follow`, `is_comment`, `is_profile_enter` (2.5% of rows),
    `profile_stay_time`, `comment_stay_time`. Adding *breadth* of signal fits the
    pattern that keeps working here.
-3. **Multi-config ensembling.** Every ensemble tested so far averaged members of
-   the *same* config differing only by seed. Averaging genuinely *different*
-   good configs (e.g. BPR+history vs BPR+multitask) could satisfy both ensemble
-   properties at once — independent *and* comparably good.
+3. ~~**Multi-config ensembling.**~~ **CLOSED — measured, negative.** Blending
+   `gru4rec_seq` with `fm_numpy` gives genuinely decorrelated members
+   (rank-correlation 0.9338 vs 0.983 for same-config seeds), but gru4rec is
+   2.1σ weaker and the quality gap cancels the whole decorrelation gain: the
+   best blend over a weight sweep was `+0.00012` (`+0.15σ`), inside the noise
+   floor — and that weight was itself picked on validation, so the honest value
+   is lower still. This is the cleanest data point yet for the standing rule
+   that ensemble members must be both independent **and** comparably good.
 
 `video_features_statistic_pure.csv` is **locked** in the menu and should stay
 locked: its counters span the evaluation window and risk target leakage.
@@ -107,7 +137,7 @@ locked: its counters span the evaluation window and risk target leakage.
 Full detail is in `README.md` — this is just the map.
 
 ```bash
-python3 tests/test_harness.py                      # 213 checks, no LLM, no training
+python3 tests/test_harness.py                      # 379 checks, no LLM, no training
 cd kuairand-starter-kit && python3 baseline.py --model fm && cd ..   # reproduce 0.6016
 python3 -m agent.baseline_repro                    # durable baseline artifact
 
@@ -116,7 +146,13 @@ python3 run_agent.py --fresh --max-spend-usd 3     # a real run
 python3 run_agent.py --reseed-top 3 --reseed-seeds 5   # multi-seed verification, no LLM
 python3 run_agent.py --fresh --parallel-k 3        # parallel worker mode
 
+python3 run_agent.py --fresh --n-candidates 4 --research-state --data-tools
+                                                   # multi-candidate policy
+
 python3 -m agent.report                            # readable run summary
+python3 -m agent.final_summary                     # the competition deliverable
+python3 -m agent.final_ensemble --seeds 16         # rebuild the submitted number
+python3 -m agent.policy_eval                       # counterfactual decision replay
 python3 -m agent.make_submission --split valid --score --ensemble
 ```
 
@@ -125,23 +161,30 @@ python3 -m agent.make_submission --split valid --score --ensemble
 - **Resuming into an already-converged journal silently does nothing.** It exits
   0 and reports the *pre-existing* iteration count. Use `--fresh` (it archives,
   never deletes). There's now a loud warning, but know the shape of it.
-- **Don't run two training jobs at once.** `--parallel-k` chmods the real data
-  directory for the duration of a round; a concurrent reseed or A/B will die
-  with `PermissionError`. There's no mutex yet — adding a lockfile guard is a
-  good small task for whoever picks this up.
+- **Don't run two training jobs at once, and don't run the test suite during a
+  run either.** The executor chmods the real data directory for the duration of
+  a subprocess; a concurrent reseed, A/B, *or* `tests/test_harness.py` (its data-
+  boundary tests take the same lock) will die with `PermissionError` mid-run.
+  This has bitten repeatedly, most recently killing an A/B arm at iteration 2.
+  There's still no mutex — a lockfile guard is the single best small task for
+  whoever picks this up. Permissions are restorable with
+  `chmod -R u+rw kuairand-starter-kit/KuaiRand-Pure`.
 
-**Heads-up on `logs/`:** it currently holds the *neural exploration* run (8
-nodes, all DeepFM/DCN) — itself a documented dead end, not the winning config.
-The winning config's evidence is in `logs/experiments/` and section 1 above.
-Reproducing the headline number needs a fresh run with that config.
+**Heads-up on `logs/`:** `logs/journal.jsonl` holds whatever the most recent
+*search* run produced, and `--fresh` archives it to `logs/archive_<ts>/` rather
+than deleting it. The **submitted** result is deliberately separate and survives
+`--fresh`: `logs/ensemble_results.json` plus `logs/final_ensemble/`. Don't
+conflate the two — reading a search journal's best node as "the result" is how
+the previous headline drifted from its evidence.
 
 ---
 
 ## 5. What's left before submission
 
-1. **Final clean end-to-end run** with the exact config from section 1, so
-   `logs/` reflects the winning configuration rather than the neural detour.
-2. **Re-run `make_submission.py --ensemble`** against that fresh journal — the
+1. ~~Final clean end-to-end run.~~ **DONE** — `logs/final_ensemble/` holds 16
+   seeds of the section-1 config, and `logs/ensemble_results.json` records
+   0.60541 with every member array on disk.
+2. **Re-run `make_submission.py --ensemble`** against that ensemble — the
    current submission CSV is stale.
 3. **The hidden-test evaluation — one shot, never yet used.**
    `python3 -m agent.make_submission --final-test-eval --ensemble`. A lockfile
@@ -150,8 +193,9 @@ Reproducing the headline number needs a fresh run with that config.
    final.** Everything to date is validation-only.
 4. **Devpost + README writeup.** The negative results are arguably the stronger
    story: a systematic, measured account of *why* this benchmark's headroom is
-   narrow, backed by 11 documented dead-ends with mechanisms rather than
-   assertions.
+   narrow, backed by 15 documented dead-ends with mechanisms rather than
+   assertions, and by the 20.6% self-disagreement measurement that explains the
+   ceiling.
 
 ---
 
@@ -167,6 +211,13 @@ Reproducing the headline number needs a fresh run with that config.
 - **Never train on test.** Generated code runs in a sandbox where the real data
   directory is unreadable and the test split has its label columns physically
   stripped. Don't work around it.
+- **A number without its evidence on disk is not a result.** The previous
+  headline had to be withdrawn because its member arrays were archived away.
+  Anything quoted as the submitted score must be rebuildable by one command.
+- **Grade evidence against the noise floor, not by sign.** A `>` comparison
+  calls a 0.0001 difference "support" when σ = 0.0008. Use
+  `research_state.grade_evidence`; INCONCLUSIVE and REJECTED are different
+  answers, and only one of them invites another experiment.
 - **Report negative results honestly.** Most of this project's value is in
   well-measured failures. A clean null with a mechanism beats a marginal,
   unverified bump.

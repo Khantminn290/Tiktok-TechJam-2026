@@ -2031,6 +2031,40 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_evidence_strength():
+    """Evidence must be graded against the noise floor, not by sign. The old
+    test was a bare `>` comparison, which reads a 0.0001 difference as support
+    when the baseline's own seed spread is 0.0008."""
+    print("\n[evidence strength grading]")
+    from agent import research_state as RS
+
+    check("a difference inside the noise floor is INCONCLUSIVE, not support",
+          RS.grade_evidence(0.0001)["strength"] == RS.INCONCLUSIVE)
+    check("a sub-sigma NEGATIVE difference is also INCONCLUSIVE, not rejection",
+          RS.grade_evidence(-0.0002)["strength"] == RS.INCONCLUSIVE)
+    check("1-2 sigma from a single run is WEAK",
+          RS.grade_evidence(0.0009)["strength"] == RS.WEAK)
+    check("replication promotes WEAK to MODERATE",
+          RS.grade_evidence(0.0009, n_runs=3)["strength"] == RS.MODERATE)
+    check("2-3 sigma is MODERATE", RS.grade_evidence(0.0018)["strength"] == RS.MODERATE)
+    check(">3 sigma is STRONG", RS.grade_evidence(0.0028)["strength"] == RS.STRONG)
+    check("reseed verification is STRONG even at modest effect size",
+          RS.grade_evidence(0.001, reseed_verified=True)["strength"] == RS.STRONG)
+    check("evidence pointing the other way is REJECTED, not merely weak",
+          RS.grade_evidence(-0.0015)["strength"] == RS.REJECTED)
+    check("INCONCLUSIVE is not actionable; REJECTED is",
+          not RS.grade_evidence(0.0001)["actionable"]
+          and RS.grade_evidence(-0.0015)["actionable"])
+
+    # the grading must actually reach component evidence, not just exist
+    src = open(os.path.join(_ROOT, "agent", "research_state.py")).read()
+    check("component evidence uses the grade, not a bare comparison",
+          "grade_evidence(" in src.split("_component_evidence")[1])
+    check("an ablation inside the noise floor is NOT reported as supported",
+          'if g["strength"] == INCONCLUSIVE:' in src
+          and 'status = "untested_assumption"' in src)
+
+
 def test_policy_replay():
     """Counterfactual replay must never invent an outcome for work that was
     never run. That restraint is the whole value of the harness."""
@@ -2135,7 +2169,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
-              test_policy_replay,
+              test_evidence_strength, test_policy_replay,
               test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

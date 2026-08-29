@@ -33,6 +33,44 @@ REPLICATED = "replicated"
 RESEED_VERIFIED = "reseed_verified"
 VALIDATED = "validated"
 
+# Strength of the evidence FOR a claim, graded against the noise floor rather
+# than by sign alone. The previous test was a bare `>` comparison, which reads
+# a 0.0001 difference as support when the baseline's own seed-to-seed spread is
+# 0.0008 -- the same mistake as trusting a single lucky run, one level down.
+INCONCLUSIVE = "INCONCLUSIVE"    # inside the noise floor: says nothing either way
+WEAK = "WEAK"                    # 1-2 sigma, single observation
+MODERATE = "MODERATE"            # 2-3 sigma, or 1-2 sigma replicated
+STRONG = "STRONG"                # >3 sigma, or reseed-verified
+REJECTED = "REJECTED"            # evidence points the OTHER way, beyond noise
+
+
+def grade_evidence(delta: float, n_runs: int = 1,
+                   reseed_verified: bool = False) -> dict:
+    """Grade one comparison by effect size in units of the noise floor.
+
+    `delta` is (claim - alternative) on primary, so a negative delta beyond the
+    noise floor is evidence AGAINST the claim, which is reported as REJECTED
+    rather than quietly as "questionable". Distinguishing "no evidence" from
+    "evidence against" matters: the first invites an experiment, the second
+    forbids one.
+    """
+    sigma = abs(delta) / BASELINE_SEED_STD
+    if sigma < 1.0:
+        strength = INCONCLUSIVE
+    elif delta < 0:
+        strength = REJECTED
+    elif reseed_verified:
+        strength = STRONG
+    elif sigma >= 3.0:
+        strength = STRONG
+    elif sigma >= 2.0:
+        strength = MODERATE
+    else:
+        strength = MODERATE if n_runs > 1 else WEAK
+    return {"strength": strength, "delta": round(delta, 5),
+            "sigma": round(delta / BASELINE_SEED_STD, 2),
+            "actionable": strength in (MODERATE, STRONG, REJECTED)}
+
 
 def _sig(choices: dict) -> str:
     return json.dumps(choices or {}, sort_keys=True)
@@ -168,13 +206,32 @@ class ResearchState:
             else:
                 best_alt = max(counterfactuals, key=lambda t: t[1])
                 helps = (best_score is not None and best_score > best_alt[1])
+                g = (grade_evidence(best_score - best_alt[1],
+                                    n_runs=len(counterfactuals))
+                     if best_score is not None else
+                     {"strength": INCONCLUSIVE, "delta": None, "sigma": None,
+                      "actionable": False})
+                # An ablation inside the noise floor is not support for the
+                # component -- it is an untested assumption that happens to have
+                # been probed once. Saying "supported" there is how a component
+                # gets carried for a whole session on no evidence.
+                if g["strength"] == INCONCLUSIVE:
+                    status = "untested_assumption"
+                elif g["strength"] == REJECTED:
+                    status = "questionable"
+                else:
+                    status = "supported" if helps else "questionable"
                 out[axis] = {
                     "value": val,
-                    "status": "supported" if helps else "questionable",
+                    "status": status,
+                    "strength": g["strength"],
+                    "sigma": g["sigma"],
                     "evidence": (f"ablation vs {axis}={best_alt[0]} "
                                  f"(node {best_alt[2]}): "
                                  f"{best_alt[1]:.5f}"
-                                 + (f" vs best {best_score:.5f}" if best_score else "")),
+                                 + (f" vs best {best_score:.5f}" if best_score else "")
+                                 + (f" = {g['sigma']:+.1f} sigma ({g['strength']})"
+                                    if g["sigma"] is not None else "")),
                     "level": OBSERVED_ONCE,
                 }
         return out
