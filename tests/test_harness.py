@@ -2113,6 +2113,68 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_mechanism_audit():
+    """A declaration is not evidence and a clean exit is not evidence. This
+    catches the two ways this project has actually been fooled."""
+    print("\n[mechanism audit]")
+    from agent import mechanism_audit as MA
+
+    null_src = ("import numpy as np, train_lib\n"
+                "def userwise_affine_normalize(scores, user_ids):\n"
+                "    u, inv = np.unique(user_ids, return_inverse=True)\n"
+                "    sums = np.bincount(inv, weights=scores)\n"
+                "    cnts = np.bincount(inv)\n"
+                "    means = sums / np.maximum(cnts, 1.0)\n"
+                "    return scores - means[inv]\n"
+                "m = train_lib.run(choices, out)\n")
+    a = MA.audit(null_src, "post-hoc per-user normalization of the scores", "B")
+    check("a per-user monotone transform is caught as STRUCTURALLY NULL",
+          a["postprocessing_null"] and a["blocks_scoring"], a["verdict"][:60])
+    check("the audit explains WHY it cannot work",
+          "within a user" in a["verdict"].lower() or "WITHIN a user" in a["verdict"])
+    check("a null-only experiment must not be scored", not a["should_score"])
+
+    # a claimed mechanism absent from both code and config
+    a2 = MA.audit("import train_lib\ntrain_lib.run(c, o)\n",
+                  "add auxiliary multitask heads on is_hate", "A",
+                  menu_choices={"multitask": "none"})
+    check("a claimed mechanism absent from code AND config is flagged",
+          "NOT EVIDENCED" in a2["verdict"] and not a2["should_score"])
+
+    # ...but selecting it in the config IS evidence, for Path A
+    a3 = MA.audit("import train_lib\ntrain_lib.run(c, o)\n",
+                  "add auxiliary multitask heads on is_hate", "A",
+                  menu_choices={"multitask": "aux_social4"})
+    check("a Path A mechanism selected by CONFIG counts as evidenced",
+          a3["should_score"] and not a3["mechanisms_missing"], a3["verdict"][:50])
+
+    # a script that trains something new is not merely post-processing
+    learn = null_src + "\nfor epoch in range(10):\n    lr = 0.001\n"
+    a4 = MA.audit(learn, "post-hoc normalization plus a new auxiliary head", "B")
+    check("a script that also LEARNS is not blocked as pure post-processing",
+          not a4["blocks_scoring"])
+
+    check("a syntax error is reported, not raised",
+          MA.audit("def (:", "x")["verdict"] == "does not parse")
+
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the audit runs BEFORE the training run, not after",
+          "mechanism_audit" in lsrc.split("run_solution(code")[0])
+    check("a blocked mechanism is journalled as an error, not silently skipped",
+          "BLOCKED BEFORE EXECUTION by the mechanism " in lsrc)
+    from agent import failure as FA
+    fc = FA.classify("BLOCKED BEFORE EXECUTION by the mechanism audit: "
+                     "STRUCTURALLY NULL")
+    check("a mechanism block has its own failure class",
+          fc["class"] == FA.MECHANISM_BLOCKED)
+    check("it is NOT retry-worthwhile -- a fix cannot rescue a null mechanism",
+          not fc["retry_worthwhile"] and "reorders items" in fc["guidance"])
+    check("a missing mechanism warns without blocking",
+          'ma["mechanisms_missing"]' in lsrc and "warning:" in lsrc)
+    check("an audit failure cannot kill an iteration",
+          '"type": "mechanism_audit_skipped"' in lsrc)
+
+
 def test_residual_screen_reporting():
     """The screen's headline must defer to its CONFIRMATION. The single screen
     picks its blend weight by scanning three values on validation, so its
@@ -2612,7 +2674,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
-              test_residual_screen_reporting,
+              test_mechanism_audit, test_residual_screen_reporting,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,

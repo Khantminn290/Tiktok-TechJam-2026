@@ -36,12 +36,14 @@ INVALID_PREDICTIONS = "invalid_predictions"
 EVALUATION = "evaluation_failure"
 LLM_RESPONSE = "invalid_llm_response"
 LEAKAGE_BLOCKED = "leakage_blocked"
+MECHANISM_BLOCKED = "mechanism_blocked"
 HYPOTHESIS_DISPROVED = "hypothesis_disproved"   # NOT a failure of the code
 UNKNOWN = "unknown"
 
 # Ordered: first match wins, so specific patterns precede generic ones.
 _PATTERNS = [
     (LEAKAGE_BLOCKED, r"BLOCKED BEFORE EXECUTION by the leakage review"),
+    (MECHANISM_BLOCKED, r"BLOCKED BEFORE EXECUTION by the mechanism audit"),
     (LLM_RESPONSE, r"LLM stage failed|response schema violations|no JSON object"),
     (TIMEOUT, r"\bTIMEOUT\b|exceeded \d+s and was killed"),
     (CUDA, r"CUDA|cuDNN|device-side assert|MPS backend|torch\.cuda"),
@@ -92,6 +94,11 @@ _GUIDANCE = {
                            "support the hypothesis. This is a RESULT, not a bug. "
                            "Do not retry it -- record it and move to a different "
                            "mechanism."),
+    MECHANISM_BLOCKED: ("The experiment was refused before running because the "
+                        "implementation cannot affect the metric. Both metrics "
+                        "rank WITHIN a user, so a monotone per-user transform of "
+                        "the scores changes neither. Propose a mechanism that "
+                        "reorders items INSIDE a single user's impression list."),
     LEAKAGE_BLOCKED: ("The experiment was refused before running because the "
                       "code appeared to use evaluation-split labels. Rebuild the "
                       "feature so it uses only information available BEFORE the "
@@ -102,6 +109,9 @@ _GUIDANCE = {
 
 # Classes where re-attempting the SAME idea (after a fix) is scientifically
 # justified. A disproved hypothesis and a hard ceiling are excluded.
+# MECHANISM_BLOCKED is deliberately NOT retry-worthwhile: the idea is
+# arithmetically incapable of moving the metric, so a repaired version of the
+# same idea is equally incapable. It needs a different mechanism, not a fix.
 _RETRY_WORTHWHILE = {SYNTAX, IMPORT, API_MISUSE, DATA_CONTRACT, NUMERICAL,
                      DIVERGENCE, INVALID_PREDICTIONS, EVALUATION, LLM_RESPONSE,
                      LEAKAGE_BLOCKED, UNKNOWN}

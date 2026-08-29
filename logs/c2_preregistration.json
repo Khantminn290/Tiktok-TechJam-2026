@@ -1,0 +1,28 @@
+{
+  "hypothesis": "The four feedback signals the pipeline never cached (is_follow, is_comment, is_hate, is_profile_enter) contain information transferable to long_view that the existing click/like/forward auxiliary heads do not capture.",
+  "mechanism": "Four additional binary auxiliary heads over the SHARED FM embeddings. Gradient from each head flows into the shared user/video/author/tab/duration embeddings; long_view remains the sole primary (BPR) objective. The auxiliary labels are never inputs.",
+  "design": {
+    "control": "incumbent config, multitask=none",
+    "treatment": "identical config, multitask=aux_social4 -- the ONLY difference",
+    "held_fixed": ["data split", "feature set", "model capacity", "training schedule", "loss", "neg sampling", "regularization", "seed protocol", "evaluation"],
+    "seeds": [0, 1, 2, 3, 4],
+    "pairing": "paired by seed; both arms trained fresh on the rebuilt cache",
+    "aux_weight": 0.2,
+    "aux_weight_note": "the existing default. NOT tuned, NOT swept. This probe asks whether there is signal at all."
+  },
+  "promotion_criteria_fixed_before_running": {
+    "PROMOTE": "mean paired delta(primary) >= +0.0008 (1 sigma) AND paired t > 2.0",
+    "INCONCLUSIVE": "|mean paired delta| < 0.0008",
+    "REJECT": "mean paired delta <= -0.0008",
+    "headline_rule": "report the MEAN paired delta, never the best individual seed",
+    "no_ensemble_selection": "no ensemble will be rebuilt or chosen on the basis of this result"
+  },
+  "prior": "multitask class measures INCONCLUSIVE at 0.21 sigma over 55 experiments. Expected value low, remaining uncertainty real, cost non-zero -- which is why exactly one probe is justified.",
+  "leakage_audit": {
+    "when_observed": "all four are outcomes of the impression being scored, identical in status to is_click/is_like/is_forward already in use",
+    "as_training_label": "yes, legitimate",
+    "as_feature": "NEVER -- would be target leakage",
+    "test_split": "added to data_boundary.TEST_LABEL_COLUMNS, so the sandbox test split carries none of them",
+    "verification": "agent.leakage_check run against the generated script before execution"
+  }
+}

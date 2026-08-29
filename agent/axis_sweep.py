@@ -101,6 +101,11 @@ def main() -> None:
     ap.add_argument("--values", required=True, help="comma-separated")
     ap.add_argument("--seeds", type=int, default=5)
     ap.add_argument("--timeout", type=int, default=1200)
+    ap.add_argument("--fresh-base", action="store_true",
+                    help="retrain the control arm instead of reusing the stored "
+                         "final_ensemble members. Required whenever the cache or "
+                         "training library changed, so the two arms differ ONLY "
+                         "by the axis under test.")
     a = ap.parse_args()
 
     cfg, code = incumbent()
@@ -114,11 +119,12 @@ def main() -> None:
     # The base arm is the incumbent config -- reuse the already-trained
     # final_ensemble members rather than retraining identical work.
     base = {}
-    for s in seeds:
-        mp = os.path.join(ROOT, "logs", "final_ensemble", f"seed_{s:02d}",
-                          "metrics.json")
-        if os.path.exists(mp):
-            base[s] = json.load(open(mp))
+    if not a.fresh_base:
+        for s in seeds:
+            mp = os.path.join(ROOT, "logs", "final_ensemble", f"seed_{s:02d}",
+                              "metrics.json")
+            if os.path.exists(mp):
+                base[s] = json.load(open(mp))
     missing = [s for s in seeds if s not in base]
     if missing:
         print(f"  base arm ({a.axis}={base_val}), {len(missing)} seed(s) to train")

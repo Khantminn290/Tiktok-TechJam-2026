@@ -133,6 +133,9 @@
               "listwise_softmax_plus_pointwise"
             ]
           }
+        },
+        "aux_social4": {
+          "description": "OUTSIDE-THE-ORIGINAL-MENU probe. Four binary auxiliary heads on feedback signals the cache never read: is_follow, is_comment, is_hate, is_profile_enter. Used ONLY as supervision targets sharing the FM embeddings -- never as features (they are outcomes of the impression, so as inputs they would be target leakage; they are in data_boundary.TEST_LABEL_COLUMNS). Train prevalence and long_view association: is_profile_enter 2.539%/0.764, is_comment 0.257%/0.886, is_follow 0.101%/0.708, is_hate 0.042%/0.246 against a 0.337 base rate. is_hate is the only NEGATIVELY associated signal available, which is why it is included despite being rare. Auxiliary weight is the existing default 0.2, NOT tuned."
         }
       }
     },

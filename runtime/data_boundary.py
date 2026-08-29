@@ -54,7 +54,10 @@ SANDBOX_CACHE_DIR = os.path.join(_HERE, "cache_sandbox")
 
 # Columns that reveal the outcome of a test-split impression. A generated
 # script must never see these for the test split (it may for train/valid).
-TEST_LABEL_COLUMNS = ("long_view", "is_click", "is_like", "is_forward", "play_time_ms")
+TEST_LABEL_COLUMNS = ("long_view", "is_click", "is_like", "is_forward", "play_time_ms",
+                      # auxiliary supervision signals: outcomes of the impression,
+                      # so they reveal the test label exactly as the others do
+                      "is_follow", "is_comment", "is_hate", "is_profile_enter")
 
 _VALID_WINDOW = (20220422, 20220428)   # inclusive -- test window (20220429+) excluded
 

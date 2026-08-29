@@ -85,9 +85,15 @@ def write_resource_json(output_dir: str, device: str, train_seconds: float) -> N
 # --------------------------------------------------------------------------
 # Data cache: parse CSVs once, store per-split column arrays as .npz
 # --------------------------------------------------------------------------
+# is_follow / is_comment / is_hate / is_profile_enter are cached as AUXILIARY
+# TARGETS only. They are outcomes of the impression, exactly like is_click /
+# is_like / is_forward, so they are legal supervision and illegal as features.
+# They are added to data_boundary.TEST_LABEL_COLUMNS in the same change, so the
+# sandbox test split never carries them.
+_AUX_SOCIAL_COLS = ["is_follow", "is_comment", "is_hate", "is_profile_enter"]
 _CACHE_COLS = ["user", "video", "author", "tab", "duration_ms", "hourmin", "date",
                "time_ms", "long_view", "is_click", "is_like", "is_forward",
-               "play_time_ms"]
+               "play_time_ms"] + _AUX_SOCIAL_COLS
 
 
 def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
@@ -117,6 +123,8 @@ def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
                 raw["is_like"].append(1.0 if r["is_like"] != "0" else 0.0)
                 raw["is_forward"].append(1.0 if r["is_forward"] != "0" else 0.0)
                 raw["play_time_ms"].append(float(r["play_time_ms"]))
+                for _c in _AUX_SOCIAL_COLS:
+                    raw[_c].append(1.0 if r.get(_c, "0") != "0" else 0.0)
 
     date = np.asarray(raw["date"], dtype=np.int32)
     train_mask = (date >= SPLITS["train"][0]) & (date <= SPLITS["train"][1])
@@ -150,6 +158,7 @@ def build_cache(data_dir: str = DATA_DIR, cache_dir: str = CACHE_DIR) -> None:
         "is_like": np.asarray(raw["is_like"], dtype=np.float32),
         "is_forward": np.asarray(raw["is_forward"], dtype=np.float32),
         "play_time_ms": np.asarray(raw["play_time_ms"], dtype=np.float32),
+        **{c: np.asarray(raw[c], dtype=np.float32) for c in _AUX_SOCIAL_COLS},
         # raw user strings are needed so GAUC groups match the official ids
         "user_raw": np.asarray(raw["user"], dtype=object),
     }
@@ -357,6 +366,18 @@ class RankFM:
 
 
 # ---- loss-specific epoch runners (numpy engine) ----
+# Single source of truth for which heads each multitask option trains. Keep in
+# step with _aux_targets below -- the two are read together.
+AUX_MAP = {
+    "none": [],
+    "aux_click": ["click"],
+    "aux_click_like_forward": ["click", "like", "forward"],
+    "censored_watch_time": ["watch"],
+    "aux_click_like_forward_watch": ["click", "like", "forward", "watch"],
+    "aux_social4": ["follow", "comment", "hate", "profile_enter"],
+}
+
+
 def _aux_targets(split_cols, multitask):
     if multitask == "aux_click":
         return {"click": split_cols["is_click"]}
@@ -391,6 +412,20 @@ def _aux_targets(split_cols, multitask):
                 "forward": split_cols["is_forward"],
                 "watch": r_clean.astype(np.float32),
                 "watch_censored": ((r >= 0.97) & (r <= 5.0)).astype(np.float32)}
+    if multitask == "aux_social4":
+        # The four feedback columns the pipeline never cached. Used ONLY as
+        # binary auxiliary targets sharing the FM's embeddings; they are never
+        # inputs. is_hate is deliberately included despite being rare (480
+        # train positives, 0.042%): it is the only signal here that is
+        # NEGATIVELY associated with long_view (P(long_view|hate)=0.246 against
+        # a 0.337 base rate), so it carries a direction no currently-used
+        # signal does. Prevalences: is_profile_enter 2.539%, is_comment 0.257%,
+        # is_follow 0.101%, is_hate 0.042% -- for scale, is_forward, already in
+        # use, has 0.100%.
+        return {"follow": split_cols["is_follow"],
+                "comment": split_cols["is_comment"],
+                "hate": split_cols["is_hate"],
+                "profile_enter": split_cols["is_profile_enter"]}
     return {}
 
 
@@ -424,13 +459,12 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     if cfg["history"] in ("mean_pool_positives", "recency_weighted_pool"):
         hist = History(splits, meta["field_dims"]["user"], cfg["history"])
 
-    aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
-               "censored_watch_time": ["watch"],
-               "aux_click_like_forward_watch": ["click", "like", "forward", "watch"],
-               "none": []}
+    # AUX_MAP is module-level: this table was duplicated here and in run(), and
+    # adding an option to one copy silently broke the other with a KeyError at
+    # training time (found the hard way -- five treatment seeds failed).
     model = RankFM(dim=cfg["dim"], k=cfg["k"], lr=cfg["lr"], seed=cfg["seed"],
                    l2=cfg.get("l2", 1e-6),
-                   aux_tasks=aux_map[cfg["multitask"]])
+                   aux_tasks=AUX_MAP[cfg["multitask"]])
     aux = _aux_targets(tr, cfg["multitask"])
     lam = cfg.get("aux_weight", 0.2)
     rng = np.random.default_rng(cfg["seed"])
@@ -1269,11 +1303,7 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
         # meaningful only across MULTIPLE runs, not within one node
         "bootstrap_seed": menu_choices.get("bootstrap_seed"),
     }
-    aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
-               "censored_watch_time": ["watch"],
-               "aux_click_like_forward_watch": ["click", "like", "forward", "watch"],
-               "none": []}
-    cfg["aux_tasks"] = aux_map[cfg["multitask"]]
+    cfg["aux_tasks"] = AUX_MAP[cfg["multitask"]]
 
     t_train = time.time()
     if cfg["model"] == "fm_numpy":

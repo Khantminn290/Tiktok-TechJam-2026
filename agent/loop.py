@@ -358,6 +358,44 @@ class AgentLoop:
         self.consecutive_llm_failures = 0   # a successful call clears the abort counter
         self._maybe_record_axis_proposal(obj, it, events)
         code = obj["code"]
+
+        # Verify the IMPLEMENTATION against the HYPOTHESIS before spending a
+        # training run on it. A declaration is not evidence and a clean exit is
+        # not evidence: this project has three nodes that "succeeded" by
+        # applying a per-user monotone transform to the scores, which cannot
+        # move a within-user ranking metric at all -- two of them returned
+        # byte-identical metrics and both were recorded as successes.
+        try:
+            from . import mechanism_audit as mech
+            ma = mech.audit(code, obj.get("hypothesis", ""),
+                            str(obj.get("implementation_path", "A")),
+                            menu_choices=obj.get("menu_choices") or {})
+            events.append({"type": "mechanism_audit",
+                           "verdict": ma["verdict"][:200],
+                           "claimed": ma["mechanisms_claimed"],
+                           "missing": ma["mechanisms_missing"],
+                           "blocks": ma["blocks_scoring"]})
+            if ma["blocks_scoring"]:
+                print(f"  [mechanism audit] BLOCKED: {ma['verdict'][:110]}",
+                      flush=True)
+                node = Node(iteration_id=it,
+                            parent_id=None if target is None else target.iteration_id,
+                            action=action,
+                            menu_choices=obj.get("menu_choices") or {},
+                            hypothesis=obj.get("hypothesis", ""),
+                            status="error", metrics=None,
+                            error_trace=("BLOCKED BEFORE EXECUTION by the mechanism "
+                                         "audit: " + ma["verdict"]),
+                            tokens_used=0, wall_clock_seconds=0.0, timestamp=now(),
+                            code_path="", decide_reason=reason, events=events)
+                self.tree.add(node)
+                return node
+            if ma["mechanisms_missing"]:
+                print(f"  [mechanism audit] warning: {ma['verdict'][:110]}",
+                      flush=True)
+        except Exception as e:            # never let the audit kill an iteration
+            events.append({"type": "mechanism_audit_skipped",
+                           "error": f"{type(e).__name__}: {str(e)[:160]}"})
         if self.inject_error_at is not None and it == self.inject_error_at:
             code += "\nraise RuntimeError('injected failure (harness robustness test)')\n"
             events.append({"type": "injected_error_for_testing",
