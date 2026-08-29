@@ -1878,8 +1878,32 @@ def test_leakage_and_ensemble():
     ens = json.load(open(os.path.join(_ROOT, "logs", "ensemble_results.json")))
     check("adopted ensemble records that it carries NO selection bias",
           "NONE" in ens["selection_bias"])
+    # The previous headline (0.60545) quoted member arrays that had been
+    # archived away, so it could not be recomputed. Reproducibility is now
+    # asserted structurally, not promised in prose.
+    check("the reported k equals the number of members actually averaged",
+          ens["k"] == len(ens["seeds_used"]))
+    mdir = os.path.join(_ROOT, ens["members_dir"])
+    present = [s for s in ens["seeds_used"]
+               if os.path.exists(os.path.join(mdir, f"seed_{s:02d}",
+                                              "scores_valid.npy"))]
+    check("every ensemble member's prediction array is on disk",
+          len(present) == ens["k"], f"{len(present)}/{ens['k']}")
+    check("the ensemble states how to reproduce itself",
+          "final_ensemble" in (ens.get("reproduce") or ""))
+    check("the ensemble beats its own mean member (averaging is doing work)",
+          ens["gain_over_mean_member"] > 0)
+    # k must not be the argmax of the k-curve -- that would BE selection.
+    curve = ens["k_curve_diagnostic_only"]
+    argmax_k = max(curve, key=lambda k: curve[k])
+    check("k is ALL seeds, not the best-scoring k on the curve",
+          int(argmax_k) != ens["k"] or len(curve) == ens["k"],
+          f"argmax k={argmax_k} reported k={ens['k']}")
     check("heterogeneous ensembling was measured and rejected, not assumed",
-          "0.60504" in ens["heterogeneous_rejected"])
+          any("gru4rec_seq as an ENSEMBLE member" in d and "0.15 sigma" in d
+              for d in json.load(open(os.path.join(
+                  _ROOT, "config", "modification_menu.json")))
+              ["notes"]["tested_dead_ends"]))
 
 
 def test_candidate_policy():
