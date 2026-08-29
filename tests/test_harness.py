@@ -2031,6 +2031,82 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_research_frontier():
+    """Directions are axis-options with evidence-based status. The old branch
+    model was (loss, model), which could not represent 'is temporal useful?'
+    at all."""
+    print("\n[research frontier]")
+    from agent import frontier as F
+
+    menu = {"axes": {"loss": {"options": ["bpr_pairwise", "lambdarank_ndcg",
+                                          "listwise_softmax"]},
+                     "multitask": {"options": ["none", "aux_click_like_forward",
+                                               "aux_click_like_forward_watch"]},
+                     "temporal": {"options": ["none", "hour_plus_dow"]}},
+            "notes": {"tested_dead_ends": [
+                "LambdaRank (|delta nDCG@5| pair weighting, loss=lambdarank_ndcg): "
+                "MEASURED HERE, decisively worse than bpr_pairwise",
+                "Graded play-time as an auxiliary head "
+                "(multitask=aux_click_like_forward_watch): MEASURED HERE, worse",
+                "gru4rec_seq as an ENSEMBLE member with fm_numpy: MEASURED HERE"]}}
+
+    def node(i, choices, primary, gauc=None, ndcg=None, status="success"):
+        m = ({"primary": primary, "GAUC": gauc if gauc is not None else primary,
+              "nDCG@5": ndcg if ndcg is not None else primary}
+             if status == "success" else None)
+        return {"iteration_id": i, "status": status, "menu_choices": choices,
+                "metrics": m}
+
+    best = {"loss": "bpr_pairwise", "multitask": "none", "temporal": "hour_plus_dow"}
+    nodes = [node(0, best, 0.6050, gauc=0.6720, ndcg=0.5380),
+             node(1, {**best, "temporal": "none"}, 0.6020, gauc=0.6660, ndcg=0.5380)]
+    f = F.Frontier(nodes, menu, best_config=best)
+    by = {d["direction"]: d for d in f.directions}
+
+    check("a never-run option is UNEXPLORED, not KNOWN_BAD",
+          by["loss=listwise_softmax"]["status"] == F.UNEXPLORED)
+    check("a recorded dead end is KNOWN_BAD with HIGH confidence",
+          by["loss=lambdarank_ndcg"]["status"] == F.KNOWN_BAD
+          and by["loss=lambdarank_ndcg"]["confidence"] == F.HIGH)
+
+    # the two matcher bugs that condemned good mechanisms
+    check("a dead end's COMPARISON BASELINE is not itself condemned",
+          by["loss=bpr_pairwise"]["status"] != F.KNOWN_BAD,
+          by["loss=bpr_pairwise"]["status"])
+    check("a shared PREFIX does not condemn a different mechanism",
+          by["multitask=aux_click_like_forward"]["status"] != F.KNOWN_BAD
+          and by["multitask=aux_click_like_forward_watch"]["status"] == F.KNOWN_BAD)
+
+    # isolated ablation, graded against the noise floor
+    t = by["temporal=hour_plus_dow"]
+    check("an in-best option with isolated evidence is graded, not assumed",
+          t.get("ablation") is not None and t["ablation"]["sigma"] > 3)
+    check("GAUC and nDCG@5 are attributed SEPARATELY",
+          "d_GAUC" in t["ablation"] and "d_nDCG@5" in t["ablation"])
+
+    # a metric conflict is invisible in the primary and must be surfaced
+    nodes2 = [node(0, best, 0.6050, gauc=0.6700, ndcg=0.5400),
+              node(1, {**best, "temporal": "none"}, 0.6050, gauc=0.6600, ndcg=0.5500)]
+    f2 = F.Frontier(nodes2, menu, best_config=best)
+    check("a GAUC/nDCG trade hidden by an unchanged primary is surfaced",
+          len(f2.metric_conflicts()) >= 1,
+          f"{[d['direction'] for d in f2.metric_conflicts()]}")
+
+    check("unexplored options are listed as candidates, not failures",
+          all(d["experiments"] == 0 for d in f.unexplored()))
+    check("the frontier renders without an LLM",
+          "RESEARCH FRONTIER" in f.render() and "UNEXPLORED" in f.render())
+
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the frontier actually reaches the planning prompt",
+          "from .frontier import from_root" in lsrc)
+    check("a frontier failure cannot kill an iteration",
+          '"type": "frontier_skipped"' in lsrc)
+    live = F.from_root(_ROOT).render(limit=22)
+    check("the live frontier stays compact (< 4500 chars)",
+          len(live) < 4500, f"{len(live)}")
+
+
 def test_submission_matches_reported_result():
     """The submission must be built from the ensemble the deliverable reports.
 
@@ -2240,6 +2316,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
+              test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_submission_artifacts_survive_fresh):

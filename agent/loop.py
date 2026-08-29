@@ -242,7 +242,19 @@ class AgentLoop:
             self._current_objective = d["category"]
             print(f"  [research policy] objective={d['category']} "
                   f"({d['reason']})", flush=True)
-            return st.render() + "\n\n" + render_decision(d)
+            # The frontier is what makes "what should we try next?" answerable
+            # from evidence: it names every axis-option with a status, keeps
+            # UNEXPLORED separate from KNOWN_BAD, and splits GAUC from nDCG@5.
+            # Rendered after the state so the state's headline numbers still
+            # lead, and capped so it cannot crowd out the decision itself.
+            blocks = [st.render(), render_decision(d)]
+            try:
+                from .frontier import from_root as _frontier
+                blocks.insert(1, _frontier(self.root).render(limit=22))
+            except Exception as e:
+                events.append({"type": "frontier_skipped",
+                               "error": f"{type(e).__name__}: {str(e)[:160]}"})
+            return "\n\n".join(blocks)
         except Exception as e:
             events.append({"type": "research_state_skipped",
                            "error": f"{type(e).__name__}: {str(e)[:200]}"})
