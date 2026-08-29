@@ -63,10 +63,19 @@ measured here at `+0.00081` of optimistic bias and rejected.
 
 **Two numbers to keep in perspective:** the metric ceiling is 0.8484, not 1.0
 (27% of users have zero positive labels, so nDCG can never reach 1 for them),
-and — more importantly — **20.6% of repeated (user, video) pairs disagree with
-themselves**, mean irreducible error 0.100. Most of the apparent headroom to
-0.8484 is label noise, not signal. Eight model families (FM, DeepFM, DCN, DIN,
-GRU4Rec, ItemCF, GBDT, item-popularity) all land in 0.55–0.605.
+and eight model families (FM, DeepFM, DCN, DIN, GRU4Rec, ItemCF, GBDT,
+item-popularity) all land in 0.55–0.605.
+
+**Correction — do not repeat the old label-noise claim.** This project used to
+say "20.6% of repeated (user, video) pairs disagree with themselves, so most of
+the headroom is noise". The statistic is true; the conclusion does not follow.
+Only **4.1%** of train pairs repeat at all, so the disagreeing ones are **1.72%
+of rows**; in valid, 3.2% repeat and 10.2% of those disagree (1.09% of rows).
+And only **0.177%** of within-user positive/negative pairs are feature-identical
+and therefore unrankable by *any* model — a hard ceiling of **0.99911** on
+unweighted pair-AUC against an observed **0.707**. There is **no measurement
+establishing this task is noise-limited.** The evidence for a ceiling is
+informational (see 1c), not statistical.
 
 **Two numbers to keep in perspective:** the metric ceiling is 0.8484, not 1.0
 (27% of users have zero positive labels, so nDCG can never reach 1 for them),
@@ -119,6 +128,43 @@ replayed decision is labelled OBSERVED / COUNTERFACTUAL_KNOWN /
 COUNTERFACTUAL_UNKNOWN, and unknown outcomes are never imputed or averaged.
 
 ---
+
+## 1c. Is the ceiling the menu, or the problem?
+
+Tested directly rather than assumed (`python3 -m agent.residual_screen`).
+
+`build_cache` reads **13 of 19** log columns, **1 of 12** video columns and
+**0 of 31** user columns. `video_features_basic_pure.csv` — `tag` (46
+categories, 99.2% coverage), `music_id`, `video_type`, `upload_type`,
+`upload_dt`, server dimensions — is **not in the menu at all**: not an option,
+not locked, simply absent. These are static item attributes and carry none of
+the eval-window leakage that locked the *statistic* file. So real information
+loss exists.
+
+It is not exploitable. A gradient-boosted model given every causally-available
+discarded attribute plus context reaches **0.64904** within-user AUC standalone
+(incumbent: 0.67720). Blended into the incumbent at a weight **fixed in advance**
+and resampled 5 times:
+
+```
++0.00031 mean  (+0.39σ)  ± 0.00032   t = 2.14
+```
+
+A residual **is** statistically detectable and is still **under half the
+seed-noise scale**. `tag` alone measures −0.09σ; user×tag affinity +0.04σ.
+
+**This is the strongest evidence available that the ceiling here is
+informational rather than an artefact of the 45-option menu** — stronger than
+exhausting an option list, because it tests the information rather than the
+menu. Note the honest limit: it bounds what *these* features carry, not what
+some unrepresented interaction might.
+
+Also measured while doing this: **per-user monotone score transforms are
+structurally null.** Both metrics rank *within* a user, so `(s−mean)/std`,
+per-user shifts and per-user shrinkage cannot change either metric. Two Path B
+nodes did exactly this, returned **identical** metrics (0.60340 / 0.66981 /
+0.53700), and were both recorded as successes.
+
 
 ## 2. What NOT to re-try
 
@@ -179,7 +225,7 @@ Not ruled out — never tested. These are the real remaining options:
 
    The corrected lesson: on this benchmark the residual error is **shared**, so
    decorrelating the *configuration* does not decorrelate the *errors* enough
-   to matter — which is what 20.6% self-disagreement predicts. That closes the
+   to matter. That closes the
    mechanism, not just one instance of it. (`agent/hetero_test.py`,
    `logs/hetero_test.json`.)
 
@@ -202,7 +248,7 @@ locked: its counters span the evaluation window and risk target leakage.
 Full detail is in `README.md` — this is just the map.
 
 ```bash
-python3 tests/test_harness.py                      # 457 checks, no LLM, no training
+python3 tests/test_harness.py                      # 468 checks, no LLM, no training
 cd kuairand-starter-kit && python3 baseline.py --model fm && cd ..   # reproduce 0.6016
 python3 -m agent.baseline_repro                    # durable baseline artifact
 
@@ -224,6 +270,7 @@ python3 -m agent.frontier                          # status of every axis-option
 python3 -m agent.error_analysis                    # where the model fails, per segment
 python3 -m agent.axis_sweep --axis X --values a,b  # controlled paired-seed comparison
 python3 -m agent.hetero_test                       # the ensemble test above
+python3 -m agent.residual_screen --confirm 5       # is there signal outside the menu?
 python3 -m agent.make_submission --split valid --score --ensemble
 ```
 
@@ -265,8 +312,7 @@ the previous headline drifted from its evidence.
 4. **Devpost + README writeup.** The negative results are arguably the stronger
    story: a systematic, measured account of *why* this benchmark's headroom is
    narrow, backed by 15 documented dead-ends with mechanisms rather than
-   assertions, and by the 20.6% self-disagreement measurement that explains the
-   ceiling.
+   assertions, and by the residual screen in 1c.
 
 ---
 

@@ -71,7 +71,7 @@ the agent with no code changes.
 ### 1. Harness self-test (free, no model calls, seconds)
 
 ```bash
-python3 tests/test_harness.py        # 457 checks
+python3 tests/test_harness.py        # 468 checks
 ```
 
 Covers the safety gate, cross-axis validation, every search-policy branch
@@ -232,7 +232,7 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        457 checks, no model calls, no training
+tests/test_harness.py        468 checks, no model calls, no training
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
 
@@ -251,12 +251,15 @@ Harness sanity checks (these should match before trusting anything else):
 ## Limitations and what we'd improve
 
 - **Headroom on this benchmark is genuinely narrow, and that is a measurement,
-  not an excuse.** 20.6% of repeated (user, video) pairs disagree with themselves
-  (mean irreducible error 0.100), and eight model families — FM, DeepFM, DCN, DIN,
-  GRU4Rec, ItemCF, GBDT, item-popularity — all land in 0.55–0.605. Most of the
-  apparent gap to the 0.8484 ceiling is label noise rather than signal, so
-  interventions are judged in σ, and 23 of them are recorded as dead ends with
-  mechanisms.
+  not an excuse.** Eight model families — FM, DeepFM, DCN, DIN, GRU4Rec, ItemCF,
+  GBDT, item-popularity — all land in 0.55–0.605, and a gradient-boosted model
+  given every raw column the pipeline discards adds only **+0.39σ** over the
+  incumbent when the blend weight is fixed in advance and resampled
+  (`agent/residual_screen.py`) — under half the seed-noise scale. Interventions
+  are judged in σ, and 26 are recorded as dead ends with mechanisms. We do *not*
+  claim the task is label-noise-limited: only 0.177% of within-user
+  positive/negative pairs are feature-identical, so that argument is unsupported
+  by measurement.
 - Crossover only combines menu choices, not code. Merging two scripts' actual
   implementations would be strictly more expressive.
 - The unbiased random-exposure diagnostic is wired for the NumPy engine only, and
