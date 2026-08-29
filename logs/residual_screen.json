@@ -1,0 +1,127 @@
+{
+  "incumbent_wAUC": 0.6772,
+  "confirmation": {
+    "n": 5,
+    "weight": 0.95,
+    "gains": [
+      -0.00018,
+      0.00034,
+      0.00077,
+      0.00012,
+      0.0005
+    ],
+    "mean_gain": 0.00031,
+    "std": 0.00032,
+    "mean_sigma": 0.39,
+    "t": 2.14,
+    "survives": false
+  },
+  "gbdt_attrs_only_wAUC": 0.64904,
+  "gbdt_residual": {
+    "feature": "GBDT(all discarded attrs)",
+    "standalone_wAUC": 0.649,
+    "model_wAUC": 0.6772,
+    "blend_delta": {
+      "0.99": 0.00046,
+      "0.95": 0.00051,
+      "0.9": -0.00038
+    },
+    "best_gain_sigma": 0.64,
+    "adds_signal": true,
+    "verdict": "adds residual signal"
+  },
+  "per_feature_residual": {
+    "tag": {
+      "standalone_wAUC": 0.5163,
+      "best_gain_sigma": -0.09,
+      "adds_signal": false
+    },
+    "music": {
+      "standalone_wAUC": 0.5013,
+      "best_gain_sigma": -0.11,
+      "adds_signal": false
+    },
+    "video_type": {
+      "standalone_wAUC": 0.5012,
+      "best_gain_sigma": 0.2,
+      "adds_signal": false
+    },
+    "upload_type": {
+      "standalone_wAUC": 0.4969,
+      "best_gain_sigma": 0.07,
+      "adds_signal": false
+    },
+    "item_age_days": {
+      "standalone_wAUC": 0.4892,
+      "best_gain_sigma": -0.07,
+      "adds_signal": false
+    },
+    "server_width": {
+      "standalone_wAUC": 0.5039,
+      "best_gain_sigma": -0.37,
+      "adds_signal": false
+    },
+    "server_height": {
+      "standalone_wAUC": 0.4862,
+      "best_gain_sigma": 0.82,
+      "adds_signal": true
+    },
+    "aspect": {
+      "standalone_wAUC": 0.5042,
+      "best_gain_sigma": -0.5,
+      "adds_signal": false
+    },
+    "video_duration": {
+      "standalone_wAUC": 0.4894,
+      "best_gain_sigma": -0.5,
+      "adds_signal": false
+    },
+    "duration_ms": {
+      "standalone_wAUC": 0.4894,
+      "best_gain_sigma": -0.5,
+      "adds_signal": false
+    },
+    "hour": {
+      "standalone_wAUC": 0.4855,
+      "best_gain_sigma": -0.49,
+      "adds_signal": false
+    },
+    "dow": {
+      "standalone_wAUC": 0.4971,
+      "best_gain_sigma": 0.26,
+      "adds_signal": false
+    },
+    "tab": {
+      "standalone_wAUC": 0.4615,
+      "best_gain_sigma": 0.71,
+      "adds_signal": true
+    }
+  },
+  "n_train_rows": 400000,
+  "features": [
+    "tag",
+    "music",
+    "video_type",
+    "upload_type",
+    "item_age_days",
+    "server_width",
+    "server_height",
+    "aspect",
+    "video_duration",
+    "duration_ms",
+    "hour",
+    "dow",
+    "tab"
+  ],
+  "excluded_post_outcome": [
+    "is_hate",
+    "is_follow",
+    "is_comment",
+    "is_profile_enter",
+    "profile_stay_time",
+    "comment_stay_time",
+    "play_time_ms"
+  ],
+  "excluded_user_side": "constant within a user -> exactly 0 for GAUC",
+  "verdict": "NOT WORTH A MECHANISM -- a residual IS statistically detectable (t=2.14) but its size is +0.39 sigma, under half the seed-noise scale. Evidence that the ceiling here is informational rather than a menu artefact."
+}

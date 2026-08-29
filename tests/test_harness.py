@@ -2105,6 +2105,38 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_residual_screen_reporting():
+    """The screen's headline must defer to its CONFIRMATION. The single screen
+    picks its blend weight by scanning three values on validation, so its
+    figure is selected; letting it set the verdict reported 'RESIDUAL SIGNAL
+    FOUND' over a confirmation that said otherwise."""
+    print("\n[residual screen reporting]")
+    src = open(os.path.join(_ROOT, "agent", "residual_screen.py")).read()
+    check("the confirmation overrides the scanned single screen",
+          'if confirm else' in src and "confirm[\"survives\"]" in src)
+    check("post-outcome columns are excluded from the FEATURES",
+          '"excluded_post_outcome"' in src and "is_hate" in src)
+    check("user-side columns are excluded with the structural reason",
+          "constant within a user" in src)
+    check("per-feature readings carry a noise caveat",
+          "Treat sub-1-sigma" in src)
+
+    p = os.path.join(_ROOT, "logs", "residual_screen.json")
+    if os.path.exists(p):
+        r = json.load(open(p))
+        c = r.get("confirmation")
+        check("the screen ran a fixed-weight confirmation", c is not None)
+        if c:
+            check("survival requires BOTH a real size and significance",
+                  c["survives"] == (c["mean_gain"] >= 0.0004 and c["t"] > 2.0))
+            check("a statistically detectable but sub-noise effect is NOT promoted",
+                  not c["survives"] and "NOT WORTH A MECHANISM" in r["verdict"]
+                  if (c["t"] > 2.0 and c["mean_gain"] < 0.0004) else True,
+                  f"t={c['t']} gain={c['mean_gain']}")
+        check("the incumbent score is the comparison baseline",
+              r["incumbent_wAUC"] > 0.6)
+
+
 def test_error_analysis():
     """The loop saw only two scalars per experiment. These are the properties
     that make per-segment analysis trustworthy rather than suggestive."""
@@ -2572,6 +2604,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
+              test_residual_screen_reporting,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
