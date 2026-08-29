@@ -1,19 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [CORRECTION] iter 7 -- best node corrected: 6 -> 7
-A 5-seed reseed found node 6's single-seed score (0.6035) was seed-lucky; node 7's true mean (0.6037) is actually higher. node 7 mean 0.6037 over 5 seeds beat node 6's mean (0.6032) under the same reseed pass -- node 6's single-seed pick of 0.6035 did not hold up as the true best. Don't treat a single high score as decisive without checking its variance.
-
-### [CRASHED] iter 8 -- Keep the current strongest menu recipe unchanged, but reduce seed variance and slightly improve rank
-menu_choices={"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "none"}. TIMEOUT: training run exceeded 1200s and was killed.
-
-### [CRASHED] iter 9 -- Keep the current best menu recipe conceptually intact but replace single-seed training with a small
-menu_choices={"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "none"}. TIMEOUT: training run exceeded 1200s and was killed.
-
-### [CRASHED] iter 10 -- Keep the current strongest recipe fixed but make training more robust by averaging scores from sever
-menu_choices={"loss": "bpr_pairwise", "user_history": "mean_pool_positives", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "two_stage_finetune", "data_extras": "none"}. TIMEOUT: training run exceeded 1200s and was killed.
-### [HELPED] iter 0 -- Switching the baseline FM from pointwise logloss to a ranking-aligned hybrid listwise objective shou
-menu_choices={"loss": "listwise_softmax_plus_pointwise", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} raised valid primary to 0.5986 (previous best n/a).
-
 ### [NEUTRAL] iter 1 -- Adding train-period positive-history pooling to the current strongest ranking-aligned FM should impr
 menu_choices={"loss": "listwise_softmax_plus_pointwise", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none"} scored 0.5985, no clear change vs the running best.
 
@@ -52,4 +38,16 @@ menu_choices={"loss": "bpr_pairwise", "user_history": "recency_weighted_pool", "
 
 ### [HELPED] iter 7 -- Test whether DIN-style candidate-conditioned history attention can convert the hundreds of train-per
 menu_choices={"loss": "bpr_pairwise", "user_history": "din_attention", "multitask": "aux_click", "model": "deepfm_mlp", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none"} raised valid primary to 0.6036 (previous best 0.6036).
+
+### [HELPED] iter 0 -- Seeded baseline: the validated best config from the prior search phase
+menu_choices={"loss":"bpr_pairwise","user_history":"recency_weighted_pool","multitask":"aux_click_like_forward","model":"fm_numpy","temporal":"hour_plus_dow","training":"default"} scores 0.6039 single-seed (5-seed mean 0.60367; 0.60515 when 5-seed rank-averaged, +4.44 sigma over the 0.6016 baseline). THIS IS THE SCORE TO BEAT. Nine separate interventions have already been measured and ruled out against it -- see the menu tested_dead_ends. A NEW untested axis exists: model=gru4rec_seq, a GRU over the user chronologically-ordered history (KuaiRand is published as a SEQUENTIAL recommendation dataset and no model here has ever used order). It scored 0.6030 untuned on one seed. Whether it is worth pursuing is an open question.
+
+### [DEAD_END] iter 1 -- The strongest measured recipe already uses broad, uniform BPR signal plus recency-weighted history,
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_2", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6037, below the then-current best 0.6039 -- not worth repeating as-is.
+
+### [DEAD_END] iter 2 -- The strongest current recipe already uses broad, uniform BPR signal plus recency-weighted history, a
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_2", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6037, below the then-current best 0.6039 -- not worth repeating as-is.
+
+### [DEAD_END] iter 3 -- The freshest high-value single-pass test is to keep the current strongest FM recipe fixed and only i
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_2", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6037, below the then-current best 0.6039 -- not worth repeating as-is.
 

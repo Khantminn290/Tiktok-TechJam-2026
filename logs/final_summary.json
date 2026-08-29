@@ -1,27 +1,27 @@
 {
-  "stop_reason": "converged: running-best valid primary improved only 0.0003 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
-  "iterations_used": 8,
-  "iteration_cap": 50,
-  "best_node": 7,
+  "stop_reason": "converged: running-best valid primary improved only 0.0000 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
+  "iterations_used": 4,
+  "iteration_cap": 40,
+  "best_node": 0,
   "best_valid_metrics": {
-    "GAUC": 0.6702496844002527,
-    "nDCG@5": 0.5370140069045856,
-    "primary": 0.6036318456524191
+    "GAUC": 0.6702887760884274,
+    "nDCG@5": 0.5375056574713676,
+    "primary": 0.6038972167798975
   },
-  "delta_valid_primary_over_baseline": 0.002,
+  "delta_valid_primary_over_baseline": 0.0023,
   "total_llm_tokens": {
-    "input_tokens": 23178,
-    "output_tokens": 11508,
+    "input_tokens": 11057,
+    "output_tokens": 1951,
     "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 26880,
-    "calls": 8,
+    "cache_read_input_tokens": 17920,
+    "calls": 3,
     "provider": "openai",
     "model": "gpt-5.4",
-    "input_plus_output": 61566
+    "input_plus_output": 30928
   },
-  "total_training_wall_clock_s": 129.2,
-  "delta_in_baseline_seed_sigmas": 2.54,
-  "total_agent_wall_clock_s": 221.2,
+  "total_training_wall_clock_s": 1514.2,
+  "delta_in_baseline_seed_sigmas": 2.87,
+  "total_agent_wall_clock_s": 505.0,
   "gpu_hours": 0.0,
   "gpu_seconds_measured": 0.0,
   "devices_used": [
@@ -30,14 +30,14 @@
   "spend": {
     "provider": "openai",
     "model": "gpt-5.4",
-    "total_usd": 0.237285,
-    "ceiling_usd": 3.0,
-    "iterations_billed": 8,
-    "mean_usd_per_iteration": 0.029661,
-    "max_usd_per_iteration": 0.065959,
+    "total_usd": 0.061387,
+    "ceiling_usd": 2.0,
+    "iterations_billed": 3,
+    "mean_usd_per_iteration": 0.020462,
+    "max_usd_per_iteration": 0.033702,
     "rate_card": "$2.50/1M in, $15.00/1M out"
   },
-  "draft_count": 14,
+  "draft_count": 4,
   "manual_interventions": 0,
   "convergence_rule": {
     "epsilon": 0.002,
