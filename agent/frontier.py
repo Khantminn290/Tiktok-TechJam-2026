@@ -174,10 +174,16 @@ class Frontier:
                         / BASELINE_SEED_STD, 2)
                     d["best_gauc"] = round(max(n["metrics"].get("GAUC", 0) for n in runs), 5)
                     d["best_ndcg"] = round(max(n["metrics"].get("nDCG@5", 0) for n in runs), 5)
+                    # A trend needs BOTH a recent window and an earlier one to
+                    # compare it against. With exactly SATURATION_MIN_EXPERIMENTS
+                    # runs there is no earlier window, and defaulting to 0.0 made
+                    # four CONSECUTIVELY IMPROVING experiments read as saturated
+                    # -- telling the planner to abandon a direction that was
+                    # actively working. None means "not computable", not "flat".
                     recent = prim[-SATURATION_MIN_EXPERIMENTS:]
-                    d["recent_trend"] = round(
-                        (max(recent) - max(prim[:-len(recent)]))
-                        if len(prim) > len(recent) else 0.0, 5)
+                    earlier = prim[:-SATURATION_MIN_EXPERIMENTS]
+                    d["recent_trend"] = (round(max(recent) - max(earlier), 5)
+                                         if earlier else None)
 
                 iso = self._isolated(axis, value)
                 if iso:
@@ -210,8 +216,10 @@ class Frontier:
             # No evidence is NOT evidence against.
             return UNEXPLORED, LOW
         ab = d.get("ablation")
-        if d["experiments"] >= SATURATION_MIN_EXPERIMENTS and \
-                d.get("recent_trend", 0) <= 0 and not d["in_best_config"]:
+        trend = d.get("recent_trend")
+        if (trend is not None and trend <= 0
+                and d["experiments"] > SATURATION_MIN_EXPERIMENTS
+                and not d["in_best_config"]):
             return SATURATED, MEDIUM
         if ab:
             if ab["strength"] in (STRONG, MODERATE):

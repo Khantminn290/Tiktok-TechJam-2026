@@ -1891,6 +1891,16 @@ def test_leakage_and_ensemble():
           len(present) == ens["k"], f"{len(present)}/{ens['k']}")
     check("the ensemble states how to reproduce itself",
           "final_ensemble" in (ens.get("reproduce") or ""))
+    # A record that stores only the MEAN of two metrics does not say what the
+    # result was, and the two move independently.
+    check("the authoritative result records GAUC and nDCG@5, not just the mean",
+          "GAUC" in ens and "nDCG@5" in ens
+          and abs((ens["GAUC"] + ens["nDCG@5"]) / 2 - ens["primary"]) < 1e-4,
+          f"{ens.get('GAUC')} {ens.get('nDCG@5')} {ens['primary']}")
+    check("the result carries provenance (code, data, time)",
+          all(k in ens for k in ("code_version", "data_version", "timestamp_utc")))
+    check("the result records whether the hidden test was touched",
+          ens.get("hidden_test_used") is False)
     check("the ensemble beats its own mean member (averaging is doing work)",
           ens["gain_over_mean_member"] > 0)
     # k must not be the argmax of the k-curve -- that would BE selection.
@@ -2153,6 +2163,31 @@ def test_research_frontier():
 
     check("unexplored options are listed as candidates, not failures",
           all(d["experiments"] == 0 for d in f.unexplored()))
+
+    # Saturation needs BOTH a recent window and an earlier one. Defaulting an
+    # uncomputable trend to 0.0 made four CONSECUTIVELY IMPROVING experiments
+    # read as saturated -- telling the planner to abandon a working direction.
+    m1 = {"axes": {"x": {"options": ["a"]}}, "notes": {"tested_dead_ends": []}}
+
+    def sn(i, p):
+        return {"iteration_id": i, "status": "success", "menu_choices": {"x": "a"},
+                "metrics": {"primary": p, "GAUC": p, "nDCG@5": p}}
+
+    improving4 = F.Frontier([sn(i, 0.601 + i * 0.001) for i in range(4)],
+                            m1, best_config={"x": "b"}).directions[0]
+    check("an improving direction with no earlier window is NOT saturated",
+          improving4["status"] != F.SATURATED
+          and improving4["recent_trend"] is None,
+          f"{improving4['status']} trend={improving4['recent_trend']}")
+    improving6 = F.Frontier([sn(i, 0.601 + i * 0.001) for i in range(6)],
+                            m1, best_config={"x": "b"}).directions[0]
+    check("a still-improving direction is never saturated",
+          improving6["status"] != F.SATURATED)
+    collapsed = F.Frontier([sn(0, .601), sn(1, .607), sn(2, .605), sn(3, .604),
+                            sn(4, .603), sn(5, .602)],
+                           m1, best_config={"x": "b"}).directions[0]
+    check("a direction whose recent returns collapsed IS saturated",
+          collapsed["status"] == F.SATURATED, collapsed["status"])
     check("the frontier renders without an LLM",
           "RESEARCH FRONTIER" in f.render() and "UNEXPLORED" in f.render())
 

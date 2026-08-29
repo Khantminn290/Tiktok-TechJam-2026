@@ -55,6 +55,30 @@ OUT_DIR = os.path.join(ROOT, "logs", "final_ensemble")
 RESULT = os.path.join(ROOT, "logs", "ensemble_results.json")
 
 
+def _git_sha() -> str:
+    try:
+        import subprocess
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                                       stderr=subprocess.DEVNULL).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+def _data_fingerprint() -> dict:
+    """Row counts of the cached splits. Cheap, and enough to catch the failure
+    that matters: a result computed against a different validation set."""
+    try:
+        import numpy as _np
+        for d in ("cache_sandbox", "cache"):
+            p = os.path.join(ROOT, "runtime", d, "valid.npz")
+            if os.path.exists(p):
+                z = _np.load(p, allow_pickle=True)
+                return {"cache": d, "valid_rows": int(len(z["long_view"]))}
+    except Exception:
+        pass
+    return {"cache": "unknown"}
+
+
 def load_best(retarget: bool = False) -> dict:
     """The configuration to ensemble.
 
@@ -147,10 +171,17 @@ def build(members: list) -> dict:
     for k in range(1, len(ranked) + 1):
         curve[k] = round(float(ev(users, labels,
                                   np.mean(ranked[:k], axis=0))["primary"]), 5)
-    final = float(ev(users, labels, np.mean(ranked, axis=0))["primary"])
+    metrics = ev(users, labels, np.mean(ranked, axis=0))
+    final = float(metrics["primary"])
 
     return {
         "primary": round(final, 5),
+        # The component metrics were absent, so the authoritative record of the
+        # result did not actually say what the result WAS -- only the mean of
+        # two numbers it never stored. They also move independently: a change
+        # can be strong on one and negative on the other.
+        "GAUC": round(float(metrics["GAUC"]), 5),
+        "nDCG@5": round(float(metrics["nDCG@5"]), 5),
         "k": len(ranked),
         "seeds_used": [t[0] for t in kept],
         "duplicate_arrays_dropped": dupes,
@@ -198,6 +229,14 @@ def main() -> None:
         "seen. No subset search was performed. k_curve is diagnostic only; "
         "best-subset selection was measured to carry +0.00081 optimistic bias.")
     r["reproduce"] = "python3 -m agent.final_ensemble --seeds %d" % a.seeds
+    # Provenance: a score is only reproducible if the code and data that
+    # produced it are identified. Recorded at write time, never edited.
+    r["code_version"] = _git_sha()
+    r["timestamp_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    r["data_version"] = _data_fingerprint()
+    r["evaluator"] = "kuairand-starter-kit/evaluate.py (never modified)"
+    r["hidden_test_used"] = os.path.exists(
+        os.path.join(ROOT, "results", "final_evaluation.lock"))
     with open(RESULT, "w") as fh:
         json.dump(r, fh, indent=2)
 
