@@ -2129,6 +2129,138 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_feature_discovery():
+    """Autonomous feature research. The agent could previously only SELECT
+    features from a human-authored menu; these assert it can now propose, probe
+    and retain them -- and that the gates which make that safe cannot be
+    bypassed."""
+    print("\n[autonomous feature discovery]")
+    import numpy as np
+    import tempfile
+    from agent import feature_lab as FL
+
+    # --- proposal must be complete: a feature without a mechanism is a guess
+    check("an incomplete proposal is rejected with reasons",
+          len(FL.validate_proposal({"name": "x"})) >= 5)
+    full = {f: "stated" for f in FL.REQUIRED_FIELDS}
+    full["source"] = "def build_features(splits, meta): return {}"
+    check("a complete proposal passes validation", FL.validate_proposal(full) == [])
+    nofn = dict(full); nofn["source"] = "x = 1"
+    check("source must define the builder contract",
+          any("build_features" in c for c in FL.validate_proposal(nofn)))
+
+    # --- builder-specific leakage: labels from anything but train
+    leak_all = ('def build_features(splits, meta):\n'
+                '    return {"x": {s: splits[s]["long_view"] for s in splits}}')
+    leak_valid = ('def build_features(splits, meta):\n'
+                  '    va = splits["valid"]\n'
+                  '    return {"x": {"valid": va["is_click"]}}')
+    ok_alias = ('import numpy as np\n'
+                'def build_features(splits, meta):\n'
+                '    tr = splits["train"]\n'
+                '    p = np.bincount(tr["video"], weights=tr["long_view"])\n'
+                '    return {"x": {s: p[splits[s]["video"]] for s in splits}}')
+    check("a builder reading labels from every split is flagged",
+          FL.label_leak_findings(leak_all))
+    check("a builder aliasing the VALID split is flagged",
+          FL.label_leak_findings(leak_valid))
+    check("the ordinary tr = splits['train'] alias is NOT flagged",
+          FL.label_leak_findings(ok_alias) == [],
+          f"{FL.label_leak_findings(ok_alias)}")
+    # this gap is real: the general checker passes leak_all cleanly
+    from agent.leakage_check import check_source, verdict as _lv
+    check("the builder gate covers a case the general checker does not",
+          not _lv(check_source(leak_all))["block"] and FL.label_leak_findings(leak_all))
+
+    # --- the gate cannot be bypassed by routing through menu_choices
+    from agent.menu import Menu, MenuError
+    m = Menu(MENU_PATH)
+    base = json.load(open(os.path.join(_ROOT, "logs",
+                                       "ensemble_results.json")))["config"]
+    good = dict(base); good["feature_source"] = ok_alias
+    check("a legitimate builder survives menu validation",
+          m.validate_choices(good).get("feature_source") == ok_alias)
+    bad = dict(base); bad["feature_source"] = leak_all
+    try:
+        m.validate_choices(bad)
+        check("a leaky builder is refused at the menu boundary", False)
+    except MenuError as e:
+        check("a leaky builder is refused at the menu boundary",
+              "feature_source rejected" in str(e))
+    junk = dict(base); junk["not_an_axis"] = "x"
+    try:
+        m.validate_choices(junk)
+        check("passthrough does not weaken unknown-axis validation", False)
+    except MenuError:
+        check("passthrough does not weaken unknown-axis validation", True)
+
+    # --- the builder contract is enforced, so misalignment cannot pass silently
+    sys.path.insert(0, os.path.join(_ROOT, "runtime"))
+    import train_lib
+    fake = {"train": {"user": np.zeros(5, np.int32)},
+            "valid": {"user": np.zeros(3, np.int32)}}
+    try:
+        train_lib.build_extra_features(
+            'def build_features(s, m): return {"x": {"train": [1, 2], "valid": [1]}}',
+            fake, {})
+        check("a wrong-length feature is refused", False)
+    except ValueError as e:
+        check("a wrong-length feature is refused", "rows" in str(e))
+    try:
+        train_lib.build_extra_features("x = 1", fake, {})
+        check("a source without the builder is refused", False)
+    except ValueError:
+        check("a source without the builder is refused", True)
+
+    # --- bin edges come from TRAIN only (leakage-safe by construction)
+    src = open(os.path.join(_ROOT, "runtime", "train_lib.py")).read()
+    seg = src.split("def encode_features")[1].split("def ")[0]
+    check("extra-feature bin edges are computed from the TRAIN split only",
+          'extra or {})[fname].get("train")' in seg)
+
+    # --- registry: reproducible, deduplicating, and fed back to the agent
+    with tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False) as t:
+        reg = t.name
+    try:
+        FL.record({"name": "feat_a", "status": FL.REJECTED,
+                   "reason": "constant within users", "source": ok_alias}, path=reg)
+        check("a rejected feature is recorded, not discarded",
+              FL.load_registry(reg)[0]["status"] == FL.REJECTED)
+        check("a repeat proposal is detected by name",
+              FL.already_tried("Feat A", path=reg) is not None)
+        check("a RENAMED repeat is still detected by its builder body",
+              FL.already_tried("totally_different", ok_alias, path=reg) is not None)
+        check("an unrelated feature is not falsely matched",
+              FL.already_tried("something_else", "def build_features(): pass",
+                               path=reg) is None)
+        check("past feature research is fed back into the prompt",
+              "feat_a" in FL.render_for_prompt(reg))
+    finally:
+        os.unlink(reg)
+
+    # --- the prompt states the two structural facts that kill bad proposals
+    pr = FL.build_feature_prompt("S", "E", "R")
+    check("the prompt warns that user-constant features are worth exactly 0.5",
+          "0.5000 AUC, exactly" in pr)
+    flat = " ".join(pr.split())      # the prompt is wrapped; assert on meaning
+    check("the prompt warns that a strong standalone score is not evidence",
+          "standalone number is not evidence" in flat and "0.639" in flat)
+    check("the prompt states the builder contract",
+          "build_features(splits, meta)" in flat
+          and 'splits["train"] only' in flat)
+
+    # --- the pathway exists in the loop and is non-fatal
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the discovery phase runs BEFORE planning, feeding the prompt",
+          "_feature_discovery_phase" in lsrc.split("_plan_candidates(action")[0])
+    check("discovery failures cannot kill an iteration",
+          '"type": "feature_discovery_skipped"' in lsrc)
+    check("every discovery outcome is journalled",
+          '"type": "feature_discovery"' in lsrc)
+    check("probe results are recorded to the registry",
+          "FL.record(entry)" in lsrc)
+
+
 def test_mechanism_audit():
     """A declaration is not evidence and a clean exit is not evidence. This
     catches the two ways this project has actually been fooled."""
@@ -2690,6 +2822,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
+              test_feature_discovery,
               test_mechanism_audit, test_residual_screen_reporting,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,

@@ -188,8 +188,69 @@ def load_cache(cache_dir: str = CACHE_DIR) -> tuple[dict, dict]:
 # --------------------------------------------------------------------------
 # Feature encoding: X (N, F) int32 with per-field offsets
 # --------------------------------------------------------------------------
-def encode_features(splits: dict, meta: dict, temporal: str = "none"):
-    """Fields: user, video, author, tab, dur_bucket [+ hour_bucket [+ dow]]."""
+EXTRA_FEATURE_BINS = 16     # quantile buckets per agent-discovered feature
+MAX_EXTRA_FEATURES = 6      # keeps one experiment interpretable
+
+
+def build_extra_features(source: str, splits: dict, meta: dict) -> dict:
+    """Execute an agent-written build_features(splits, meta) and validate it.
+
+    The contract is deliberately narrow: return
+        {feature_name: {"train": arr, "valid": arr, "test": arr}}
+    with one float per row of that split. Everything else -- bucketing, offsets,
+    the embedding table -- is handled by encode_features, so the agent writes
+    only the part that is actually a research decision.
+
+    Validated rather than trusted: a wrong length would otherwise misalign
+    silently against the labels and produce a plausible, meaningless score.
+    """
+    ns: dict = {}
+    exec(compile(source, "<agent_features>", "exec"), ns)
+    fn = ns.get("build_features")
+    if not callable(fn):
+        raise ValueError("feature source must define build_features(splits, meta)")
+    out = fn(splits, meta)
+    if not isinstance(out, dict) or not out:
+        raise ValueError("build_features must return a non-empty dict")
+    if len(out) > MAX_EXTRA_FEATURES:
+        raise ValueError(f"at most {MAX_EXTRA_FEATURES} features per experiment, "
+                         f"got {len(out)}")
+    clean = {}
+    for name, per_split in out.items():
+        if not isinstance(per_split, dict):
+            raise ValueError(f"feature {name!r} must map split -> array")
+        cols = {}
+        for sp in splits:
+            if sp not in per_split:
+                raise ValueError(f"feature {name!r} is missing split {sp!r}")
+            arr = np.asarray(per_split[sp], dtype=np.float64).ravel()
+            n = len(splits[sp]["user"])
+            if len(arr) != n:
+                raise ValueError(f"feature {name!r} split {sp!r} has {len(arr)} "
+                                 f"values but the split has {n} rows")
+            cols[sp] = arr
+        clean[str(name)] = cols
+    return clean
+
+
+def encode_features(splits: dict, meta: dict, temporal: str = "none",
+                    extra: dict | None = None):
+    """Fields: user, video, author, tab, dur_bucket [+ hour_bucket [+ dow]]
+    [+ one field per agent-discovered feature].
+
+    `extra` is the extension point for autonomously discovered features:
+        {feature_name: {"train": arr, "valid": arr, "test": arr}}
+    Each is a float array with one value per row of that split. It is bucketed
+    into EXTRA_FEATURE_BINS quantiles and appended as another categorical FM
+    field, which is how every existing feature is represented -- so a
+    discovered feature is a first-class citizen, not a bolted-on side channel.
+
+    LEAKAGE SAFETY, by construction: the bin edges are computed from the TRAIN
+    split ONLY and then applied unchanged to valid and test. A feature builder
+    cannot widen its own bins using evaluation data even by accident. (It could
+    still leak inside its own body, which is why the generated builder is put
+    through the AST leakage checker before it ever runs.)
+    """
     tr = splits["train"]
     edges = np.quantile(tr["duration_ms"], np.linspace(0, 1, 11)[1:-1])
     dims = [meta["field_dims"]["user"], meta["field_dims"]["video"],
@@ -200,6 +261,17 @@ def encode_features(splits: dict, meta: dict, temporal: str = "none"):
         dims.append(24)
     if use_dow:
         dims.append(7)
+
+    # agent-discovered features: train-only quantile edges, NaN -> its own bucket
+    extra_edges = {}
+    for fname in sorted(extra or {}):
+        col = np.asarray((extra or {})[fname].get("train"), dtype=np.float64)
+        finite = col[np.isfinite(col)]
+        e = (np.unique(np.quantile(finite,
+                                   np.linspace(0, 1, EXTRA_FEATURE_BINS + 1)[1:-1]))
+             if finite.size else np.asarray([0.0]))
+        extra_edges[fname] = e
+        dims.append(len(e) + 2)          # buckets + 1 overflow + 1 missing
     offsets = np.cumsum([0] + dims[:-1]).astype(np.int32)
 
     enc = {}
@@ -212,6 +284,12 @@ def encode_features(splits: dict, meta: dict, temporal: str = "none"):
             # date is yyyymmdd in April–May 2022; day-of-week via day offset from 20220408 (a Friday)
             day = (s["date"] % 100) + np.where(s["date"] >= 20220501, 30, 0)
             cols.append(((day - 8 + 4) % 7).astype(np.int32))
+        for fname in sorted(extra_edges):
+            v = np.asarray((extra or {})[fname].get(name), dtype=np.float64)
+            e = extra_edges[fname]
+            b = np.searchsorted(e, v).astype(np.int32)
+            b[~np.isfinite(v)] = len(e) + 1          # missing gets its own bucket
+            cols.append(b)
         X = np.stack(cols, axis=1).astype(np.int32) + offsets[None, :]
         enc[name] = X
     return enc, int(sum(dims)), offsets, dims
@@ -1277,8 +1355,17 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
             print(msg, flush=True)
 
     splits, meta = load_cache()
+    # Agent-discovered features arrive as SOURCE for a build_features() function
+    # rather than as data, so the exact code that produced them is recorded with
+    # the experiment and the result is reproducible from the journal alone.
+    extra = None
+    fsrc = menu_choices.get("feature_source")
+    if fsrc:
+        extra = build_extra_features(fsrc, splits, meta)
+        log(f"agent features: {sorted(extra)}")
     enc, dim, offsets, dims = encode_features(splits, meta,
-                                              menu_choices.get("temporal", "none"))
+                                              menu_choices.get("temporal", "none"),
+                                              extra=extra)
 
     training = menu_choices.get("training", "default")
     cfg = {

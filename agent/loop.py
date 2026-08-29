@@ -46,6 +46,7 @@ class AgentLoop:
                  min_branching_iterations: int = 0,
                  enable_data_tools: bool = False,
                  enable_research_state: bool = False,
+                 enable_feature_discovery: bool = False,
                  n_candidates: int = 0):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
@@ -95,6 +96,11 @@ class AgentLoop:
         # 0/1 disables multi-candidate planning (old single-proposal behaviour)
         self.n_candidates = int(n_candidates or 0)
         self._current_objective = None
+        self.enable_feature_discovery = bool(enable_feature_discovery)
+        # blocks the discovery prompt reuses, and the candidate it cleared
+        self._last_state_block = ""
+        self._last_error_block = ""
+        self._pending_feature = None
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -252,7 +258,8 @@ class AgentLoop:
             # UNEXPLORED separate from KNOWN_BAD, and splits GAUC from nDCG@5.
             # Rendered after the state so the state's headline numbers still
             # lead, and capped so it cannot crowd out the decision itself.
-            blocks = [st.render(), render_decision(d)]
+            self._last_state_block = st.render()
+            blocks = [self._last_state_block, render_decision(d)]
             try:
                 from .frontier import from_root as _frontier
                 blocks.insert(1, _frontier(self.root).render(limit=22))
@@ -295,6 +302,107 @@ class AgentLoop:
               f"{[r['tool'] for r in reqs]}", flush=True)
         return inspect_tools.render_results(results)
 
+    def _feature_discovery_phase(self, events: list) -> str:
+        """Autonomous feature research, one candidate per iteration.
+
+            evidence -> hypothesis -> builder code -> PROBE -> decision
+
+        The probe is what makes this affordable: a training run costs ~70s and
+        answers one question badly against a 0.0008 noise floor, while the
+        probe costs seconds and answers the question that actually gates the
+        decision -- does this carry signal the incumbent lacks? Only a
+        candidate that clears it reaches a training run.
+
+        Every outcome is recorded, including refusals, so a failed feature is
+        never rediscovered. Failures here are non-fatal: feature discovery is
+        an addition to the loop, never a prerequisite for making progress.
+        """
+        if not getattr(self, "enable_feature_discovery", False):
+            return ""
+        from . import feature_lab as FL
+        try:
+            state = self._last_state_block or ""
+            err = self._last_error_block or ""
+            prompt = FL.build_feature_prompt(state, err, FL.render_for_prompt())
+            obj, usage = self.llm.json_call(prompt)
+            self.spend.record(usage)
+        except LLMError as e:
+            events.append({"type": "feature_discovery_skipped", "error": str(e)[:200]})
+            return ""
+        except Exception as e:
+            events.append({"type": "feature_discovery_skipped",
+                           "error": f"{type(e).__name__}: {str(e)[:160]}"})
+            return ""
+
+        if not obj.get("propose"):
+            events.append({"type": "feature_discovery", "proposed": False,
+                           "reason": str(obj.get("decline_reason", ""))[:200]})
+            print(f"  [feature discovery] declined: "
+                  f"{str(obj.get('decline_reason', ''))[:90]}", flush=True)
+            return ""
+
+        problems = FL.validate_proposal(obj)
+        if problems:
+            events.append({"type": "feature_discovery", "proposed": True,
+                           "rejected": "incomplete proposal", "problems": problems})
+            print(f"  [feature discovery] incomplete proposal: {problems[:2]}",
+                  flush=True)
+            return ""
+
+        seen = FL.already_tried(obj.get("name", ""), obj.get("source", ""))
+        if seen:
+            events.append({"type": "feature_discovery", "proposed": True,
+                           "duplicate_of": seen.get("name"),
+                           "prior_status": seen.get("status")})
+            print(f"  [feature discovery] already tried: {seen.get('name')} "
+                  f"({seen.get('status')})", flush=True)
+            return ""
+
+        try:
+            from . import error_analysis as EA
+            splits, meta = EA.load_valid()
+            inc = self._incumbent_valid_scores()
+            res = FL.probe(obj, splits, meta, incumbent_scores=inc)
+        except Exception as e:
+            events.append({"type": "feature_discovery_skipped",
+                           "error": f"probe failed: {type(e).__name__}: {str(e)[:160]}"})
+            return ""
+
+        entry = {k: obj.get(k) for k in FL.REQUIRED_FIELDS}
+        entry.update(status=res["status"], reason=res.get("reason", ""),
+                     probe=res, iteration=len(self.tree.nodes))
+        FL.record(entry)
+        events.append({"type": "feature_discovery", "proposed": True,
+                       "name": obj.get("name"), "status": res["status"],
+                       "reason": res.get("reason", "")[:200],
+                       "best_incremental_sigma": res.get("best_incremental_sigma")})
+        print(f"  [FEATURE DISCOVERY] {obj.get('name')} -> {res['status']} "
+              f"({res.get('reason', '')[:80]})", flush=True)
+        self._pending_feature = (obj if res["status"] == FL.PROMISING else None)
+        return FL.render_probe_for_prompt(res)
+
+    def _incumbent_valid_scores(self):
+        """Rank-averaged validation scores of the submitted ensemble, if built.
+        Without it the probe can still measure standalone signal, just not the
+        residual -- which is the number that actually decides."""
+        import numpy as np
+        p = os.path.join(self.log_dir, "ensemble_results.json")
+        if not os.path.exists(p):
+            return None
+        try:
+            from .ensemble import rank_normalise
+            with open(p) as fh:
+                res = json.load(fh)
+            arrs = []
+            for i in res.get("seeds_used", []):
+                q = os.path.join(self.root, res.get("members_dir", ""),
+                                 f"seed_{i:02d}", "scores_valid.npy")
+                if os.path.exists(q):
+                    arrs.append(rank_normalise(np.load(q)))
+            return np.mean(arrs, axis=0) if arrs else None
+        except Exception:
+            return None
+
     # ---------- one iteration ----------
     def iterate(self) -> Node:
         it = self.tree.next_id()
@@ -315,6 +423,9 @@ class AgentLoop:
         run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
         events = []
         extra = self._research_block(events) + "\n\n" + self._inspect_phase(events)
+        feature_block = self._feature_discovery_phase(events)
+        if feature_block:
+            extra += "\n\n" + feature_block
         winner, trace = self._plan_candidates(action, target, reason, events,
                                               extra, self._current_objective)
         if trace:

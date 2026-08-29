@@ -33,7 +33,8 @@ from agent.pricing import RateTable  # noqa: E402
 # ensemble is a separate, later artifact from any single search run, so a new
 # search must not carry it off.
 SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json",
-                        "ab_test")   # A/B evidence is analysis, not a search product
+                        "ab_test",              # A/B evidence, not a search product
+                        "feature_registry.jsonl")  # accumulated feature research
 
 
 def archive_logs(log_dir: str) -> None:
@@ -125,6 +126,14 @@ def main():
                          "research objective (agent/research_policy.py) instead "
                          "of raw history. Objectives: exploration / exploitation "
                          "/ ablation / confirmation / integration.")
+    ap.add_argument("--feature-discovery", action="store_true",
+                    help="autonomous FEATURE RESEARCH: each iteration the agent "
+                         "may propose a new feature from the evidence, write its "
+                         "builder, and have it probed (leakage, within-user "
+                         "variation, redundancy, incremental signal) BEFORE any "
+                         "training run is spent. Results go to "
+                         "logs/feature_registry.jsonl so a failed feature is "
+                         "never reproposed. See agent/feature_lab.py.")
     ap.add_argument("--n-candidates", type=int, default=0,
                     help="multi-candidate planning: generate N candidate "
                          "experiments in ONE call, score them deterministically "
@@ -211,6 +220,7 @@ def main():
         min_branching_iterations=a.min_branching_iterations,
         enable_data_tools=a.data_tools,
         enable_research_state=a.research_state,
+        enable_feature_discovery=a.feature_discovery,
         n_candidates=a.n_candidates,
     )
     summary = loop.run()

@@ -44,6 +44,11 @@ class Menu:
         return {axis: next(iter(self.options(axis))) for axis in self.axes}
 
     # ---------- validation (call BEFORE any choice is executed) ----------
+    # Keys that are NOT menu axes but are legitimate parts of an experiment.
+    # feature_source carries an agent-written build_features() -- it is code,
+    # not an option, so it is validated by rule rather than by membership.
+    PASSTHROUGH_KEYS = ("feature_source",)
+
     def validate_choices(self, choices: dict) -> dict:
         """Returns normalized choices or raises MenuError with a readable message."""
         if not isinstance(choices, dict):
@@ -67,11 +72,29 @@ class Menu:
                 continue
             normalized[axis] = opt
         for axis in choices:
+            if axis in self.PASSTHROUGH_KEYS:
+                continue
             if axis not in self.axes:
                 problems.append(f"unknown axis '{axis}' (valid axes: {list(self.axes)})")
+        # An agent-written feature builder travels inside menu_choices, so the
+        # executor's leakage gate -- which scans the SCRIPT -- never sees it.
+        # Gate it here, at the only point it can enter an experiment.
+        fsrc = choices.get("feature_source")
+        if fsrc:
+            from .feature_lab import label_leak_findings
+            leaks = label_leak_findings(str(fsrc))
+            if leaks:
+                problems.append("feature_source rejected: " + leaks[0])
+            elif "build_features" not in str(fsrc):
+                problems.append("feature_source must define "
+                                "build_features(splits, meta)")
+            else:
+                normalized["feature_source"] = str(fsrc)
         # cross-axis constraints: option-level "requires": {other_axis: [allowed…]}
         if not problems:
             for axis, opt in normalized.items():
+                if axis in self.PASSTHROUGH_KEYS:
+                    continue          # code, not an option -- no cross-axis rules
                 req = self.options(axis)[opt].get("requires", {})
                 for other_axis, allowed in req.items():
                     if normalized.get(other_axis) not in allowed:
