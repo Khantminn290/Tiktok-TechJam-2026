@@ -1230,6 +1230,69 @@ def test_lambdarank():
           "36.3%" in spec and "nDCG@5" in spec)
 
 
+def test_new_axes_and_snapshot():
+    """Candidates #1 (per-user weighting), #2 (regularization), #4 (snapshot
+    ensembling). Asserts wiring + math without training a real model.
+    """
+    print("\n[candidates #1/#2/#4: wiring and math]")
+    import numpy as np
+    m = Menu(MENU_PATH)
+    base = m.default_choices()
+
+    # --- #1 sample_weighting ------------------------------------------------
+    check("sample_weighting is a real axis with a per_row default",
+          "sample_weighting" in m.axis_names()
+          and base["sample_weighting"] == "per_row")
+    m.validate_choices({**base, "loss": "bpr_pairwise",
+                        "sample_weighting": "per_user_sqrt"})
+    check("per_user_sqrt validates on bpr_pairwise (the untested config)", True)
+    expect_menu_error(m, {**base, "loss": "pointwise_logloss",
+                          "sample_weighting": "per_user_inv"},
+                      "per-user weighting rejected on a non-pairwise loss")
+    sw = m.options("sample_weighting")["per_user_inv"]["description"]
+    check("sample_weighting entry cites the measured aggregation mismatch",
+          "33.3%" in m.axes["sample_weighting"]["description"]
+          and "809" in m.axes["sample_weighting"]["description"])
+    check("sample_weighting entry records the listwise counter-signal honestly",
+          "listwise" in m.axes["sample_weighting"]["description"]
+          and "0.6032" in m.axes["sample_weighting"]["description"])
+
+    # the weighting math itself: mean-1.0 renormalisation, correct ordering
+    n_users, user_tr = 3, np.array([0, 0, 0, 0, 1, 1, 2])
+    npairs = np.bincount(user_tr, minlength=n_users).astype(float)
+    per_user = npairs[user_tr]
+    w_inv = 1.0 / np.maximum(per_user, 1.0); w_inv /= w_inv.mean()
+    w_sqrt = 1.0 / np.sqrt(np.maximum(per_user, 1.0)); w_sqrt /= w_sqrt.mean()
+    check("per-user weights renormalise to mean 1.0 (no hidden lr change)",
+          abs(w_inv.mean() - 1.0) < 1e-12 and abs(w_sqrt.mean() - 1.0) < 1e-12)
+    check("the heavy user's pairs are downweighted vs the light user's",
+          w_inv[0] < w_inv[6] and w_sqrt[0] < w_sqrt[6])
+    check("sqrt variant is a gentler correction than inv",
+          (w_sqrt[6] / w_sqrt[0]) < (w_inv[6] / w_inv[0]))
+
+    # --- #2 regularization --------------------------------------------------
+    check("regularization is a real axis defaulting to the current 1e-6",
+          base["regularization"] == "l2_default")
+    src = open(os.path.join(_ROOT, "runtime", "train_lib.py")).read()
+    check("l2 is threaded from cfg into RankFM (was hardcoded)",
+          'l2=cfg.get("l2", 1e-6)' in src)
+    reg = m.axes["regularization"]["description"]
+    check("regularization entry distinguishes itself from CAPACITY explicitly",
+          "NOT capacity" in reg and "1.62%" in reg)
+
+    # --- #4 snapshot ensembling --------------------------------------------
+    check("snapshot_ensemble is config-driven, NOT a menu axis",
+          "snapshot_ensemble" not in m.axis_names()
+          and '"snapshot_ensemble"' in src)
+    check("snapshot ensemble keeps only the top-N checkpoints by valid score",
+          "snapshots.sort(key=lambda s: -s[0])" in src
+          and "del snapshots[snap_n:]" in src)
+    check("snapshot ensemble is ADOPTED only if it beats the best checkpoint",
+          "if snap_primary > best:" in src)
+    check("snapshot ensemble rank-normalises before averaging (scale-free)",
+          "_rank_norm(s[1])" in src)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1240,7 +1303,8 @@ if __name__ == "__main__":
               test_worker_sandbox_hardlinking, test_run_parallel_round,
               test_merge_acceptance_via_tree_ordering,
               test_standing_override_survives_reload,
-              test_compute_budget_prompt_section, test_lambdarank):
+              test_compute_budget_prompt_section, test_lambdarank,
+              test_new_axes_and_snapshot):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

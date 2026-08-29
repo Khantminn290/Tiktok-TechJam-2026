@@ -367,6 +367,30 @@ def _aux_targets(split_cols, multitask):
         r = split_cols["play_time_ms"] / np.maximum(split_cols["duration_ms"], 1.0)
         return {"watch": np.minimum(r, 3.0).astype(np.float32),
                 "watch_censored": (r >= 0.97).astype(np.float32)}
+    if multitask == "aux_click_like_forward_watch":
+        # Candidate #3, in the only form compatible with a pairwise primary
+        # loss: the graded play-time signal as an ADDITIONAL auxiliary head
+        # beside the binary click/like/forward heads, leaving long_view as the
+        # primary target. Replacing the primary target with a graded one would
+        # require either grade-weighted pairs (structurally identical to
+        # lambdarank_ndcg, measured here at -13.7 sigma) or pointwise
+        # regression (already measured worse than BPR).
+        #
+        # The ratio is CLEANED before use, for measured reasons:
+        #  * max observed ratio is 617842x duration, and rows with ratio > 5
+        #    (1.85% of train) have a long_view rate of only 13.7% versus 100%
+        #    at ratio 1-5 -- that tail is broken instrumentation, not
+        #    engagement, and the binary label already rejects it. Feeding it
+        #    raw would teach the model the opposite of the truth.
+        #  * clipping at 2.0 keeps the monotone, informative band (long_view
+        #    rate rises 50% -> 68% -> 83% -> 100% across ratio 0.2 -> 1.0)
+        #    while discarding the corrupted tail.
+        r = split_cols["play_time_ms"] / np.maximum(split_cols["duration_ms"], 1.0)
+        r_clean = np.where(r > 5.0, 0.0, np.minimum(r, 2.0))
+        return {"click": split_cols["is_click"], "like": split_cols["is_like"],
+                "forward": split_cols["is_forward"],
+                "watch": r_clean.astype(np.float32),
+                "watch_censored": ((r >= 0.97) & (r <= 5.0)).astype(np.float32)}
     return {}
 
 
@@ -401,8 +425,11 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
         hist = History(splits, meta["field_dims"]["user"], cfg["history"])
 
     aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
-               "censored_watch_time": ["watch"], "none": []}
+               "censored_watch_time": ["watch"],
+               "aux_click_like_forward_watch": ["click", "like", "forward", "watch"],
+               "none": []}
     model = RankFM(dim=cfg["dim"], k=cfg["k"], lr=cfg["lr"], seed=cfg["seed"],
+                   l2=cfg.get("l2", 1e-6),
                    aux_tasks=aux_map[cfg["multitask"]])
     aux = _aux_targets(tr, cfg["multitask"])
     lam = cfg.get("aux_weight", 0.2)
@@ -414,6 +441,8 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
     user_tr = tr["user"]
     order = np.argsort(user_tr, kind="stable")
     bounds = np.searchsorted(user_tr[order], np.arange(n_users + 1))
+    # train-split impression count per video, for popularity-biased negatives
+    item_pop = np.bincount(tr["video"], minlength=meta["field_dims"]["video"])
 
     def refresh_pooled():
         nonlocal Htr, Hva, Hte
@@ -438,27 +467,123 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
             model.apply_grads([(cache, g)],
                               _aux_grad_contribs(model, cache, aux, b, lam))
 
-    def epoch_bpr():
-        pos_rows = np.flatnonzero(ytr > 0)
-        neg_pick = np.empty(len(pos_rows), dtype=np.int64)
-        ok = np.zeros(len(pos_rows), dtype=bool)
-        for j, r in enumerate(pos_rows):
+    def _sample_pairs(mode="uniform_1"):
+        """Build the (positive, negative) training pairs for a pairwise epoch.
+
+        Separable from the loss SHAPE: BPR's objective and BPR's sampler are
+        independent choices, and only the objective had ever been varied here.
+        Measured motivation: each train user averages 14.7 positives and 28.9
+        negatives, but uniform_1 draws exactly one negative per positive per
+        epoch -- touching ~1/29 of the available negatives. Refs: Rendle et
+        al., BPR (UAI 2009) for the uniform baseline; Rendle & Freudenthaler,
+        'Improving Pairwise Learning for Item Recommendation from Implicit
+        Feedback' (WSDM 2014), which shows uniform sampling is the weak point
+        rather than the objective; Zhang et al., 'Optimizing Top-N
+        Collaborative Filtering via Dynamic Negative Item Sampling' (SIGIR
+        2013) for score-aware (hard) negatives.
+
+        Returns (pos_rows, neg_rows), aligned and equal length.
+        """
+        pos_all = np.flatnonzero(ytr > 0)
+        # --- bagging (candidate #5): row-level Poisson bootstrap ------------
+        # Row-level, NOT user-level, and deliberately so. Measured constraints:
+        #  * #1 showed that flattening user frequency HURTS monotonically
+        #    (per_user_sqrt -0.00103, per_user_inv -0.00380 vs BPR), so the
+        #    resampler must not implicitly equalise users. Poisson(1)
+        #    multiplicities are drawn PER ROW independently of user identity,
+        #    so expected rows per user stays exactly n_u -- the natural
+        #    imbalance is preserved.
+        #  * #4 showed ensemble members must be BOTH independent and
+        #    comparably good. A user-level bootstrap would drop each user
+        #    entirely from ~1/e = 37% of members, and with 100% train/valid
+        #    user overlap those members would have untrained embeddings for
+        #    37% of evaluated users -- not comparably good. Row-level keeps
+        #    every user present (~63% of their distinct rows in expectation).
+        # Ref: Breiman, "Bagging Predictors" (1996); Oza & Russell / Chamandy
+        # et al. for the Poisson formulation used at scale.
+        bag_seed = cfg.get("bootstrap_seed")
+        if bag_seed is not None:
+            brng = np.random.default_rng(int(bag_seed))
+            mult = brng.poisson(1.0, size=len(ytr))
+            pos_all = np.repeat(pos_all, mult[pos_all])
+            keep_neg = mult > 0          # negatives present in this resample
+        else:
+            keep_neg = None
+        n_per = {"uniform_1": 1, "uniform_2": 2, "uniform_4": 4}.get(mode, 1)
+        scores = None
+        if mode == "hard_negatives":
+            scores = model.predict(Xtr, Htr)   # current model -> hardest negatives
+
+        P, N = [], []
+        for r in pos_all:
             u = user_tr[r]
             lo, hi = bounds[u], bounds[u + 1]
             rows_u = order[lo:hi]
             negs = rows_u[ytr[rows_u] == 0]
-            if len(negs):
-                neg_pick[j] = negs[rng.integers(len(negs))]
-                ok[j] = True
-        pos_rows, neg_pick = pos_rows[ok], neg_pick[ok]
+            if keep_neg is not None:
+                negs = negs[keep_neg[negs]]   # negatives this member actually saw
+            if not len(negs):
+                continue
+            if mode == "popularity_biased":
+                # Popular items the user did NOT long-view are more informative
+                # negatives than obscure ones: the impression was served and
+                # declined, rather than simply never surfacing.
+                w = item_pop[tr["video"][negs]].astype(np.float64) + 1.0
+                pick = negs[rng.choice(len(negs), size=1, p=w / w.sum())]
+            elif mode == "hard_negatives":
+                # Dynamic negative sampling: prefer the negatives the model
+                # currently scores highest -- the ones it is actively wrong about.
+                k = min(len(negs), 8)
+                top = negs[np.argpartition(-scores[negs], k - 1)[:k]]
+                pick = top[rng.integers(k, size=1)]
+            else:
+                pick = negs[rng.integers(len(negs), size=n_per)]
+            for q in np.atleast_1d(pick):
+                P.append(r)
+                N.append(q)
+        return np.asarray(P, dtype=np.int64), np.asarray(N, dtype=np.int64)
+
+    def _user_weights(pos_rows):
+        """Per-pair weight implementing the sample_weighting axis.
+
+        The metric aggregates PER USER (nDCG@5 averages every user equally;
+        GAUC weights users by positive count), but training averages PER ROW.
+        Measured on this train split: max 809 rows for one user vs a median of
+        31, and the top 10% of users supply 33.3% of all rows -- so heavy users
+        dominate the gradient in a way the metric never rewards. Weighting each
+        pair by 1/n_u (or 1/sqrt(n_u)) makes the training objective aggregate
+        the way the metric does. Weights are renormalised to mean 1.0 so the
+        effective learning rate is unchanged and this is a pure reweighting,
+        not a hidden lr change.
+        """
+        mode = cfg.get("sample_weighting", "per_row")
+        if mode == "per_row":
+            return None
+        npairs = np.bincount(user_tr[pos_rows], minlength=n_users).astype(np.float64)
+        per_user = npairs[user_tr[pos_rows]]
+        if mode == "per_user_inv":
+            w = 1.0 / np.maximum(per_user, 1.0)
+        elif mode == "per_user_sqrt":
+            w = 1.0 / np.sqrt(np.maximum(per_user, 1.0))
+        else:
+            return None
+        return (w / w.mean()).astype(np.float32)
+
+    def epoch_bpr():
+        pos_rows, neg_pick = _sample_pairs(cfg.get("neg_sampling", "uniform_1"))
+        uw = _user_weights(pos_rows)
         perm = rng.permutation(len(pos_rows))
         for i in range(0, len(perm), bs):
-            pb, nb = pos_rows[perm[i:i + bs]], neg_pick[perm[i:i + bs]]
+            sel = perm[i:i + bs]
+            pb, nb = pos_rows[sel], neg_pick[sel]
             hp = None if Htr is None else Htr[pb]
             hn = None if Htr is None else Htr[nb]
             zp, cp = model.forward(Xtr[pb], hp)
             zn, cn = model.forward(Xtr[nb], hn)
-            g = (-sigmoid(-(zp - zn)) / len(pb)).astype(np.float32)
+            g = (-sigmoid(-(zp - zn)) / len(pb))
+            if uw is not None:
+                g = g * uw[sel]
+            g = g.astype(np.float32)
             contribs = [(cp, g), (cn, -g)]
             contribs_aux = (_aux_grad_contribs(model, cp, aux, pb, lam)
                             + _aux_grad_contribs(model, cn, aux, nb, lam))
@@ -611,6 +736,26 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
                   (cfg["loss"], cfg["epochs"], cfg["lr"] * 0.3)]
 
     best, best_state, bad = -1.0, None, 0
+    # --- snapshot ensembling (candidate #4) ---------------------------------
+    # Not a menu axis: it is a post-hoc scoring technique applicable to ANY
+    # trained model, not a per-node search choice. Keeps the top-N epoch
+    # checkpoints by valid primary and rank-averages their scores at the end.
+    # Rationale, measured on this project: seed ensembling is the largest
+    # verified win so far (+0.00157, +1.96 sigma, all 252 five-seed subsets
+    # beat the best single seed) but costs N full training runs. Checkpoints
+    # from a single run target the same variance-reduction mechanism at ~1x
+    # cost, because SGD leaves each epoch's parameters at a different point.
+    # Ref: Huang et al., "Snapshot Ensembles: Train 1, Get M For Free"
+    # (ICLR 2017).
+    snap_n = int(cfg.get("snapshot_ensemble", 0) or 0)
+    snapshots = []   # (valid_primary, scores_valid, scores_test)
+
+    def _rank_norm(x):
+        o = np.argsort(x, kind="stable")
+        r = np.empty(len(x), dtype=np.float64)
+        r[o] = np.arange(len(x), dtype=np.float64)
+        return r / max(1, len(x) - 1)
+
     for loss_name, n_ep, lr in stages:
         model.lr = lr
         bad = 0
@@ -619,9 +764,17 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
             refresh_pooled()
             runners[loss_name]()
             refresh_pooled()
-            va = evaluate(uva_raw, yva, model.predict(Xva, Hva))
+            sv = model.predict(Xva, Hva)
+            va = evaluate(uva_raw, yva, sv)
             log(f"  [{loss_name}] epoch {ep:2d} | valid primary {va['primary']:.4f} "
                 f"(GAUC {va['GAUC']:.4f} nDCG@5 {va['nDCG@5']:.4f}) | {time.time()-t0:.1f}s")
+            if snap_n:
+                # test scores are computed only for retained snapshots, so the
+                # cost stays proportional to snap_n rather than to epoch count
+                snapshots.append((float(va["primary"]), sv.copy(),
+                                  model.predict(Xte, Hte)))
+                snapshots.sort(key=lambda s: -s[0])
+                del snapshots[snap_n:]
             if va["primary"] > best + 1e-5:
                 best, bad, best_state = va["primary"], 0, model.state()
             else:
@@ -632,9 +785,23 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
 
     model.load_state(best_state)
     refresh_pooled()
+    scores_valid = model.predict(Xva, Hva)
+    scores_test = model.predict(Xte, Hte)
+    if snap_n and len(snapshots) > 1:
+        sv = np.mean([_rank_norm(s[1]) for s in snapshots], axis=0)
+        st_ = np.mean([_rank_norm(s[2]) for s in snapshots], axis=0)
+        snap_primary = evaluate(uva_raw, yva, sv)["primary"]
+        log(f"  snapshot ensemble of {len(snapshots)} checkpoints: "
+            f"valid primary {snap_primary:.4f} (best single epoch {best:.4f})")
+        # Guard: only adopt the ensemble if it actually beats the best single
+        # checkpoint on valid. Otherwise this silently degrades a good model.
+        if snap_primary > best:
+            scores_valid, scores_test = sv, st_
+        else:
+            log("  snapshot ensemble did NOT beat the best checkpoint — keeping single")
     return {
-        "scores_valid": model.predict(Xva, Hva),
-        "scores_test": model.predict(Xte, Hte),
+        "scores_valid": scores_valid,
+        "scores_test": scores_test,
         "model": model,
         "hist": hist,
     }
@@ -887,9 +1054,20 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
         "multitask": menu_choices.get("multitask", "none"),
         "model": menu_choices.get("model", "fm_numpy"),
         "training": training,
+        "neg_sampling": menu_choices.get("neg_sampling", "uniform_1"),
+        "sample_weighting": menu_choices.get("sample_weighting", "per_row"),
+        "l2": {"l2_default": 1e-6, "l2_1e5": 1e-5, "l2_1e4": 1e-4,
+               "l2_1e3": 1e-3}.get(menu_choices.get("regularization", "l2_default"), 1e-6),
+        # not a menu axis -- post-hoc scoring technique, set via config/CLI
+        "snapshot_ensemble": menu_choices.get("snapshot_ensemble", 0),
+        # not a menu axis -- bagging is an ensemble-construction mechanism,
+        # meaningful only across MULTIPLE runs, not within one node
+        "bootstrap_seed": menu_choices.get("bootstrap_seed"),
     }
     aux_map = {"aux_click": ["click"], "aux_click_like_forward": ["click", "like", "forward"],
-               "censored_watch_time": ["watch"], "none": []}
+               "censored_watch_time": ["watch"],
+               "aux_click_like_forward_watch": ["click", "like", "forward", "watch"],
+               "none": []}
     cfg["aux_tasks"] = aux_map[cfg["multitask"]]
 
     t_train = time.time()
