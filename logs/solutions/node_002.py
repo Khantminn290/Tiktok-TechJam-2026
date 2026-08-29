@@ -1,178 +1,194 @@
-#!/usr/bin/env python3
 import argparse
 import json
 import os
 import sys
+import tempfile
 import traceback
+from collections import defaultdict
+
 import numpy as np
+
 import train_lib
 
 
 def parse_args():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--menu-choices', type=str, required=True)
-    ap.add_argument('--output-dir', type=str, required=True)
-    ap.add_argument('--seed', type=int, default=0)
-    return ap.parse_args()
+    p = argparse.ArgumentParser()
+    p.add_argument('--menu-choices', type=str, required=True)
+    p.add_argument('--output-dir', type=str, required=True)
+    p.add_argument('--seed', type=int, default=0)
+    return p.parse_args()
 
 
-def incumbent_cfg():
-    return {
-        'loss': 'bpr_pairwise',
-        'neg_sampling': 'uniform_1',
-        'user_history': 'recency_weighted_pool',
-        'multitask': 'none',
-        'model': 'fm_numpy',
-        'temporal': 'hour_plus_dow',
-        'training': 'lower_lr_longer',
-        'data_extras': 'none',
-        'sample_weighting': 'per_row',
-        'regularization': 'l2_default',
-    }
+def load_base_scores(base_menu, output_dir, seed):
+    with tempfile.TemporaryDirectory(prefix='kuairand_base_') as tmpdir:
+        train_lib.run(base_menu, tmpdir, seed=seed)
+        valid_scores = np.load(os.path.join(tmpdir, 'scores_valid.npy'))
+        test_scores = np.load(os.path.join(tmpdir, 'scores_test.npy'))
+    return valid_scores.astype(np.float64), test_scores.astype(np.float64)
 
 
-def recency_centroids_from_train(train, n_users, n_videos, emb_dim, video_vecs, max_hist=30, decay=0.85):
-    user = np.asarray(train['user'], dtype=np.int64)
-    video = np.asarray(train['video'], dtype=np.int64)
-    label = np.asarray(train['long_view'], dtype=np.int8)
-    date = np.asarray(train['date'], dtype=np.int64)
-    time_ms = np.asarray(train['time_ms'], dtype=np.int64)
+def build_user_positive_histories(splits):
+    train = splits['train']
+    user_hist = defaultdict(list)
+    users = train['user']
+    videos = train['video']
+    labels = train['long_view']
+    times = train['time_ms']
+    dates = train['date']
 
-    order = np.lexsort((time_ms, date, user))
-    user_o = user[order]
-    video_o = video[order]
-    label_o = label[order]
-
-    centroids = np.zeros((n_users, emb_dim), dtype=np.float32)
-    norms = np.zeros(n_users, dtype=np.float32)
-
-    start = 0
-    n = len(order)
-    while start < n:
-        u = user_o[start]
-        end = start + 1
-        while end < n and user_o[end] == u:
-            end += 1
-        vids = video_o[start:end][label_o[start:end] == 1]
-        if vids.size > 0:
-            vids = vids[-max_hist:]
-            vecs = video_vecs[vids]
-            m = vecs.shape[0]
-            w = decay ** np.arange(m - 1, -1, -1, dtype=np.float32)
-            denom = float(np.sum(w))
-            c = (vecs * w[:, None]).sum(axis=0) / max(denom, 1e-12)
-            cn = float(np.linalg.norm(c))
-            if cn > 0:
-                centroids[u] = c.astype(np.float32)
-                norms[u] = cn
-        start = end
-    return centroids, norms
+    order = np.lexsort((times, dates, users))
+    for idx in order:
+        if labels[idx] > 0:
+            user_hist[int(users[idx])].append(int(videos[idx]))
+    return user_hist
 
 
-def compute_similarity_prior(split, centroids, centroid_norms, video_vecs, video_norms):
-    user = np.asarray(split['user'], dtype=np.int64)
-    video = np.asarray(split['video'], dtype=np.int64)
-    uv = centroids[user]
-    vv = video_vecs[video]
-    dot = np.sum(uv * vv, axis=1)
-    denom = centroid_norms[user] * video_norms[video]
-    sim = np.zeros_like(dot, dtype=np.float32)
-    mask = denom > 1e-12
-    sim[mask] = (dot[mask] / denom[mask]).astype(np.float32)
-    return sim
+def build_affinity(splits, min_count=2, topk=200):
+    train = splits['train']
+    users = train['user']
+    videos = train['video']
+    labels = train['long_view']
+
+    pos_by_user = defaultdict(list)
+    for u, v, y in zip(users, videos, labels):
+        if y > 0:
+            pos_by_user[int(u)].append(int(v))
+
+    item_count = defaultdict(int)
+    pair_count = defaultdict(int)
+
+    for vids in pos_by_user.values():
+        uniq = sorted(set(vids))
+        m = len(uniq)
+        if m == 0:
+            continue
+        for v in uniq:
+            item_count[v] += 1
+        for i in range(m):
+            vi = uniq[i]
+            for j in range(i + 1, m):
+                vj = uniq[j]
+                pair_count[(vi, vj)] += 1
+
+    neigh = defaultdict(list)
+    for (i, j), cij in pair_count.items():
+        if cij < min_count:
+            continue
+        denom = np.sqrt(item_count[i] * item_count[j])
+        if denom <= 0:
+            continue
+        w = cij / denom
+        neigh[i].append((j, w))
+        neigh[j].append((i, w))
+
+    aff = {}
+    for i, lst in neigh.items():
+        lst.sort(key=lambda x: x[1], reverse=True)
+        if topk is not None and len(lst) > topk:
+            lst = lst[:topk]
+        aff[i] = dict(lst)
+    return aff, item_count
 
 
-def zscore_from_train(train_vals, vals):
-    mu = float(np.mean(train_vals))
-    sd = float(np.std(train_vals))
-    if sd < 1e-8:
-        return np.zeros_like(vals, dtype=np.float32)
-    return ((vals - mu) / sd).astype(np.float32)
+def affinity_scores(split, user_hist, aff):
+    users = split['user']
+    videos = split['video']
+    out = np.zeros(len(users), dtype=np.float64)
+    cache_user = {}
+
+    for idx, (u, v) in enumerate(zip(users, videos)):
+        u = int(u)
+        v = int(v)
+        hist = cache_user.get(u)
+        if hist is None:
+            raw = user_hist.get(u, [])
+            hist = list(dict.fromkeys(raw[-50:]))
+            cache_user[u] = hist
+        s = 0.0
+        for h in hist:
+            if h == v:
+                s += 1.0
+            else:
+                s += aff.get(h, {}).get(v, 0.0)
+        out[idx] = s
+    return out
+
+
+def zscore(x):
+    x = x.astype(np.float64)
+    m = float(np.mean(x))
+    s = float(np.std(x))
+    if s < 1e-12:
+        return np.zeros_like(x)
+    return (x - m) / s
+
+
+def choose_alpha(base_valid, aff_valid, valid_user_raw, valid_labels):
+    alphas = [0.0, 0.02, 0.05, 0.10, 0.15, 0.20, 0.30]
+    best_alpha = 0.0
+    best_metrics = None
+    best_primary = -1e18
+    for a in alphas:
+        scores = base_valid + a * aff_valid
+        metrics = train_lib.evaluate(valid_user_raw, valid_labels, scores)
+        primary = float(metrics['primary'])
+        if primary > best_primary:
+            best_primary = primary
+            best_alpha = a
+            best_metrics = metrics
+    return best_alpha, best_metrics
 
 
 def main():
     args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
     try:
-        _ = json.loads(args.menu_choices)
+        if args.menu_choices:
+            _ = json.loads(args.menu_choices)
 
-        cfg = incumbent_cfg()
-        train_lib.run(cfg, args.output_dir, seed=args.seed)
+        base_menu = {
+            'loss': 'bpr_pairwise',
+            'neg_sampling': 'uniform_1',
+            'user_history': 'none',
+            'multitask': 'none',
+            'model': 'fm_numpy',
+            'temporal': 'hour_plus_dow',
+            'training': 'lower_lr_longer',
+            'data_extras': 'none',
+            'sample_weighting': 'per_row',
+            'regularization': 'l2_default',
+        }
 
-        valid_scores = np.load(os.path.join(args.output_dir, 'scores_valid.npy'))
-        test_scores = np.load(os.path.join(args.output_dir, 'scores_test.npy'))
-
+        base_valid, base_test = load_base_scores(base_menu, args.output_dir, args.seed)
         splits, meta = train_lib.load_cache()
-        enc, dim, offsets, dims = train_lib.encode_features(splits, meta, temporal=cfg['temporal'])
 
-        # Refit the same incumbent once to expose learned embeddings for the similarity prior.
-        # Root-cause fix from the failed attempt: train_lib.train_numpy_fm expects cfg['history']
-        # in some internal paths, so provide both aliases.
-        cfg_train = dict(cfg)
-        cfg_train['history'] = cfg['user_history']
+        user_hist = build_user_positive_histories(splits)
+        aff, _ = build_affinity(splits, min_count=2, topk=200)
 
-        def log(*a, **k):
-            return None
+        aff_valid_raw = affinity_scores(splits['valid'], user_hist, aff)
+        aff_test_raw = affinity_scores(splits['test'], user_hist, aff)
+        aff_valid = zscore(aff_valid_raw)
+        aff_test = zscore(aff_test_raw)
 
-        model, _ = train_lib.train_numpy_fm(cfg_train, enc, splits, meta, log)
-
-        state = model.state()
-        V = None
-        for key in ('V', 'embeddings', 'embed'):
-            if key in state:
-                V = np.asarray(state[key])
-                break
-        if V is None:
-            raise RuntimeError('Could not find FM embedding matrix in model.state(); available keys: %s' % list(state.keys()))
-
-        video_field = 1
-        video_start = int(offsets[video_field])
-        n_videos = int(meta['field_dims']['video'])
-        video_vecs = np.asarray(V[video_start:video_start + n_videos], dtype=np.float32)
-        video_norms = np.linalg.norm(video_vecs, axis=1).astype(np.float32)
-
-        n_users = int(meta['field_dims']['user'])
-        centroids, centroid_norms = recency_centroids_from_train(
-            splits['train'], n_users=n_users, n_videos=n_videos,
-            emb_dim=video_vecs.shape[1], video_vecs=video_vecs,
-            max_hist=30, decay=0.85,
+        alpha, metrics = choose_alpha(
+            base_valid,
+            aff_valid,
+            splits['valid']['user_raw'],
+            splits['valid']['long_view'],
         )
 
-        prior_train = compute_similarity_prior(splits['train'], centroids, centroid_norms, video_vecs, video_norms)
-        prior_valid = compute_similarity_prior(splits['valid'], centroids, centroid_norms, video_vecs, video_norms)
-        prior_test = compute_similarity_prior(splits['test'], centroids, centroid_norms, video_vecs, video_norms)
+        final_valid = base_valid + alpha * aff_valid
+        final_test = base_test + alpha * aff_test
 
-        prior_valid_z = zscore_from_train(prior_train, prior_valid)
-        prior_test_z = zscore_from_train(prior_train, prior_test)
-
-        labels_valid = np.asarray(splits['valid']['long_view'])
-        users_valid = np.asarray(splits['valid']['user_raw'])
-
-        alphas = [0.0, 0.01, 0.02, 0.05, 0.10]
-        best_alpha = 0.0
-        best_metrics = None
-        best_valid_scores = valid_scores.astype(np.float32)
-
-        for alpha in alphas:
-            cand_scores = (valid_scores + alpha * prior_valid_z).astype(np.float32)
-            metrics = train_lib.evaluate(users_valid, labels_valid, cand_scores)
-            if best_metrics is None or float(metrics['primary']) > float(best_metrics['primary']):
-                best_metrics = metrics
-                best_alpha = alpha
-                best_valid_scores = cand_scores
-
-        final_test_scores = (test_scores + best_alpha * prior_test_z).astype(np.float32)
-
+        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_valid)
+        np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test)
         with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-            json.dump({k: float(v) for k, v in best_metrics.items()}, f)
-        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), best_valid_scores)
-        np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test_scores)
-    except Exception:
+            json.dump({k: float(v) for k, v in metrics.items()}, f)
+    except Exception as e:
         traceback.print_exc(file=sys.stderr)
-        sys.stderr.flush()
-        return 1
-    return 0
+        sys.stderr.write(f'ERROR: {e}\n')
+        sys.exit(1)
 
 
 if __name__ == '__main__':
-    sys.exit(main())
+    main()

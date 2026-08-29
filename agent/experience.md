@@ -1,14 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [HELPED] iter 2 -- A sequential additive signal may still improve within-user ranking even though set-based history poo
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6033 (previous best n/a).
-
-### [NEUTRAL] iter 3 -- Combine Candidate A's strongest broad additive signals — recency_weighted_pool user history plus aux
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6046, no clear change vs the running best.
-
-### [HELPED] iter 4 -- A clean ablation of the current best recipe's multitask auxiliary heads will reveal whether aux_clic
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6050 (previous best 0.6046).
-
 ### [HELPED] iter 5 -- Ablate the multitask auxiliary heads from the current best FM+BPR recipe: if aux_click_like_forward
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6050 (previous best 0.6046).
 
@@ -44,4 +35,13 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [HELPED] iter 0 -- Exploit the strongest known recipe by adding the still-helpful recency-weighted positive-history fea
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6050 as the first scored node (no prior best to compare against).
+
+### [HELPED] iter 0 -- Probe the only remaining major standalone model family that may capture information missing from set
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6033 as the first scored node (no prior best to compare against).
+
+### [HELPED] iter 1 -- A clean model ablation should swap the incumbent's gru4rec_seq for fm_numpy while holding the rest o
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6042 from 0.6033 (+0.00089 = +1.1 sigma).
+
+### [NEUTRAL] iter 3 -- Confirm whether the strongest remaining lightweight history variant is a real improvement in the set
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6050 vs the then-best 0.6042 (+0.00078 = +1.0 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 

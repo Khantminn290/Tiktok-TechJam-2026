@@ -1,5 +1,5 @@
 {
-  "iteration_id": 0,
+  "iteration_id": 3,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
@@ -12,12 +12,12 @@
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "Exploit the strongest known recipe by adding the still-helpful recency-weighted positive-history feature on top of the incumbent FM+BPR stack: recent long-viewed items should interact with candidate item IDs/authors to better capture short-term taste drift within each user's logged impression list, yielding a small but real lift in both GAUC and nDCG@5.",
+  "hypothesis": "Confirm whether the strongest remaining lightweight history variant is a real improvement in the settled FM+BPR recipe: switch only user_history from none to recency_weighted_pool while keeping the incumbent configuration fixed. This should raise valid GAUC and nDCG@5 if short-term preference drift matters, because the pooled history vector interacts with candidate items within each user’s impression list and can therefore change within-user ranking, unlike user-only scalars.",
   "valid_metrics": {
     "GAUC": 0.6720477510874213,
     "nDCG@5": 0.5378881530235174,
     "primary": 0.6049679520554694
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
-  "timestamp": 1788029758.783189
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_003.py",
+  "timestamp": 1788031203.87119
 }

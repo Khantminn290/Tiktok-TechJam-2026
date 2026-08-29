@@ -24,6 +24,7 @@ def main():
         metrics_path = os.path.join(args.output_dir, "metrics.json")
         with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump({k: float(v) for k, v in metrics.items()}, f)
+
     except Exception as e:
         print(f"ERROR: {e}", file=sys.stderr)
         raise
