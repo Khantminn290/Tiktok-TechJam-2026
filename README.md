@@ -210,7 +210,17 @@ config/
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
 tests/test_harness.py        55 checks, no model calls
-logs/                        journal.jsonl, solutions/, best_*, final_summary.json
+logs/
+  nodes/node_NNN/            one self-contained folder per research iteration
+    solution.py              complete generated script
+    record.json              hypothesis, choices, metrics, errors, usage
+    metrics.json             validation metrics (successful nodes)
+    resource.json            measured compute (when produced)
+    scores_*.npy             prediction artifacts (local, Git-ignored)
+  smoke/                     isolated smoke-test journal and nodes
+  history/                   prior run-level summaries; nodes stay in nodes/
+  journal.jsonl              compact index of all active research nodes
+  best_* / final_summary     current run summary artifacts
 ```
 
 ---
@@ -241,5 +251,6 @@ Harness sanity checks (these should match before trusting anything else):
 ## Team
 
 Solo participant. Every agent-authored script is journaled per iteration in
-`logs/journal.jsonl` with its hypothesis, and the full source is kept in
-`logs/solutions/`.
+`logs/journal.jsonl` with its hypothesis. Every node is self-contained under
+`logs/nodes/node_NNN/`, so its source, record, metrics, errors, and local prediction
+artifacts can be inspected without cross-referencing `solutions/` and `runs/`.

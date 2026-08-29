@@ -25,17 +25,19 @@ from agent.pricing import RateTable  # noqa: E402
 
 
 def archive_logs(log_dir: str) -> None:
-    """Move a previous run's logs aside so the next run starts at iteration 0."""
+    """Archive run-level metadata while keeping all node bundles together."""
     import shutil
     import time
     if not os.path.exists(os.path.join(log_dir, "journal.jsonl")):
         return
-    dest = os.path.join(log_dir, f"archive_{time.strftime('%Y%m%d_%H%M%S')}")
+    history = os.path.join(log_dir, "history")
+    dest = os.path.join(history, f"run_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(dest, exist_ok=True)
-    for name in os.listdir(log_dir):
-        if name.startswith("archive_"):
-            continue
-        shutil.move(os.path.join(log_dir, name), os.path.join(dest, name))
+    for name in ("journal.jsonl", "best_solution.py", "best_metrics.json",
+                 "final_summary.json", "tree.html", "interventions.jsonl"):
+        source = os.path.join(log_dir, name)
+        if os.path.exists(source):
+            shutil.move(source, os.path.join(dest, name))
     print(f"archived previous run to {dest}")
 
 
@@ -129,8 +131,10 @@ def main():
     if a.smoke:
         print("  SMOKE TEST: plumbing check only — not a scored run.")
 
+    main_log_dir = os.path.join(_ROOT, "logs")
+    log_dir = os.path.join(main_log_dir, "smoke") if a.smoke else main_log_dir
     if a.fresh:
-        archive_logs(os.path.join(_ROOT, "logs"))
+        archive_logs(log_dir)
 
     loop = AgentLoop(
         root=_ROOT,
@@ -144,6 +148,7 @@ def main():
         max_spend_usd=a.max_spend_usd,
         draft_count=a.draft_count,
         test_model=a.smoke,
+        log_dir=log_dir,
     )
     if forced_iterations:
         completed = []

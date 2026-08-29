@@ -29,7 +29,7 @@ class Node:
     tokens_used: int                  # input+output tokens of the LLM call(s) for this node
     wall_clock_seconds: float         # training-run wall clock (subprocess)
     timestamp: float
-    code_path: str                    # solutions/node_XXX.py (full script, AIDE-style)
+    code_path: str                    # nodes/node_XXX/solution.py (full script)
     # --- extra bookkeeping (kept in the journal for the judges) ---
     expected_effect: str = ""         # LLM's stated expectation before running
     decide_reason: str = ""           # why decide_action picked this action/target
@@ -43,13 +43,17 @@ class Node:
 class ExperimentTree:
     """All nodes of one run + best tracking. Journal-backed (append-only jsonl)."""
 
-    def __init__(self, log_dir: str):
+    def __init__(self, log_dir: str, nodes_dir: str | None = None,
+                 project_root: str | None = None):
         self.log_dir = log_dir
+        self.project_root = project_root or os.path.dirname(log_dir)
+        self.nodes_dir = nodes_dir or os.path.join(log_dir, "nodes")
         self.journal_path = os.path.join(log_dir, "journal.jsonl")
         self.nodes: list[Node] = []
         self.best_node_id: Optional[int] = None
         self.corrupt_lines: list = []
         os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(self.nodes_dir, exist_ok=True)
         self._load_existing()
 
     # ---------- persistence ----------
@@ -85,10 +89,14 @@ class ExperimentTree:
             self._maybe_update_best(n, persist_artifacts=False)
 
     def add(self, node: Node) -> None:
-        """Append node to journal immediately, then update best-pointers."""
+        """Persist one self-contained node record and append the run journal."""
         self.nodes.append(node)
         with open(self.journal_path, "a") as fh:
             fh.write(node.to_json() + "\n")
+        node_dir = os.path.join(self.nodes_dir, f"node_{node.iteration_id:03d}")
+        os.makedirs(node_dir, exist_ok=True)
+        with open(os.path.join(node_dir, "record.json"), "w") as fh:
+            json.dump(dataclasses.asdict(node), fh, indent=2, ensure_ascii=False)
         self._maybe_update_best(node, persist_artifacts=True)
 
     def _maybe_update_best(self, node: Node, persist_artifacts: bool):
@@ -102,8 +110,9 @@ class ExperimentTree:
 
     def _write_best_artifacts(self, node: Node):
         """logs/best_solution.py + logs/best_metrics.json, updated when best changes."""
-        if node.code_path and os.path.exists(node.code_path):
-            shutil.copyfile(node.code_path, os.path.join(self.log_dir, "best_solution.py"))
+        source = self.resolve_code_path(node)
+        if source and os.path.exists(source):
+            shutil.copyfile(source, os.path.join(self.log_dir, "best_solution.py"))
         with open(os.path.join(self.log_dir, "best_metrics.json"), "w") as fh:
             json.dump({
                 "iteration_id": node.iteration_id,
@@ -121,6 +130,11 @@ class ExperimentTree:
                 return n
         return None
 
+    def resolve_code_path(self, node: Node) -> str:
+        if not node.code_path or os.path.isabs(node.code_path):
+            return node.code_path
+        return os.path.join(self.project_root, node.code_path)
+
     def best(self) -> Optional[Node]:
         return self.get(self.best_node_id)
 
@@ -136,7 +150,12 @@ class ExperimentTree:
         return [n for n in self.nodes if n.status == "success" and n.metrics]
 
     def next_id(self) -> int:
-        return (max((n.iteration_id for n in self.nodes), default=-1)) + 1
+        ids = [n.iteration_id for n in self.nodes]
+        if os.path.isdir(self.nodes_dir):
+            for name in os.listdir(self.nodes_dir):
+                if name.startswith("node_") and name[5:].isdigit():
+                    ids.append(int(name[5:]))
+        return max(ids, default=-1) + 1
 
     def total_tokens(self) -> int:
         return sum(n.tokens_used for n in self.nodes)

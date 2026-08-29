@@ -67,7 +67,10 @@ def _summarize_node(n: Node) -> str:
 
 def _read_code(n: Node) -> str:
     try:
-        with open(n.code_path) as fh:
+        path = n.code_path
+        if path and not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(_HERE), path)
+        with open(path) as fh:
             return fh.read()
     except OSError:
         return "<code file missing>"

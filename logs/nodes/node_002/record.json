@@ -1,0 +1,43 @@
+{
+  "iteration_id": 2,
+  "parent_id": null,
+  "action": "draft",
+  "menu_choices": {
+    "loss": "listwise_softmax",
+    "user_history": "none",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "none",
+    "training": "default",
+    "data_extras": "none"
+  },
+  "hypothesis": "Pure listwise softmax may outperform the previously tried hybrid because the target metrics are strictly within-user ranking metrics, and the hybrid likely retained pointwise calibration pressure that hurts top-of-list ordering. Since the hybrid underperformed the baseline, this draft isolates whether removing the pointwise term lets the model focus entirely on ordering each user's impressions, potentially lifting nDCG@5 and GAUC without changing architecture or adding noisy signals.",
+  "status": "success",
+  "metrics": {
+    "GAUC": 0.6641545755437267,
+    "nDCG@5": 0.5343240330374975,
+    "primary": 0.5992393042906121
+  },
+  "error_trace": null,
+  "tokens_used": 3590,
+  "wall_clock_seconds": 13.553123950958252,
+  "timestamp": 1787897318.924462,
+  "code_path": "logs\\nodes\\node_002\\solution.py",
+  "expected_effect": "Small but informative move: roughly -0.001 to +0.003 primary versus the hybrid attempt, with the upside mainly from better nDCG@5 if pure ranking pressure matters more than calibration.",
+  "decide_reason": "only 2 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes",
+  "token_breakdown": {
+    "input_tokens": 3050,
+    "output_tokens": 540,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "events": [
+    {
+      "type": "spend",
+      "iteration_usd": 0.015725,
+      "run_total_usd": 0.03967,
+      "provider": "openai",
+      "model": "gpt-5.4"
+    }
+  ]
+}

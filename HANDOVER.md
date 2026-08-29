@@ -70,8 +70,11 @@ don't respend iterations there.
 
 ## Where results live
 
-- `logs/journal.jsonl` — one line per iteration: hypothesis, menu choices, metrics,
-  errors, tokens, spend. This is also the competition's run-log deliverable.
+- `logs/nodes/node_NNN/` — one self-contained folder per iteration containing
+  `solution.py`, `record.json`, metrics/resources, and local score arrays.
+- `logs/journal.jsonl` — compact one-line-per-iteration index and competition log.
+  Use `python3 -m agent.report --node N` for a complete readable node view.
+- `logs/smoke/` — isolated smoke-test nodes; smoke runs never replace research logs.
 - `logs/best_solution.py` + `logs/best_metrics.json` — the current winning script.
 - `python3 -m agent.report` — readable summary; `--html` draws the search tree.
 

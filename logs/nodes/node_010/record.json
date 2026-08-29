@@ -1,0 +1,44 @@
+{
+  "iteration_id": 10,
+  "parent_id": 9,
+  "action": "improve",
+  "menu_choices": {
+    "loss": "bpr_pairwise",
+    "score_prior": "recency_bayesian_item_author",
+    "user_history": "mean_pool_positives",
+    "multitask": "aux_click_like_forward",
+    "model": "fm_numpy",
+    "temporal": "none",
+    "training": "lower_lr_longer",
+    "data_extras": "none"
+  },
+  "hypothesis": "Add the strongest low-variance memorization signal on top of the current best configuration: keep BPR pairwise + mean-pooled positive history + aux_click_like_forward + lower_lr_longer, and turn on the recency-weighted Bayesian item/author prior. Node 9 already captures user-specific interaction structure and trains stably; the remaining gap is plausibly from under-memorizing fresh item/author propensity, which matters for within-user top-5 ordering when many candidates are unseen or weakly estimated by FM interactions. The recency prior already showed a positive control alone and should complement, not duplicate, history/multitask signals because it injects train-only recent content popularity and creator quality while shrinking rare entities safely. I expect a modest additive gain, mainly via nDCG@5 and slightly GAUC.",
+  "status": "success",
+  "metrics": {
+    "GAUC": 0.6708815097808838,
+    "nDCG@5": 0.5370551347732544,
+    "primary": 0.6039683222770691
+  },
+  "error_trace": null,
+  "tokens_used": 5815,
+  "wall_clock_seconds": 108.27118873596191,
+  "timestamp": 1787927315.4771628,
+  "code_path": "logs\\nodes\\node_010\\solution.py",
+  "expected_effect": "+0.0004 to +0.0012 primary over node 9, with best guess around 0.6045 valid primary from improved recent item/author memorization.",
+  "decide_reason": "extending global best node 9 (valid primary 0.6038); its neighborhood is not exhausted",
+  "token_breakdown": {
+    "input_tokens": 2455,
+    "output_tokens": 544,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 2816
+  },
+  "events": [
+    {
+      "type": "spend",
+      "iteration_usd": 0.015002,
+      "run_total_usd": 0.026237,
+      "provider": "openai",
+      "model": "gpt-5.4"
+    }
+  ]
+}

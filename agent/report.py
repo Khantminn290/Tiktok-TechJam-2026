@@ -27,6 +27,35 @@ def load_journal():
         return [json.loads(line) for line in fh if line.strip()]
 
 
+def render_node(node_id: int) -> str:
+    """Detailed, self-contained view of one node and its colocated artifacts."""
+    path = os.path.join(LOGS, "nodes", f"node_{node_id:03d}", "record.json")
+    if not os.path.exists(path):
+        return f"node {node_id} not found at {path}"
+    with open(path) as fh:
+        n = json.load(fh)
+    node_dir = os.path.dirname(path)
+    files = sorted(name for name in os.listdir(node_dir)
+                   if os.path.isfile(os.path.join(node_dir, name)))
+    metrics = (json.dumps(n.get("metrics"), indent=2)
+               if n.get("metrics") else "none")
+    error = n.get("error_trace") or "none"
+    return "\n".join([
+        f"NODE {node_id}  action={n.get('action')}  parent={n.get('parent_id')}  "
+        f"status={n.get('status')}",
+        f"folder: {node_dir}",
+        f"files: {', '.join(files)}",
+        f"policy decision: {n.get('decide_reason') or 'none'}",
+        f"hypothesis: {n.get('hypothesis') or 'none'}",
+        f"expected effect: {n.get('expected_effect') or 'none'}",
+        "menu choices:\n" + json.dumps(n.get("menu_choices", {}), indent=2),
+        "metrics:\n" + metrics,
+        "error trace:\n" + error,
+        f"tokens: {n.get('tokens_used', 0)}  "
+        f"training seconds: {n.get('wall_clock_seconds', 0):.1f}",
+    ])
+
+
 def render() -> str:
     nodes = load_journal()
     if not nodes:
@@ -174,8 +203,11 @@ if __name__ == "__main__":
                     help="also write a machine-readable summary to this path")
     ap.add_argument("--html", nargs="?", const=os.path.join(LOGS, "tree.html"),
                     default=None, help="write the search-tree visualization")
+    ap.add_argument("--node", type=int, default=None,
+                    help="show one node's reasoning, configuration, metrics, error, "
+                         "and colocated artifact files")
     a = ap.parse_args()
-    text = render()
+    text = render_node(a.node) if a.node is not None else render()
     print(text)
     if a.json:
         with open(a.json, "w") as fh:

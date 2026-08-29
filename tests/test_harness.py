@@ -329,6 +329,8 @@ def test_audit_regressions():
         t = ExperimentTree(td)
         t.add(_node(0, "success", 0.60))
         t.add(_node(1, "success", 0.61))
+        check("node records are colocated under nodes/node_NNN",
+              os.path.exists(os.path.join(td, "nodes", "node_001", "record.json")))
         with open(os.path.join(td, "journal.jsonl"), "a") as fh:
             fh.write('{"iteration_id": 2, "action": "dra')   # killed mid-write
         try:

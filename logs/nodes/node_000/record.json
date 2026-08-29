@@ -1,0 +1,43 @@
+{
+  "iteration_id": 0,
+  "parent_id": null,
+  "action": "draft",
+  "menu_choices": {
+    "loss": "listwise_softmax_plus_pointwise",
+    "user_history": "none",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "none",
+    "training": "default",
+    "data_extras": "none"
+  },
+  "hypothesis": "Switching the objective from pointwise logloss to a ranking-aligned hybrid listwise loss should improve within-user ordering directly, while preserving some pointwise calibration for stability. This targets the biggest mismatch in the baseline: training on independent labels while being judged on per-user ranking (GAUC, nDCG@5). I keep all other axes at baseline to isolate the effect of the highest-priority unexplored direction and avoid confounding from model/history changes.",
+  "status": "success",
+  "metrics": {
+    "GAUC": 0.6628254372684631,
+    "nDCG@5": 0.53428915620756,
+    "primary": 0.5985572967380115
+  },
+  "error_trace": null,
+  "tokens_used": 3218,
+  "wall_clock_seconds": 11.10404920578003,
+  "timestamp": 1787897282.2847638,
+  "code_path": "logs\\nodes\\node_000\\solution.py",
+  "expected_effect": "+0.004 to +0.010 primary over the 0.6016 FM baseline if ranking alignment helps as expected; likely via modest gains in both GAUC and nDCG@5, with nDCG@5 benefiting more.",
+  "decide_reason": "only 0 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes",
+  "token_breakdown": {
+    "input_tokens": 2698,
+    "output_tokens": 520,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "events": [
+    {
+      "type": "spend",
+      "iteration_usd": 0.014545,
+      "run_total_usd": 0.014545,
+      "provider": "openai",
+      "model": "gpt-5.4"
+    }
+  ]
+}
