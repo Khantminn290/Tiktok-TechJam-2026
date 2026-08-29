@@ -32,7 +32,8 @@ from agent.pricing import RateTable  # noqa: E402
 # a number on the deliverable that could no longer be recomputed. The submitted
 # ensemble is a separate, later artifact from any single search run, so a new
 # search must not carry it off.
-SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json")
+SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json",
+                        "ab_test")   # A/B evidence is analysis, not a search product
 
 
 def archive_logs(log_dir: str) -> None:
