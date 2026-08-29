@@ -55,3 +55,37 @@ beats mean in only **10/24**, mean delta **-0.06 sigma**, t=-1.09.
 not a property of median aggregation. Exactly the trap the project's own rules
 warn about.
 **Decision:** REJECT. Incumbent rank-mean stands.
+
+## E5 — Does the STOPPING RULE generalise? (held-out halves)
+**Observation:** the stopping epoch is chosen by argmax over ~40 validation
+evaluations — selection on validation. So "which epoch scores highest" is the
+wrong question.
+**Change:** choose the epoch on one half of the validation USERS, score on the
+other, both directions, 4 splits x 3 seeds = 24 held-out evaluations.
+**Result:** averaging the top-5 checkpoints beats argmax by **+0.00069
+(+0.87 sigma), sd 0.00061, t=5.54, wins 22/24**.
+**Interpretation:** OVERTURNS a standing rejection. Snapshot ensembling was
+already in the codebase and already refused — by a guard that adopted it only if
+it beat the best single checkpoint ON THE SAME validation set that selected that
+checkpoint. The rejection was an artefact of a biased comparison.
+**Decision:** KEEP the finding; test whether it survives ensembling.
+
+## E6 — 16-member ensemble of snapshot-averaged members (pre-registered)
+**Result:** incumbent 0.60541 -> snapshot 0.60540, **-0.00001 (-0.01 sigma)**.
+**Decision:** INCONCLUSIVE by the rule fixed in advance. NOT adopted.
+
+## E7 — Why did a +0.87 sigma member gain vanish in the ensemble?
+**Change:** same held-out protocol as E5, but comparing 3-member ENSEMBLES.
+**Result:** the advantage decays monotonically with ensemble size —
+  1 member  +0.87 sigma (t=5.54, 22/24)
+  3 members +0.28 sigma (t=1.90, 10/12)
+  16 members -0.01 sigma
+**Interpretation:** checkpoint averaging and seed ensembling remove the SAME
+variance — the noise in where the epoch argmax lands. They are SUBSTITUTES, not
+complements. At k=16 the seed ensemble has already removed all of it.
+**Decision:** REJECT for the submitted ensemble, and CLOSE the whole
+variance-reduction family: any further technique of that kind is redundant with
+16-seed averaging for the same reason.
+**Still true and still useful:** for a SINGLE model, or a small ensemble,
+checkpoint averaging is a real +0.87 sigma improvement. It is only redundant at
+our ensemble size.
