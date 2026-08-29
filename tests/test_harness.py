@@ -1293,6 +1293,69 @@ def test_new_axes_and_snapshot():
           "_rank_norm(s[1])" in src)
 
 
+def test_parallel_worker_diversity():
+    """The K-way diversity fix. Measured failure it exists for: with
+    --parallel-k 3 against a prompt constrained by 14 dead-ends, all three
+    workers proposed the IDENTICAL config and scored identically -- 3x cost,
+    1x information.
+
+    Verified with a FAKE LLM (no API calls): a stub that mimics the real
+    failure mode -- it returns its single favourite config unless a sibling
+    section tells it that config is taken. If conditioning is wired through
+    correctly, a K=3 round yields 3 DISTINCT proposals; if it is not, the stub
+    reproduces the original bug and this test fails.
+    """
+    print("\n[parallel worker diversity]")
+    from agent.prompts import render_sibling_section
+
+    check("no siblings yet -> no sibling section (worker 0 is unconstrained)",
+          render_sibling_section([]) == "")
+    sec = render_sibling_section([{"loss": "bpr_pairwise", "model": "fm_numpy"}])
+    check("sibling section names the already-taken configuration",
+          "bpr_pairwise" in sec and "worker 0" in sec)
+    check("sibling section instructs the worker to differ",
+          "MEANINGFULLY DIFFERENT" in sec)
+
+    # --- simulate a K=3 round against a stub that reproduces the real bug ---
+    FAVOURITES = [{"loss": "bpr_pairwise", "model": "fm_numpy"},
+                  {"loss": "bpr_pairwise", "model": "gru4rec_seq"},
+                  {"loss": "pointwise_logloss", "model": "fm_numpy"}]
+
+    def fake_llm(prompt):
+        """Greedy: always wants FAVOURITES[0]; only moves on when the prompt
+        says that choice is already taken by a sibling."""
+        for cand in FAVOURITES:
+            if json.dumps(cand, sort_keys=True) not in prompt:
+                return cand
+        return FAVOURITES[-1]
+
+    # WITHOUT conditioning (the old behaviour): same prompt every time
+    old = [fake_llm("base prompt") for _ in range(3)]
+    old_sigs = {json.dumps(c, sort_keys=True) for c in old}
+    check("baseline: K identical prompts reproduce the ORIGINAL bug "
+          "(1 distinct proposal from 3 workers)", len(old_sigs) == 1)
+
+    # WITH conditioning: each worker sees its siblings' picks
+    siblings, new = [], []
+    for _ in range(3):
+        p = "base prompt\n" + render_sibling_section(siblings)
+        c = fake_llm(p)
+        new.append(c)
+        siblings.append(c)
+    new_sigs = {json.dumps(c, sort_keys=True) for c in new}
+    check("FIXED: conditioning yields 3 genuinely DISTINCT proposals",
+          len(new_sigs) == 3, f"{len(new_sigs)}/3 distinct")
+    check("the distinct proposals span more than one axis value",
+          len({c["model"] for c in new}) > 1)
+
+    src = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("loop.py rebuilds the prompt per worker with sibling_choices",
+          "sibling_choices=sibling_choices" in src
+          and "sibling_choices.append(obj[\"menu_choices\"])" in src)
+    check("loop.py measures and journals per-round worker diversity",
+          '"type": "worker_diversity"' in src and "diversity_event" in src)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1304,7 +1367,7 @@ if __name__ == "__main__":
               test_merge_acceptance_via_tree_ordering,
               test_standing_override_survives_reload,
               test_compute_budget_prompt_section, test_lambdarank,
-              test_new_axes_and_snapshot):
+              test_new_axes_and_snapshot, test_parallel_worker_diversity):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:

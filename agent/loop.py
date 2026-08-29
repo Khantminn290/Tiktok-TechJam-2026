@@ -280,23 +280,42 @@ class AgentLoop:
         best_before = self.tree.best()   # ALL K workers compare against this SAME
                                          # snapshot -- they're siblings generated
                                          # from one pre-round state, not a chain
-        prompt = build_prompt(action, target, reason, self.tree, self.menu,
-                             exec_timeout_s=self.exec_timeout_s)
-
-        # ---- K independent LLM calls for the SAME decided action ----
+        # ---- K LLM calls, each conditioned on its siblings' proposals ----
+        # NOT K independent calls against one prompt: that was measured to
+        # produce K identical proposals once the prompt is well-constrained
+        # (see prompts.render_sibling_section). These calls were already
+        # sequential -- only training is parallel -- so conditioning is free.
         proposals = []
         saw_success = False
+        sibling_choices: list = []
         for _w in range(self.parallel_k):
+            w_prompt = build_prompt(action, target, reason, self.tree, self.menu,
+                                    exec_timeout_s=self.exec_timeout_s,
+                                    sibling_choices=sibling_choices)
             try:
                 obj, usage, llm_events = self.llm.structured_call(
-                    prompt, validate_choices=self.menu.validate_choices)
+                    w_prompt, validate_choices=self.menu.validate_choices)
                 proposals.append({"ok": True, "obj": obj, "usage": usage,
                                   "events": llm_events})
+                sibling_choices.append(obj["menu_choices"])
                 saw_success = True
             except LLMError as e:
                 proposals.append({"ok": False, "error": str(e), "usage": {},
                                   "events": [{"type": "llm_failure",
                                              "error": str(e)[:1000]}]})
+        # Report whether the diversity mechanism actually worked this round --
+        # a silently-degraded K-way round is exactly the failure that went
+        # unnoticed before, so it is measured rather than assumed.
+        _sigs = [json.dumps(c, sort_keys=True) for c in sibling_choices]
+        n_distinct = len(set(_sigs))
+        if _sigs:
+            print(f"[{round_id}] worker diversity: {n_distinct}/{len(_sigs)} "
+                  f"distinct proposals"
+                  + ("" if n_distinct == len(_sigs)
+                     else "  <-- DUPLICATES: workers wasted on the same experiment"),
+                  flush=True)
+        diversity_event = {"type": "worker_diversity", "round_id": round_id,
+                           "distinct": n_distinct, "workers": len(_sigs)}
         if saw_success:
             self.consecutive_llm_failures = 0
         else:
@@ -367,6 +386,7 @@ class AgentLoop:
                           "run_total_usd": round(self.spend.total_usd, 6),
                           "provider": self.llm.provider, "model": self.llm.model,
                           "round_id": round_id, "worker": j["slot"]})
+            events.append(diversity_event)
             node = Node(iteration_id=it,
                        parent_id=None if target is None else target.iteration_id,
                        action=action, menu_choices=obj["menu_choices"],

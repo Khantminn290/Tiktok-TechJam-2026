@@ -114,9 +114,49 @@ def _compute_budget_section(exec_timeout_s: int) -> str:
         f"anyway -- propose a different, single-pass idea instead.")
 
 
+def render_sibling_section(sibling_choices: list) -> str:
+    """The K-way diversity mechanism for parallel rounds.
+
+    Measured failure this was written for: with --parallel-k 3 against a
+    well-constrained prompt (14 recorded dead-ends), all three workers
+    independently proposed the IDENTICAL configuration and scored identically
+    -- 3x the cost for 1x the information. iterate_parallel() issues K calls
+    against the same prompt and relied on sampling temperature for diversity,
+    which is not a mechanism once the prompt narrows the plausible choice set
+    to one "best remaining" option.
+
+    Conditioning each worker on its siblings' already-made proposals is
+    preferred over assigning each worker a fixed axis, for two reasons: the K
+    LLM calls in a round are ALREADY sequential (only training is
+    parallelised), so this costs no wall-clock; and it preserves the agent's
+    freedom to choose its own hypothesis, dictating only that it not duplicate
+    a sibling -- which is the capability a parallel round is supposed to show.
+    """
+    if not sibling_choices:
+        return ""
+    lines = ["## Sibling proposals ALREADY MADE in this same round",
+             "Other workers are exploring these configurations RIGHT NOW, in "
+             "parallel with you:"]
+    for i, ch in enumerate(sibling_choices):
+        lines.append(f"- worker {i}: {json.dumps(ch, sort_keys=True)}")
+    lines.append(
+        "\nYou MUST propose something MEANINGFULLY DIFFERENT from every one of "
+        "them. Returning the same menu_choices as a sibling wastes an entire "
+        "training run on a duplicate experiment and tells us nothing new. "
+        "Differ on at least one axis, and prefer differing on an axis none of "
+        "them touched -- the point of running workers in parallel is to cover "
+        "MORE of the search space per round, not to re-run one idea K times. "
+        "If you believe every remaining option is exhausted, say so explicitly "
+        "in your hypothesis and pick the least-explored axis anyway.")
+    return "\n".join(lines)
+
+
 def build_prompt(action: str, target: Node | None, reason: str,
-                 tree: ExperimentTree, menu, exec_timeout_s: int = 1200) -> str:
+                 tree: ExperimentTree, menu, exec_timeout_s: int = 1200,
+                 sibling_choices: list | None = None) -> str:
     parts = [STATIC_CONTEXT, _compute_budget_section(exec_timeout_s)]
+    if sibling_choices:
+        parts.append(render_sibling_section(sibling_choices))
 
     with open(_API_MD) as fh:
         parts.append("## train_lib API available to your script\n" + fh.read())
