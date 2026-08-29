@@ -1,0 +1,52 @@
+{
+  "arm_A": {
+    "label": "A single-prop",
+    "iterations": 11,
+    "scored": 11,
+    "failed": 0,
+    "best": 0.60497,
+    "median": 0.60463,
+    "path_b_nodes": 0,
+    "distinct_configs": 5,
+    "model_families": "fm_numpy,gru4rec_seq",
+    "categories": {
+      "exploration": 3,
+      "ablation": 3,
+      "confirmation": 3
+    },
+    "tokens": 145871,
+    "decision_points": 0,
+    "candidates_generated": 0,
+    "path_b_candidates_generated": 0,
+    "candidates_gated": 0,
+    "auditable_decisions": false,
+    "path_b_genuine": 0,
+    "path_b_fake": 0,
+    "best_delta_sigma": 4.21
+  },
+  "arm_B": {
+    "label": "B multi-cand",
+    "iterations": 10,
+    "scored": 7,
+    "failed": 3,
+    "best": 0.60367,
+    "median": 0.6034,
+    "path_b_nodes": 6,
+    "distinct_configs": 5,
+    "model_families": "fm_numpy",
+    "categories": {
+      "exploration": 1,
+      "ablation": 3,
+      "confirmation": 6
+    },
+    "tokens": 160890,
+    "decision_points": 10,
+    "candidates_generated": 40,
+    "path_b_candidates_generated": 10,
+    "candidates_gated": 18,
+    "auditable_decisions": true,
+    "path_b_genuine": 3,
+    "path_b_fake": 3,
+    "best_delta_sigma": 2.59
+  }
+}

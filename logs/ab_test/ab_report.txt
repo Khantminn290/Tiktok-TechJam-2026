@@ -1,0 +1,44 @@
+==========================================================================
+A/B — single-proposal planner vs multi-candidate policy
+==========================================================================
+                                       A single-prop      B multi-cand
+--------------------------------------------------------------------------
+PROCESS (what a single run pair CAN show)
+  Path B nodes declared                            0                 6
+    ...GENUINE (own mechanism)                     0                 3
+    ...fake (delegates to lib)                     0                 3
+  Path B candidates generated                      0                10
+  decision points recorded                         0                10
+  candidates generated                             0                40
+  candidates gated (waste avoided)                 0                18
+  decisions auditable                          False              True
+  distinct configs explored                        5                 5
+  model families                  fm_numpy,gru4rec_seq          fm_numpy
+
+COST
+  iterations                                      11                10
+  scored / failed                                 11                 7
+  LLM tokens                                 145,871           160,890
+
+SCORE (secondary -- see caveat)
+  best primary                               0.60497           0.60367
+  best vs baseline (sigma)                      4.21              2.59
+  median primary                             0.60463            0.6034
+--------------------------------------------------------------------------
+Arm A recorded NO decision points: its planner emitted one proposal,
+so there were no alternatives to score and 'why not Path B?' had no
+answer. Arm B records the full candidate set for every decision.
+
+Path B went from NEVER generated (0 nodes) to generated and selected
+(6 declared, 10 candidates offered). The audit finding was that Path B
+was never GENERATED; that part is fixed.
+
+Of these, 3 implement their own mechanism and 3 merely delegate to
+train_lib.run().
+
+CAVEAT ON SCORE: seed noise here is 0.0008, and these are two runs, not
+two samples of a policy. A score difference between single runs cannot
+separate policy from luck, so no causal claim is made from it. The
+process rows above do not depend on luck.
+
+wrote logs/ab_test/ab_result.json

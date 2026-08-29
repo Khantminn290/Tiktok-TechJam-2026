@@ -1,23 +1,23 @@
 {
-  "iteration_id": 4,
+  "iteration_id": 6,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
-    "user_history": "recency_weighted_pool",
+    "user_history": "mean_pool_positives",
     "multitask": "none",
     "model": "fm_numpy",
-    "temporal": "hour_plus_dow",
+    "temporal": "none",
     "training": "lower_lr_longer",
     "data_extras": "none",
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "A clean ablation of the current best recipe's multitask auxiliary heads will reveal whether aux_click_like_forward is carrying real ranking signal or just noise: keep the strongest broad-signal FM+BPR backbone fixed and remove only the auxiliary tasks. Because node 1 scored 0.6046 with aux_click_like_forward while otherwise-similar broad BPR recipes have been near 0.6050 without extras in experience memory, I expect little to no gain and possibly a slight improvement from simplifying the objective.",
+  "hypothesis": "A clean ablation of the incumbent's training=default choice: keep the current best BPR+FM+mean-pooled-positive-history recipe fixed and switch only to training=lower_lr_longer. If the default BPR optimization is slightly under-converged or too coarse, a smaller step size with longer patience should yield a small but real lift in GAUC and nDCG@5 without changing the broad, uniform training signal that has consistently worked best on this dataset.",
   "valid_metrics": {
-    "GAUC": 0.6720477510874213,
-    "nDCG@5": 0.5378881530235174,
-    "primary": 0.6049679520554694
+    "GAUC": 0.6704195901998051,
+    "nDCG@5": 0.5369221882652637,
+    "primary": 0.6036708892325344
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_004.py",
-  "timestamp": 1787998048.022221
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_006.py",
+  "timestamp": 1788010043.8112051
 }

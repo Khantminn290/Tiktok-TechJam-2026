@@ -101,9 +101,16 @@ def policy_deployed(cands: list):
 
 
 def policy_first(cands: list):
-    """Baseline: take the planner's first proposal, gates ignored. This is the
-    single-proposal behaviour that arm A actually had."""
-    return cands[0] if cands else None
+    """Baseline: take the model's FIRST proposal, gates ignored -- the
+    single-proposal behaviour arm A actually had, and the thing multi-candidate
+    scoring has to beat to be worth its tokens.
+
+    Must sort by `index`, not take cands[0]: the journal stores the list already
+    SORTED BY UTILITY (candidates.select returns `ranked`), so reading position
+    0 would return the winner by construction and score a meaningless 100%
+    agreement. `index` is the only field preserving the order the model emitted.
+    """
+    return min(cands, key=lambda c: c.get("index", 0)) if cands else None
 
 
 def policy_greedy_gain(cands: list):
@@ -203,6 +210,23 @@ def render(res: dict, decisions: list) -> str:
                  f"{worst[1]['picked_gated']}/{worst[1]['decisions']} iterations on "
                  f"gated candidates; 'deployed' spent "
                  f"{res['deployed']['picked_gated']}.")
+
+    # The comparison the whole multi-candidate design has to justify: is
+    # scoring K proposals better than just taking the model's first one?
+    fp, dep = res.get("first_proposal"), res.get("deployed")
+    if fp and dep and fp["decisions"]:
+        L.append(
+            f"\nWHY SCORE CANDIDATES AT ALL — 'first_proposal' is what a "
+            f"single-proposal\nplanner does. Replayed over the same "
+            f"{fp['decisions']} decisions it would have:\n"
+            f"  * picked a GATED candidate {fp['picked_gated']}/{fp['decisions']} "
+            f"times ({fp['gated_pick_rate']:.0%}) -- a duplicate, a recorded dead\n"
+            f"    end, or an unfalsifiable proposal, each costing a full iteration\n"
+            f"  * agreed with the deployed choice only {fp['agreement_rate']:.0%} "
+            f"of the time\n"
+            f"  * opened {fp['branches']} branches vs {dep['branches']}, and chosen "
+            f"Path B {fp['path_b_rate']:.0%} of the time vs {dep['path_b_rate']:.0%}\n"
+            f"None of that depends on an outcome, so none of it depends on luck.")
     unknown = res["deployed"]["cf_unknown"]
     L.append(f"\nHONESTY BOUND: {unknown} replayed decision(s) selected work that was "
              f"never implemented.\nTheir outcomes are UNKNOWN and are not scored, "

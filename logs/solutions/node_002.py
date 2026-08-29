@@ -2,31 +2,98 @@ import argparse
 import json
 import os
 import sys
+import traceback
+import numpy as np
 
 import train_lib
 
 
+INCUMBENT_MENU = {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "mean_pool_positives",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "none",
+    "training": "default",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default",
+}
+
+
+def userwise_affine_normalize(scores, user_ids):
+    scores = np.asarray(scores, dtype=np.float64)
+    user_ids = np.asarray(user_ids)
+    out = scores.copy()
+
+    uniq, inv = np.unique(user_ids, return_inverse=True)
+    n = len(uniq)
+    sums = np.bincount(inv, weights=scores, minlength=n)
+    cnts = np.bincount(inv, minlength=n).astype(np.float64)
+    means = sums / np.maximum(cnts, 1.0)
+
+    centered = scores - means[inv]
+    sq_sums = np.bincount(inv, weights=centered * centered, minlength=n)
+    vars_ = sq_sums / np.maximum(cnts, 1.0)
+    stds = np.sqrt(np.maximum(vars_, 0.0))
+
+    safe_stds = stds.copy()
+    safe_stds[safe_stds < 1e-12] = 1.0
+    out = centered / safe_stds[inv]
+    return out.astype(np.float32)
+
+
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--menu-choices', type=str, required=True)
-    parser.add_argument('--output-dir', type=str, required=True)
-    parser.add_argument('--seed', type=int, default=0)
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--menu-choices", type=str, required=True)
+    ap.add_argument("--output-dir", type=str, required=True)
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
+    os.makedirs(args.output_dir, exist_ok=True)
 
     try:
-        menu_choices = json.loads(args.menu_choices)
-        os.makedirs(args.output_dir, exist_ok=True)
-        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-        if not os.path.exists(metrics_path):
-            with open(metrics_path, 'w') as f:
-                json.dump({k: float(v) for k, v in metrics.items()}, f)
-        return 0
+        # Parse but intentionally ignore caller menu choices: this Path B experiment
+        # confirms invariance starting from the current incumbent backbone.
+        _ = json.loads(args.menu_choices)
+
+        train_lib.run(INCUMBENT_MENU, args.output_dir, seed=args.seed)
+
+        valid_scores_path = os.path.join(args.output_dir, "scores_valid.npy")
+        test_scores_path = os.path.join(args.output_dir, "scores_test.npy")
+        if not os.path.exists(valid_scores_path) or not os.path.exists(test_scores_path):
+            raise FileNotFoundError("Base training did not produce score files")
+
+        valid_scores = np.load(valid_scores_path)
+        test_scores = np.load(test_scores_path)
+
+        splits, _meta = train_lib.load_cache()
+        valid_users = splits["valid"]["user_raw"]
+        test_users = splits["test"]["user_raw"]
+        valid_labels = splits["valid"]["long_view"]
+
+        if len(valid_scores) != len(valid_users):
+            raise ValueError(f"valid score length mismatch: {len(valid_scores)} vs {len(valid_users)}")
+        if len(test_scores) != len(test_users):
+            raise ValueError(f"test score length mismatch: {len(test_scores)} vs {len(test_users)}")
+
+        valid_scores_norm = userwise_affine_normalize(valid_scores, valid_users)
+        test_scores_norm = userwise_affine_normalize(test_scores, test_users)
+
+        metrics = train_lib.evaluate(valid_users, valid_labels, valid_scores_norm)
+
+        with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
+            json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+        np.save(valid_scores_path, valid_scores_norm)
+        np.save(test_scores_path, test_scores_norm)
+
     except Exception as e:
-        import traceback
+        print(f"ERROR: {e}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
-        return 1
+        sys.exit(1)
 
 
-if __name__ == '__main__':
-    sys.exit(main())
+if __name__ == "__main__":
+    main()

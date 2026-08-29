@@ -60,15 +60,27 @@ def parse_requests(obj) -> list:
     reqs = obj.get("requests") or []
     if not isinstance(reqs, list):
         return []
-    out = []
-    for r in reqs[:MAX_TOOL_CALLS]:
+    # Deduplicate BEFORE applying the cap. Observed in real runs: the model
+    # asks for get_within_user_auc with identical args three times in one
+    # iteration, spending 3 of its 4 tool calls to receive the same number
+    # three times. These tools are deterministic reads of a fixed cache, so a
+    # repeat cannot return anything new -- dropping it costs no information and
+    # frees the budget for a genuinely different measurement.
+    out, seen = [], set()
+    for r in reqs:
         if not isinstance(r, dict):
             continue
         name = r.get("tool")
         args = r.get("args") or {}
         if not isinstance(name, str) or not isinstance(args, dict):
             continue
+        key = (name, json.dumps(args, sort_keys=True))
+        if key in seen:
+            continue
+        seen.add(key)
         out.append({"tool": name, "args": args})
+        if len(out) >= MAX_TOOL_CALLS:
+            break
     return out
 
 

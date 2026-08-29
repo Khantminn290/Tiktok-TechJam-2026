@@ -2111,7 +2111,7 @@ def test_evidence_strength():
     # the grading must actually reach component evidence, not just exist
     src = open(os.path.join(_ROOT, "agent", "research_state.py")).read()
     check("component evidence uses the grade, not a bare comparison",
-          "grade_evidence(" in src.split("_component_evidence")[1])
+          "grade_evidence(" in src.split("def _component_evidence")[1])
     check("an ablation inside the noise floor is NOT reported as supported",
           'if g["strength"] == INCONCLUSIVE:' in src
           and 'status = "untested_assumption"' in src)

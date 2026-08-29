@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_005.py
-@@ -1,35 +1,29 @@
+@@ -1,34 +1,121 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -18,39 +18,128 @@
  import json
  import os
  import sys
++import traceback
++import numpy as np
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
 +import train_lib
++
++
++def sigmoid(x):
++    x = np.clip(x, -30.0, 30.0)
++    return 1.0 / (1.0 + np.exp(-x))
++
++
++def logit(p):
++    p = np.clip(p, 1e-6, 1 - 1e-6)
++    return np.log(p / (1.0 - p))
++
++
++def compute_video_prior_logits(splits, meta):
++    train = splits["train"]
++    n_videos = int(meta["field_dims"]["video"])
++    vids = train["video"].astype(np.int64)
++    y = train["long_view"].astype(np.float64)
++    cnt = np.bincount(vids, minlength=n_videos).astype(np.float64)
++    pos = np.bincount(vids, weights=y, minlength=n_videos).astype(np.float64)
++    global_rate = float(y.mean())
++    # Empirical-Bayes style smoothing strength.
++    beta = 20.0
++    rate = (pos + beta * global_rate) / (cnt + beta)
++    return logit(rate)
++
++
++def compute_user_positive_counts(splits, meta):
++    train = splits["train"]
++    n_users = int(meta["field_dims"]["user"])
++    users = train["user"].astype(np.int64)
++    y = train["long_view"].astype(np.float64)
++    return np.bincount(users, weights=y, minlength=n_users).astype(np.float64)
++
++
++def blended_scores(base_scores, split_data, video_prior_logits, user_pos_counts, tau):
++    users = split_data["user"].astype(np.int64)
++    videos = split_data["video"].astype(np.int64)
++    support = user_pos_counts[users]
++    alpha = support / (support + float(tau))
++    prior = video_prior_logits[videos]
++    return alpha * base_scores + (1.0 - alpha) * prior
++
++
++def evaluate_scores(splits, scores, split_name):
++    data = splits[split_name]
++    metrics = train_lib.evaluate(data["user_raw"], data["long_view"], scores)
++    return {k: float(v) for k, v in metrics.items()}
  
  
  def main():
--    ap = argparse.ArgumentParser()
+     ap = argparse.ArgumentParser()
 -    ap.add_argument("--menu-choices", required=True)
 -    ap.add_argument("--output-dir", required=True)
--    ap.add_argument("--seed", type=int, default=0)
++    ap.add_argument("--menu-choices", type=str, required=True)
++    ap.add_argument("--output-dir", type=str, required=True)
+     ap.add_argument("--seed", type=int, default=0)
 -    a = ap.parse_args()
 -    choices = json.loads(a.menu_choices)
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', type=str, required=True)
-+    parser.add_argument('--output-dir', type=str, required=True)
-+    parser.add_argument('--seed', type=int, default=0)
-+    args = parser.parse_args()
++    args = ap.parse_args()
++
++    os.makedirs(args.output_dir, exist_ok=True)
 +
 +    try:
-+        menu_choices = json.loads(args.menu_choices)
-+        os.makedirs(args.output_dir, exist_ok=True)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+        with open(metrics_path, 'w', encoding='utf-8') as f:
-+            json.dump({k: float(v) for k, v in metrics.items()}, f)
++        # Selected candidate: train incumbent backbone, then custom inference-time shrinkage.
++        menu_choices = {
++            "loss": "bpr_pairwise",
++            "neg_sampling": "uniform_1",
++            "user_history": "mean_pool_positives",
++            "multitask": "none",
++            "model": "fm_numpy",
++            "temporal": "none",
++            "training": "default",
++            "data_extras": "none",
++            "sample_weighting": "per_row",
++            "regularization": "l2_default",
++        }
++
++        # Train once and let train_lib write base artifacts.
++        train_lib.run(menu_choices, args.output_dir, seed=args.seed)
++
++        base_valid = np.load(os.path.join(args.output_dir, "scores_valid.npy"))
++        base_test = np.load(os.path.join(args.output_dir, "scores_test.npy"))
++
++        splits, meta = train_lib.load_cache()
++        video_prior_logits = compute_video_prior_logits(splits, meta)
++        user_pos_counts = compute_user_positive_counts(splits, meta)
++
++        # Small fixed validation-only selection budget.
++        tau_grid = [0.0, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
++        best_tau = None
++        best_metrics = None
++        best_primary = -1e18
++        best_valid_scores = None
++
++        for tau in tau_grid:
++            valid_scores = blended_scores(base_valid, splits["valid"], video_prior_logits, user_pos_counts, tau)
++            metrics = evaluate_scores(splits, valid_scores, "valid")
++            if metrics["primary"] > best_primary:
++                best_primary = metrics["primary"]
++                best_tau = tau
++                best_metrics = metrics
++                best_valid_scores = valid_scores
++
++        final_test_scores = blended_scores(base_test, splits["test"], video_prior_logits, user_pos_counts, best_tau)
++
++        with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
++            json.dump({k: float(v) for k, v in best_metrics.items()}, f)
++        np.save(os.path.join(args.output_dir, "scores_valid.npy"), best_valid_scores)
++        np.save(os.path.join(args.output_dir, "scores_test.npy"), final_test_scores)
++
 +    except Exception as e:
-+        print(f'ERROR: {e}', file=sys.stderr)
-+        raise
++        sys.stderr.write("ERROR: %s\n" % str(e))
++        sys.stderr.write(traceback.format_exc())
++        sys.exit(1)
  
  
--if __name__ == "__main__":
-+if __name__ == '__main__':
-     main()
+ if __name__ == "__main__":

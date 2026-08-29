@@ -1,0 +1,516 @@
+{
+  "n_decisions": 10,
+  "known_outcomes": 5,
+  "policies": {
+    "deployed": {
+      "decisions": 10,
+      "agreed": 10,
+      "picked_gated": 0,
+      "no_pick": 0,
+      "path_b": 6,
+      "observed": 10,
+      "cf_known": 0,
+      "cf_unknown": 0,
+      "branches": 5,
+      "categories": {
+        "exploration": 1,
+        "ablation": 3,
+        "confirmation": 6
+      },
+      "detail": [
+        {
+          "node": 0,
+          "status": "OBSERVED",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 1,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6031982961292528
+        },
+        {
+          "node": 2,
+          "status": "OBSERVED",
+          "picked_index": 2,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 3,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6020813479210678
+        },
+        {
+          "node": 4,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 5,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 6,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 7,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 8,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 9,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        }
+      ],
+      "agreement_rate": 1.0,
+      "gated_pick_rate": 0.0,
+      "path_b_rate": 0.6,
+      "outcome_coverage": 1.0
+    },
+    "first_proposal": {
+      "decisions": 10,
+      "agreed": 1,
+      "picked_gated": 7,
+      "no_pick": 0,
+      "path_b": 0,
+      "observed": 1,
+      "cf_known": 6,
+      "cf_unknown": 3,
+      "branches": 3,
+      "categories": {
+        "exploration": 1,
+        "ablation": 3,
+        "confirmation": 6
+      },
+      "detail": [
+        {
+          "node": 0,
+          "status": "OBSERVED",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 1,
+          "status": "COUNTERFACTUAL_UNKNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": null
+        },
+        {
+          "node": 2,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 3,
+          "status": "COUNTERFACTUAL_UNKNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": null
+        },
+        {
+          "node": 4,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 5,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 6,
+          "status": "COUNTERFACTUAL_UNKNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": null
+        },
+        {
+          "node": 7,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 8,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 9,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 0,
+          "path": "A",
+          "gated": true,
+          "primary": 0.6036708892325344
+        }
+      ],
+      "agreement_rate": 0.1,
+      "gated_pick_rate": 0.7,
+      "path_b_rate": 0.0,
+      "outcome_coverage": 0.7
+    },
+    "greedy_gain": {
+      "decisions": 10,
+      "agreed": 9,
+      "picked_gated": 0,
+      "no_pick": 0,
+      "path_b": 7,
+      "observed": 9,
+      "cf_known": 1,
+      "cf_unknown": 0,
+      "branches": 4,
+      "categories": {
+        "exploration": 1,
+        "ablation": 3,
+        "confirmation": 6
+      },
+      "detail": [
+        {
+          "node": 0,
+          "status": "COUNTERFACTUAL_KNOWN",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 1,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6031982961292528
+        },
+        {
+          "node": 2,
+          "status": "OBSERVED",
+          "picked_index": 2,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 3,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6020813479210678
+        },
+        {
+          "node": 4,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 5,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 6,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 7,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 8,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 9,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        }
+      ],
+      "agreement_rate": 0.9,
+      "gated_pick_rate": 0.0,
+      "path_b_rate": 0.7,
+      "outcome_coverage": 1.0
+    },
+    "cheapest": {
+      "decisions": 10,
+      "agreed": 8,
+      "picked_gated": 0,
+      "no_pick": 0,
+      "path_b": 4,
+      "observed": 8,
+      "cf_known": 0,
+      "cf_unknown": 2,
+      "branches": 6,
+      "categories": {
+        "exploration": 1,
+        "ablation": 3,
+        "confirmation": 6
+      },
+      "detail": [
+        {
+          "node": 0,
+          "status": "OBSERVED",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 1,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6031982961292528
+        },
+        {
+          "node": 2,
+          "status": "COUNTERFACTUAL_UNKNOWN",
+          "picked_index": 3,
+          "path": "A",
+          "gated": false,
+          "primary": null
+        },
+        {
+          "node": 3,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6020813479210678
+        },
+        {
+          "node": 4,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 5,
+          "status": "COUNTERFACTUAL_UNKNOWN",
+          "picked_index": 2,
+          "path": "A",
+          "gated": false,
+          "primary": null
+        },
+        {
+          "node": 6,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 7,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 8,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 9,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        }
+      ],
+      "agreement_rate": 0.8,
+      "gated_pick_rate": 0.0,
+      "path_b_rate": 0.4,
+      "outcome_coverage": 0.8
+    },
+    "no_gates": {
+      "decisions": 10,
+      "agreed": 10,
+      "picked_gated": 0,
+      "no_pick": 0,
+      "path_b": 6,
+      "observed": 10,
+      "cf_known": 0,
+      "cf_unknown": 0,
+      "branches": 5,
+      "categories": {
+        "exploration": 1,
+        "ablation": 3,
+        "confirmation": 6
+      },
+      "detail": [
+        {
+          "node": 0,
+          "status": "OBSERVED",
+          "picked_index": 0,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6034038591127983
+        },
+        {
+          "node": 1,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6031982961292528
+        },
+        {
+          "node": 2,
+          "status": "OBSERVED",
+          "picked_index": 2,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 3,
+          "status": "OBSERVED",
+          "picked_index": 1,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6020813479210678
+        },
+        {
+          "node": 4,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 5,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 6,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "A",
+          "gated": false,
+          "primary": 0.6036708892325344
+        },
+        {
+          "node": 7,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 8,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        },
+        {
+          "node": 9,
+          "status": "OBSERVED",
+          "picked_index": 3,
+          "path": "B",
+          "gated": false,
+          "primary": 0.6018893690731795
+        }
+      ],
+      "agreement_rate": 1.0,
+      "gated_pick_rate": 0.0,
+      "path_b_rate": 0.6,
+      "outcome_coverage": 1.0
+    }
+  }
+}

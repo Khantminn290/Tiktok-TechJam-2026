@@ -1,0 +1,35 @@
+==============================================================================
+POLICY REPLAY — counterfactual decision analysis
+==============================================================================
+recorded decision points: 10
+
+policy            agree  gated  pathB  branch  cover   outcome knowability
+------------------------------------------------------------------------------
+deployed           100%     0%    60%       5   100%   obs 10 / known-cf 0 / UNKNOWN 0
+first_proposal      10%    70%     0%       3    70%   obs 1 / known-cf 6 / UNKNOWN 3
+greedy_gain         90%     0%    70%       4   100%   obs 9 / known-cf 1 / UNKNOWN 0
+cheapest            80%     0%    40%       6    80%   obs 8 / known-cf 0 / UNKNOWN 2
+no_gates           100%     0%    60%       5   100%   obs 10 / known-cf 0 / UNKNOWN 0
+
+Reading this table:
+  agree  = same choice as the policy that actually ran
+  gated  = picked a duplicate / dead end / unfalsifiable proposal.
+           This is a mistake visible WITHOUT running anything, which
+           is why it is the most trustworthy column here.
+  cover  = share of decisions whose outcome is actually knowable.
+
+'first_proposal' would have spent 7/10 iterations on gated candidates; 'deployed' spent 0.
+
+WHY SCORE CANDIDATES AT ALL — 'first_proposal' is what a single-proposal
+planner does. Replayed over the same 10 decisions it would have:
+  * picked a GATED candidate 7/10 times (70%) -- a duplicate, a recorded dead
+    end, or an unfalsifiable proposal, each costing a full iteration
+  * agreed with the deployed choice only 10% of the time
+  * opened 3 branches vs 5, and chosen Path B 0% of the time vs 60%
+None of that depends on an outcome, so none of it depends on luck.
+
+HONESTY BOUND: 0 replayed decision(s) selected work that was never implemented.
+Their outcomes are UNKNOWN and are not scored, imputed, or averaged. No
+'policy X would have scored Y' claim is made from this table.
+
+wrote logs/ab_test/policy_replay.json

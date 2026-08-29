@@ -1,27 +1,27 @@
 {
-  "stop_reason": "converged: running-best valid primary improved only 0.0000 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
-  "iterations_used": 11,
-  "iteration_cap": 40,
-  "best_node": 4,
+  "stop_reason": "converged: running-best valid primary improved only 0.0003 (\u2264 \u03b5=0.002) over the last 3 scored iterations",
+  "iterations_used": 10,
+  "iteration_cap": 20,
+  "best_node": 6,
   "best_valid_metrics": {
-    "GAUC": 0.6720477510874213,
-    "nDCG@5": 0.5378881530235174,
-    "primary": 0.6049679520554694
+    "GAUC": 0.6704195901998051,
+    "nDCG@5": 0.5369221882652637,
+    "primary": 0.6036708892325344
   },
-  "delta_valid_primary_over_baseline": 0.0034,
+  "delta_valid_primary_over_baseline": 0.0021,
   "total_llm_tokens": {
-    "input_tokens": 136802,
-    "output_tokens": 8280,
+    "input_tokens": 242495,
+    "output_tokens": 31125,
     "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 15360,
-    "calls": 14,
+    "cache_read_input_tokens": 0,
+    "calls": 30,
     "provider": "openai",
     "model": "gpt-5.4",
-    "input_plus_output": 160442
+    "input_plus_output": 273620
   },
-  "total_training_wall_clock_s": 2443.3,
-  "delta_in_baseline_seed_sigmas": 4.21,
-  "total_agent_wall_clock_s": 1190.4,
+  "total_training_wall_clock_s": 241.9,
+  "delta_in_baseline_seed_sigmas": 2.59,
+  "total_agent_wall_clock_s": 506.9,
   "gpu_hours": 0.0,
   "gpu_seconds_measured": 0.0,
   "devices_used": [
@@ -30,14 +30,14 @@
   "spend": {
     "provider": "openai",
     "model": "gpt-5.4",
-    "total_usd": 0.470045,
-    "ceiling_usd": 1.2,
-    "iterations_billed": 14,
-    "mean_usd_per_iteration": 0.033575,
-    "max_usd_per_iteration": 0.047845,
+    "total_usd": 1.073112,
+    "ceiling_usd": 3.0,
+    "iterations_billed": 30,
+    "mean_usd_per_iteration": 0.03577,
+    "max_usd_per_iteration": 0.098688,
     "rate_card": "$2.50/1M in, $15.00/1M out"
   },
-  "draft_count": 5,
+  "draft_count": 7,
   "manual_interventions": 0,
   "convergence_rule": {
     "epsilon": 0.002,
