@@ -301,6 +301,12 @@ def build_prompt(action: str, target: Node | None, reason: str,
             "model). If you believe two choices actively fight each other, say so "
             "and pick the one you expect to dominate. Return the complete script.")
     elif action == "debug":
+        try:
+            from .failure import classify, repair_brief
+            _fc = classify(target.error_trace)
+            parts.append(repair_brief(_fc, attempt=1, max_attempts=2))
+        except Exception:
+            pass
         parts.append(
             f"## Target node {target.iteration_id} (the failed attempt to fix)\n"
             f"menu_choices: {json.dumps(target.menu_choices)}\n"

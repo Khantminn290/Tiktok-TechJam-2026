@@ -24,6 +24,7 @@ from .pricing import SpendTracker
 from .prompts import build_merge_prompt, build_prompt
 from . import inspect as inspect_tools
 from . import propose_axis
+from . import failure as failure_mod
 from .research_policy import decide_category, render_decision
 from .research_state import ResearchState
 
@@ -277,8 +278,15 @@ class AgentLoop:
         res = run_solution(code, code_path, obj["menu_choices"], run_dir,
                            timeout_s=self.exec_timeout_s, seed=self.seed)
         if not res.ok:
+            fc = failure_mod.classify(res.error_trace)
             events.append({"type": "execution_error",
+                           "failure_class": fc["class"],
+                           "retry_worthwhile": fc["retry_worthwhile"],
+                           "needs_shrink": fc["needs_shrink"],
+                           "likely_cause": fc["likely_cause"],
                            "error_head": (res.error_trace or "")[:300]})
+            print(f"  [failure] class={fc['class']} "
+                  f"retry_worthwhile={fc['retry_worthwhile']}", flush=True)
         diff_info = {"diff_path": "", "diff_sha256": ""}
         if os.path.exists(code_path):
             parent_code_path = target.code_path if target is not None else None
@@ -353,8 +361,12 @@ class AgentLoop:
             return
         choices_s = json.dumps(node.menu_choices)
         if node.status != "success":
-            outcome = "CRASHED"
-            body = f"menu_choices={choices_s}. {error_headline(node.error_trace, 200)}"
+            # Stage E: record the CLASSIFIED fault, so the lesson carried
+            # forward is "this class of bug, and how to avoid it" rather than
+            # an opaque stack-trace line.
+            fc = failure_mod.classify(node.error_trace)
+            outcome, _title, body = failure_mod.as_knowledge(
+                fc, node.iteration_id, node.menu_choices)
         else:
             primary = node.metrics["primary"]
             if best_before is None or primary > best_before.metrics["primary"] + 1e-9:
@@ -497,7 +509,12 @@ class AgentLoop:
             it, p, obj = j["_iteration_id"], j["_proposal"], j["_proposal"]["obj"]
             events = list(p["events"])
             if not res.ok:
+                fc = failure_mod.classify(res.error_trace)
                 events.append({"type": "execution_error",
+                              "failure_class": fc["class"],
+                              "retry_worthwhile": fc["retry_worthwhile"],
+                              "needs_shrink": fc["needs_shrink"],
+                              "likely_cause": fc["likely_cause"],
                               "error_head": (res.error_trace or "")[:300]})
             diff_info = {"diff_path": "", "diff_sha256": ""}
             if os.path.exists(j["code_path"]):

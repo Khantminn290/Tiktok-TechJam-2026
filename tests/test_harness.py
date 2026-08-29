@@ -1766,6 +1766,71 @@ def test_research_policy():
           st.component_evidence == before)
 
 
+def test_failure_taxonomy():
+    """Stage E: Path B makes custom code common, so failures must be classified
+    before repair -- and a disproved HYPOTHESIS must never be confused with
+    broken CODE."""
+    print("\n[stage E: failure taxonomy and repair policy]")
+    from agent import failure as F
+
+    cases = [("SyntaxError: unterminated string literal", F.SYNTAX),
+             ("ModuleNotFoundError: No module named 'lightgbm'", F.IMPORT),
+             ("KeyError: 'n_users'", F.API_MISUSE),
+             ("TIMEOUT: training run exceeded 1200s and was killed", F.TIMEOUT),
+             ("scores_valid.npy contains NaN/Inf", F.INVALID_PREDICTIONS),
+             ("metrics.json was not written to --output-dir", F.DATA_CONTRACT),
+             ("torch.cuda.OutOfMemoryError: CUDA out of memory", F.CUDA),
+             ("LLM stage failed: response schema violations", F.LLM_RESPONSE)]
+    for trace, expect in cases:
+        check(f"classified: {expect}", F.classify(trace)["class"] == expect)
+
+    # THE central distinction
+    ok = F.classify(None, status="success", metrics={"primary": 0.55})
+    check("a run that SUCCEEDED but scored poorly is hypothesis_disproved",
+          ok["class"] == F.HYPOTHESIS_DISPROVED)
+    check("...and is explicitly NOT a code failure", ok["is_code_failure"] is False)
+    check("...and is NOT retried (it answered the question)",
+          ok["retry_worthwhile"] is False)
+    bad = F.classify("SyntaxError: bad")
+    check("a crash IS a code failure", bad["is_code_failure"] is True)
+
+    # retry policy is class-specific, not blanket
+    check("a timeout is not worth retrying unchanged",
+          F.classify("TIMEOUT: exceeded")["retry_worthwhile"] is False)
+    check("a timeout demands a materially cheaper experiment",
+          F.classify("TIMEOUT: exceeded")["needs_shrink"] is True)
+    check("OOM demands shrinking too",
+          F.classify("OutOfMemoryError: ...")["needs_shrink"] is True)
+    check("a syntax error IS worth retrying after repair",
+          F.classify("SyntaxError: x")["retry_worthwhile"] is True)
+
+    # repair brief is compact and constrains the fix
+    brief = F.repair_brief(F.classify("KeyError: 'n_users'"), 1, 2)
+    check("repair brief is compact (< 900 chars)", len(brief) < 900, f"{len(brief)}")
+    check("repair brief names the class and forbids redesigning the experiment",
+          "api_misuse" in brief and "SMALLEST change" in brief)
+    check("repair brief for a non-retryable class says so",
+          "should NOT be retried" in F.repair_brief(F.classify("TIMEOUT: x"), 1, 2))
+
+    # failures become research knowledge
+    out, title, body = F.as_knowledge(F.classify("SyntaxError: x"), 7, {"loss": "bpr"})
+    check("a crash is recorded as CRASHED knowledge with its class",
+          out == "CRASHED" and "implementation_syntax" in body)
+    out2, _, body2 = F.as_knowledge(
+        F.classify(None, status="success", metrics={"primary": 0.5}), 8, {"loss": "bpr"})
+    check("a disproved hypothesis is recorded as DEAD_END, not CRASHED",
+          out2 == "DEAD_END" and "not a bug" in body2)
+
+    src = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("loop journals the failure class for every execution error",
+          '"failure_class": fc["class"]' in src)
+    check("loop records classified failures into experience memory",
+          "failure_mod.as_knowledge(" in src)
+    psrc = open(os.path.join(_ROOT, "agent", "prompts.py")).read()
+    check("debug prompts receive the classified repair brief",
+          "repair_brief(_fc" in psrc)
+
+
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
               test_executor, test_crossover, test_spend_ceiling,
@@ -1780,7 +1845,7 @@ if __name__ == "__main__":
               test_new_axes_and_snapshot, test_parallel_worker_diversity,
               test_data_tools_and_proposals, test_stage_b_path_freedom,
               test_research_state, test_research_state_no_side_effects,
-              test_research_policy):
+              test_research_policy, test_failure_taxonomy):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
     if FAIL:
