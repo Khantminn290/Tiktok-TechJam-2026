@@ -205,9 +205,14 @@ class AgentLoop:
             except Exception:
                 pass
             left = max(0, self.max_iterations - len(self.tree.nodes))
+            try:
+                from .frontier import from_root as _frontier
+                fr = _frontier(self.root)
+            except Exception:
+                fr = None
             cand_mod.score_candidates(cands, history=hist, dead_ends=dead,
                                       state=st, budget_left=left,
-                                      objective=objective)
+                                      objective=objective, frontier=fr)
             winner, ranked = cand_mod.select(cands)
             trace = cand_mod.render_trace(winner, ranked, objective, st, left)
             events.append({"type": "candidate_selection",

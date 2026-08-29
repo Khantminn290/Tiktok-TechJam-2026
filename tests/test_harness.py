@@ -2156,9 +2156,55 @@ def test_research_frontier():
     check("the frontier renders without an LLM",
           "RESEARCH FRONTIER" in f.render() and "UNEXPLORED" in f.render())
 
+    # value of information: resolving an open question is worth an iteration
+    # even when its expected score gain is not the largest on offer.
+    from agent import candidates as C
+
+    def mk(i, choices, gain):
+        return C.Candidate({"hypothesis": f"idea {i}",
+                            "mechanism": "a stated mechanism long enough to pass",
+                            "expected_gain": gain, "menu_choices": choices,
+                            "research_category": "exploration",
+                            "rationale": {"grounded_in": "measured evidence here"}}, i)
+
+    hist = [{"iteration_id": 0, "status": "success", "hypothesis": "base",
+             "menu_choices": best, "metrics": {"primary": 0.605},
+             "implementation_path": "A"}]
+    settled = mk(0, {"loss": "lambdarank_ndcg"}, 0.004)   # KNOWN_BAD (dead end)
+    open_q = mk(1, {"loss": "listwise_softmax"}, 0.002)   # UNEXPLORED
+    C.score_candidates([settled, open_q], history=hist, dead_ends=[],
+                       budget_left=40, frontier=f)
+    check("an UNEXPLORED direction earns information value",
+          open_q.parts["information_value"] == C.INFO_UNEXPLORED,
+          f"{open_q.parts['information_value']}")
+    # temporal=hour_plus_dow has isolated evidence beyond the noise floor in
+    # this fixture, so it is KNOWN_GOOD -- settled, nothing left to learn.
+    check("a settled (KNOWN_GOOD) direction earns no information value",
+          by["temporal=hour_plus_dow"]["status"] == F.KNOWN_GOOD
+          and C._information_value(mk(2, {"temporal": "hour_plus_dow"}, 0.001), f) == 0.0,
+          by["temporal=hour_plus_dow"]["status"])
+    check("a CONTRADICTORY direction DOES carry information value",
+          C._information_value(mk(6, {"loss": "bpr_pairwise"}, 0.001), f)
+          == C.INFO_CONTRADICTORY)
+    check("information value takes the MAX over axes, not the sum",
+          C._information_value(mk(3, {"loss": "listwise_softmax",
+                                      "multitask": "aux_click_like_forward"}, 0.001),
+                               f) == C.INFO_UNEXPLORED)
+    late = mk(4, {"loss": "listwise_softmax"}, 0.002)
+    C.score_candidates([late], history=hist, dead_ends=[], budget_left=2, frontier=f)
+    check("information is worth less when the budget is nearly spent",
+          late.parts["info_factor"] < open_q.parts["info_factor"],
+          f"{late.parts['info_factor']} vs {open_q.parts['info_factor']}")
+    nofr = mk(5, {"loss": "listwise_softmax"}, 0.002)
+    C.score_candidates([nofr], history=hist, dead_ends=[], budget_left=40)
+    check("scoring still works with no frontier available",
+          nofr.parts["information_value"] == 0.0 and nofr.utility > 0)
+
     lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
     check("the frontier actually reaches the planning prompt",
           "from .frontier import from_root" in lsrc)
+    check("the frontier also reaches candidate scoring",
+          "frontier=fr" in lsrc)
     check("a frontier failure cannot kill an iteration",
           '"type": "frontier_skipped"' in lsrc)
     live = F.from_root(_ROOT).render(limit=22)

@@ -14,7 +14,15 @@ counterfactual replay possible at all.
 
 Scoring, deliberately simple and inspectable:
 
-    utility = expected_gain x P(success) x novelty_factor / cost
+    utility = expected_gain x P(success) x novelty x redundancy x info / cost
+
+where `info` is the VALUE OF INFORMATION: an experiment earns an iteration
+either because it may raise the score, or because it resolves an uncertainty
+that decides where the remaining budget goes. Pure expected-gain scoring cannot
+express the second, so a cheap experiment settling whether a whole direction is
+viable used to lose to a marginally better tweak -- even though it redirects
+every iteration after it. It is graded from the research frontier's own status
+(UNEXPLORED / UNCERTAIN / CONTRADICTORY) and decays as the budget closes out.
 
 with hard gates applied BEFORE scoring, because a high utility computed from a
 fabricated premise is worse than no score:
@@ -209,9 +217,41 @@ def saturated_branches(stats: dict, min_experiments: int = 4) -> set:
             and s["recent_mean_gain"] < NOISE_FLOOR / 2}
 
 
+INFO_UNEXPLORED = 0.60      # never run: any outcome is new information
+INFO_UNCERTAIN = 0.35       # tried, evidence does not separate
+INFO_CONTRADICTORY = 0.45   # experiments disagree beyond seed noise
+
+
+def _information_value(c, frontier) -> float:
+    """How much does running this RESOLVE, independent of what it scores?
+
+    Reads the frontier status of every axis-option the candidate would set.
+    Takes the MAXIMUM rather than the sum: one genuinely open question is what
+    makes an experiment informative, and adding up several half-open ones would
+    let a candidate that changes many axes at once outrank a clean single-axis
+    test -- which is exactly the uncontrolled experiment we do not want.
+    """
+    if frontier is None or not c.menu_choices:
+        return 0.0
+    try:
+        from .frontier import (UNEXPLORED, UNCERTAIN, CONTRADICTORY)
+    except ImportError:
+        return 0.0
+    by = {d["direction"]: d for d in getattr(frontier, "directions", [])}
+    best = 0.0
+    for axis, value in c.menu_choices.items():
+        d = by.get(f"{axis}={value}")
+        if not d:
+            continue
+        best = max(best, {UNEXPLORED: INFO_UNEXPLORED,
+                          UNCERTAIN: INFO_UNCERTAIN,
+                          CONTRADICTORY: INFO_CONTRADICTORY}.get(d["status"], 0.0))
+    return best
+
+
 def score_candidates(cands: list, *, history: list, dead_ends: list,
                      state=None, budget_left: int = 50,
-                     objective: str | None = None) -> list:
+                     objective: str | None = None, frontier=None) -> list:
     """Deterministically score every candidate; attach gates and components."""
     stats = branch_stats(history)
     sat = saturated_branches(stats)
@@ -256,6 +296,26 @@ def score_candidates(cands: list, *, history: list, dead_ends: list,
         if budget_left <= 8:
             cost *= 1.5
 
+        # --- value of INFORMATION, not just of score ---------------------
+        # An experiment can be worth an iteration because it may raise the
+        # score, OR because it resolves an uncertainty that decides where the
+        # remaining budget goes. Pure expected-gain scoring cannot express the
+        # second: a cheap experiment that settles whether an entire direction
+        # is viable outranks a marginally better tweak, because it redirects
+        # every iteration after it.
+        #
+        # Graded by the frontier's own status, so this is evidence-derived
+        # rather than a hand-set exploration bonus:
+        #   UNEXPLORED -- never run, so ANY result is new information
+        #   UNCERTAIN  -- tried, but the evidence does not separate; a repeat
+        #                 with a decisive design is what breaks the tie
+        #   settled    -- KNOWN_GOOD/KNOWN_BAD/SATURATED already answer it
+        # Deliberately capped: information is worth less than a real gain when
+        # the budget is nearly spent, so it decays as the run closes out.
+        info = _information_value(c, frontier)
+        budget_frac = min(1.0, budget_left / 20.0)
+        info_factor = 1.0 + info * budget_frac
+
         # Graded redundancy penalty instead of a hard block: an idea that
         # merely restates a previous one loses most of its value, while a
         # genuine extension of it (which looks just as similar lexically) is
@@ -273,9 +333,11 @@ def score_candidates(cands: list, *, history: list, dead_ends: list,
                    "novelty": round(novelty, 3),
                    "novelty_factor": round(novelty_factor, 3),
                    "cost": round(cost, 2),
+                   "information_value": round(info, 3),
+                   "info_factor": round(info_factor, 3),
                    "branch_seen": key in stats,
                    "objective_match": (objective is None or c.category == objective)}
-        u = (gain * p_succ * novelty_factor * redundancy) / cost
+        u = (gain * p_succ * novelty_factor * redundancy * info_factor) / cost
         # honour the research objective without making it absolute
         if objective and c.category != objective:
             u *= 0.55
