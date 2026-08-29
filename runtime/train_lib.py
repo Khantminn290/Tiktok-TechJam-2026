@@ -810,6 +810,211 @@ def train_numpy_fm(cfg, enc, splits, meta, log):
 # --------------------------------------------------------------------------
 # Torch engine (DeepFM / DCN-lite, optional DIN attention history)
 # --------------------------------------------------------------------------
+SEQ_LEN = 50   # covers p90 of train users (43.5 mean / 31 median impressions)
+
+
+def build_causal_sequences(splits, n_users, seq_len=SEQ_LEN):
+    """Per-user chronological sequence of TRAIN-period long_view items.
+
+    Returns (seq_items, seq_times, seq_len_per_user), each (n_users, seq_len),
+    left-aligned oldest -> newest so a left-to-right RNN reads them in time
+    order. seq_times is kept so callers can apply a STRICT causal mask per
+    row (position included only if its time < the scored row's time).
+
+    Why times are stored rather than just a length:
+      * A validation/test row can safely see the user's entire train history
+        (train 20220408-21 strictly precedes valid 20220422-28 and test
+        20220429-0508), so nothing is masked there.
+      * A TRAIN row must NOT see itself or anything after it. Without a time
+        mask, scoring a positive train row would include that very row in its
+        own history -- the label leaking into its own features. The numpy
+        History class already does leave-one-out for exactly this reason; the
+        existing torch history path (hist_pad) does NOT, which is a real
+        pre-existing leak in the deepfm/dcn/DIN path (those are a documented
+        dead end, so it is noted here rather than silently changed).
+
+    Sandbox note: this reads ONLY train-split positives (long_view from
+    train.npz). runtime/data_boundary strips label columns from test.npz
+    alone, and leaves train/valid intact -- so sequences build correctly
+    inside the sandbox without ever needing a test label.
+    """
+    tr = splits["train"]
+    pos = tr["long_view"] > 0
+    pu, pv, pt = tr["user"][pos], tr["video"][pos], tr["time_ms"][pos]
+    ordidx = np.lexsort((pt, pu))          # by user, then chronological
+    pu, pv, pt = pu[ordidx], pv[ordidx], pt[ordidx]
+    items = np.zeros((n_users, seq_len), dtype=np.int64)
+    times = np.full((n_users, seq_len), np.iinfo(np.int64).max, dtype=np.int64)
+    lens = np.zeros(n_users, dtype=np.int64)
+    starts = np.searchsorted(pu, np.arange(n_users + 1))
+    for u in range(n_users):
+        lo, hi = starts[u], starts[u + 1]
+        if hi <= lo:
+            continue
+        v, t = pv[lo:hi][-seq_len:], pt[lo:hi][-seq_len:]   # most recent seq_len
+        items[u, :len(v)] = v
+        times[u, :len(t)] = t
+        lens[u] = len(v)
+    return items, times, lens
+
+
+def train_torch_seq(cfg, enc, splits, meta, log):
+    """GRU4Rec-style sequential model: FM backbone + a GRU over the user's
+    chronologically-ordered train history.
+
+    Deliberately a SEPARATE function from train_torch rather than another
+    branch inside it: the deepfm/dcn path is a documented dead end and adding
+    a third model to its Net would put the one untested idea at risk of the
+    same generated-code fragility that crashed 4 of 8 iterations there.
+
+    Architecture choice -- GRU (Hidasi et al., "Session-based Recommendations
+    with Recurrent Neural Networks", ICLR 2016) rather than a causal
+    Transformer (Kang & McAuley, "Self-Attentive Sequential Recommendation",
+    ICDM 2018), because a GRU has no positional embeddings and no causal
+    attention mask, which are the two classic sources of silent look-ahead
+    leakage; given this project's track record of real bugs surfacing on
+    first live use, the smaller correctness surface is worth more than
+    SASRec's marginal capacity. Sequential modelling is the intervention the
+    dataset's own design implies -- KuaiRand is published as "An Unbiased
+    Sequential Recommendation Dataset" (Gao et al., CIKM 2022) -- and no model
+    tried on this project has used ORDER at all (FM/DeepFM/DCN treat history
+    as a set; DIN attends over it but is order-invariant).
+
+    The sequence signal is ADDITIVE on top of the FM score, not a replacement:
+    score = bias + linear + FM_interaction + <gru_state, candidate_video_emb>.
+    That follows the pattern that has actually worked here (broad, additive
+    signal) rather than swapping out the backbone that is known to work.
+    """
+    import torch
+    import torch.nn as nn
+    torch.manual_seed(cfg["seed"])
+    dev = cfg.get("device") or select_device()
+    log(f"  torch device: {dev} (gru4rec_seq)")
+
+    n_users = meta["field_dims"]["user"]
+    v_off = n_users                      # video field offset in the shared table
+    k = cfg["k"]
+    tr = splits["train"]
+    Xtr = torch.from_numpy(enc["train"]).long().to(dev)
+    Xva = torch.from_numpy(enc["valid"]).long().to(dev)
+    Xte = torch.from_numpy(enc["test"]).long().to(dev)
+    ytr = torch.from_numpy(tr["long_view"]).to(dev)
+    uva_raw = list(splits["valid"]["user_raw"])
+    yva = splits["valid"]["long_view"]
+
+    items, times, lens = build_causal_sequences(splits, n_users)
+    seq_items = torch.from_numpy(items + v_off).to(dev)      # (U, L) into emb table
+    seq_times = torch.from_numpy(times).to(dev)
+    seq_lens = torch.from_numpy(lens).to(dev)
+    L = seq_items.shape[1]
+
+    users_tr = torch.from_numpy(tr["user"].astype(np.int64)).to(dev)
+    users_va = torch.from_numpy(splits["valid"]["user"].astype(np.int64)).to(dev)
+    users_te = torch.from_numpy(splits["test"]["user"].astype(np.int64)).to(dev)
+    times_tr = torch.from_numpy(tr["time_ms"].astype(np.int64)).to(dev)
+
+    class SeqNet(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.emb = nn.Embedding(cfg["dim"], k)
+            nn.init.normal_(self.emb.weight, 0, 0.01)
+            self.lin = nn.Embedding(cfg["dim"], 1)
+            nn.init.zeros_(self.lin.weight)
+            self.bias = nn.Parameter(torch.zeros(1))
+            self.gru = nn.GRU(k, k, batch_first=True)
+
+        def seq_state(self, users, row_times):
+            """Causal GRU state for each row. row_times=None => eval rows, which
+            may use the user's FULL train history (the split is defined by DATE
+            and train strictly precedes valid/test by date; a raw time_ms
+            comparison is NOT used because date and time_ms are ~1h skewed, so
+            0.04% of valid rows carry a time_ms below the train maximum)."""
+            s_it = seq_items[users]                       # (B, L)
+            valid = (torch.arange(L, device=dev)[None, :] < seq_lens[users][:, None])
+            if row_times is not None:                     # TRAIN rows: strict causal
+                valid = valid & (seq_times[users] < row_times[:, None])
+            e = self.emb(s_it) * valid.unsqueeze(-1).float()
+            out, _ = self.gru(e)                          # (B, L, k)
+            idx = valid.sum(1).long()                     # count of usable steps
+            has = idx > 0
+            gather = (idx - 1).clamp(min=0)
+            st = out[torch.arange(len(idx), device=dev), gather]
+            return st * has.unsqueeze(-1).float()         # zero when no history
+
+        def forward(self, X, users, row_times):
+            E = self.emb(X)
+            S = E.sum(1)
+            fm = 0.5 * ((S ** 2).sum(1) - (E ** 2).sum((1, 2)))
+            first = self.lin(X).sum((1, 2)) + self.bias
+            st = self.seq_state(users, row_times)
+            cand = self.emb(X[:, 1])                      # candidate video embedding
+            return first + fm + (st * cand).sum(1)
+
+    net = SeqNet().to(dev)
+    opt = torch.optim.Adam(net.parameters(), lr=cfg["lr"])
+    bce = nn.BCEWithLogitsLoss()
+    bs = min(cfg["bs"], 4096)                             # GRU is the memory driver
+    rng = np.random.default_rng(cfg["seed"])
+    user_np = tr["user"]
+    order = np.argsort(user_np, kind="stable")
+    bounds = np.searchsorted(user_np[order], np.arange(n_users + 1))
+
+    def predict(X, users, bs_=4096):
+        net.eval()
+        out = []
+        with torch.no_grad():
+            for i in range(0, len(X), bs_):
+                out.append(net(X[i:i + bs_], users[i:i + bs_], None))
+        net.train()
+        return torch.cat(out).cpu().numpy()
+
+    def epoch_pointwise():
+        idx = torch.randperm(len(ytr), device=dev)
+        for i in range(0, len(idx), bs):
+            b = idx[i:i + bs]
+            loss = bce(net(Xtr[b], users_tr[b], times_tr[b]), ytr[b])
+            opt.zero_grad(); loss.backward(); opt.step()
+
+    def epoch_bpr():
+        pos_rows = np.flatnonzero(tr["long_view"] > 0)
+        P, N = [], []
+        for r in pos_rows:
+            rows_u = order[bounds[user_np[r]]:bounds[user_np[r] + 1]]
+            negs = rows_u[tr["long_view"][rows_u] == 0]
+            if len(negs):
+                P.append(r); N.append(negs[rng.integers(len(negs))])
+        P = torch.from_numpy(np.asarray(P)).to(dev)
+        N = torch.from_numpy(np.asarray(N)).to(dev)
+        perm = torch.randperm(len(P), device=dev)
+        for i in range(0, len(perm), bs):
+            pb, nb = P[perm[i:i + bs]], N[perm[i:i + bs]]
+            zp = net(Xtr[pb], users_tr[pb], times_tr[pb])
+            zn = net(Xtr[nb], users_tr[nb], times_tr[nb])
+            loss = torch.nn.functional.softplus(-(zp - zn)).mean()
+            opt.zero_grad(); loss.backward(); opt.step()
+
+    runner = epoch_bpr if cfg["loss"] == "bpr_pairwise" else epoch_pointwise
+    best, best_sd, bad = -1.0, None, 0
+    for ep in range(1, min(cfg["epochs"], 12) + 1):
+        t0 = time.time()
+        runner()
+        va = evaluate(uva_raw, yva, predict(Xva, users_va))
+        log(f"  [gru4rec_seq/{cfg['loss']}] epoch {ep:2d} | valid primary "
+            f"{va['primary']:.4f} (GAUC {va['GAUC']:.4f} nDCG@5 {va['nDCG@5']:.4f})"
+            f" | {time.time()-t0:.1f}s")
+        if va["primary"] > best + 1e-5:
+            best, bad = va["primary"], 0
+            best_sd = {kk: v.detach().clone() for kk, v in net.state_dict().items()}
+        else:
+            bad += 1
+            if bad >= min(cfg["patience"], 3):
+                log(f"  early stop at epoch {ep}")
+                break
+    net.load_state_dict(best_sd)
+    return {"scores_valid": predict(Xva, users_va),
+            "scores_test": predict(Xte, users_te)}
+
+
 def train_torch(cfg, enc, splits, meta, log):
     import torch
     import torch.nn as nn
@@ -1079,7 +1284,9 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
         cfg["patience"] = min(cfg["patience"], 3)
         device = cfg.get("device") or select_device()
         cfg["device"] = device
-        res = train_torch(cfg, enc, splits, meta, log)
+        res = (train_torch_seq(cfg, enc, splits, meta, log)
+               if cfg["model"] == "gru4rec_seq"
+               else train_torch(cfg, enc, splits, meta, log))
     train_seconds = time.time() - t_train
     # Measured compute, read back by the harness for the GPU-hours report.
     write_resource_json(output_dir, device, train_seconds)

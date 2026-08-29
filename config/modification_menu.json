@@ -148,6 +148,14 @@
         },
         "dcn_lite": {
           "description": "Small Deep & Cross network (torch, CPU)."
+        },
+        "gru4rec_seq": {
+          "description": "GRU4Rec-style SEQUENTIAL model: the FM backbone plus a GRU run over the user's chronologically-ordered train-period long_view history, scored as <gru_state, candidate_video_embedding> ADDED to the FM score (additive, not a replacement). This is the one category of intervention the dataset's own design implies and that nothing on this project has tried: FM/DeepFM/DCN treat a user's history as a SET, and DIN attends over it but is order-invariant -- none of them use ORDER. KuaiRand is published as 'An Unbiased Sequential Recommendation Dataset' (Gao et al., CIKM 2022). A GRU (Hidasi et al., 'Session-based Recommendations with Recurrent Neural Networks', ICLR 2016) is used rather than a causal Transformer (Kang & McAuley, 'Self-Attentive Sequential Recommendation', SASRec, ICDM 2018) because a GRU needs no positional embeddings and no causal attention mask -- the two classic sources of silent look-ahead leakage -- and on this project the measured torch failure rate for generated code was 4 of 8 iterations versus 0 of 8 for numpy FM, so a smaller correctness surface is worth more than SASRec's marginal capacity. LEAKAGE DISCIPLINE: sequences are built from train-split positives only; a TRAIN row is masked to strictly earlier interactions (without this a positive row appears in its own history, leaking its label), while valid/test rows may use the full train history because the split is defined by DATE and train strictly precedes both. A raw time_ms comparison is deliberately NOT used across splits, because date and time_ms are ~1h skewed (0.04% of valid rows carry a time_ms below the train maximum). Window length 50 covers p90 of train users (mean 43.5, median 31 impressions). Sequence construction reads only train.npz, which the sandbox leaves intact -- no test label is ever required.",
+          "requires": {
+            "user_history": [
+              "none"
+            ]
+          }
         }
       }
     },
