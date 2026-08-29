@@ -2195,6 +2195,25 @@ def test_research_frontier():
           by["multitask=aux_click_like_forward"]["status"] != F.KNOWN_BAD
           and by["multitask=aux_click_like_forward_watch"]["status"] == F.KNOWN_BAD)
 
+    # A finding scoped to a whole AXIS must reach its option values, which may
+    # be named far into the text -- otherwise an already-measured variant shows
+    # UNEXPLORED and invites a re-run.
+    menu2 = {"axes": {"neg": {"options": ["uniform_1", "uniform_2", "uniform_4"]}},
+             "notes": {"tested_dead_ends": [
+                 "Negative-sampling variants (neg axis): MEASURED HERE, none beat "
+                 "the uniform_1 default. uniform_2 0.60356 and uniform_4 0.60316 "
+                 "vs uniform_1 0.60367 over 5 paired seeds"]}}
+    fb = F.Frontier([node(0, {"neg": "uniform_1"}, 0.60367)], menu2,
+                    best_config={"neg": "uniform_1"})
+    b2 = {d["direction"]: d for d in fb.directions}
+    check("an axis-scoped dead end reaches its option values",
+          b2["neg=uniform_2"]["status"] == F.KNOWN_BAD
+          and b2["neg=uniform_4"]["status"] == F.KNOWN_BAD,
+          f"{b2['neg=uniform_2']['status']}/{b2['neg=uniform_4']['status']}")
+    check("the INCUMBENT is never condemned by a finding that merely names it",
+          b2["neg=uniform_1"]["status"] != F.KNOWN_BAD,
+          b2["neg=uniform_1"]["status"])
+
     # isolated ablation, graded against the noise floor
     t = by["temporal=hour_plus_dow"]
     check("an in-best option with isolated evidence is graded, not assumed",

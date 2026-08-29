@@ -135,6 +135,15 @@ class Frontier:
     def _dead_end_hit(self, axis: str, value: str) -> str | None:
         if value == "none":                      # "none" is a default, not a mechanism
             return None
+        # The incumbent is never a dead end. Lexical matching cannot reliably
+        # tell a finding's SUBJECT from the baseline it was measured against --
+        # "none beat the uniform_1 default" and "decisively worse than
+        # bpr_pairwise" both name a working option inside a negative finding.
+        # Rather than keep patching the patterns, assert the invariant: an
+        # option the current best configuration actually uses demonstrably
+        # works, whatever some other experiment's write-up mentions.
+        if self.best_config.get(axis) == value:
+            return None
         import re
         # Whole-token match: plain substring made multitask=aux_click_like_forward
         # match the dead end for multitask=aux_click_like_forward_WATCH, wrongly
@@ -142,6 +151,14 @@ class Frontier:
         pat = re.compile(rf"\b{re.escape(axis)}={re.escape(value)}(?![\w])")
         for d in self.dead_ends:
             if pat.search(d):
+                return d[:120]
+            # A finding scoped to a whole AXIS covers its option values even
+            # when they are named far into the text: "Negative-sampling variants
+            # (neg_sampling axis): ... uniform_2 0.60356 and uniform_4 0.60316"
+            # left both showing UNEXPLORED, inviting the agent to re-run an
+            # experiment already measured over 5 paired seeds.
+            if re.search(rf"\b{re.escape(axis)}\b", d) and \
+                    re.search(rf"\b{re.escape(value)}(?![\w])", d):
                 return d[:120]
             subject = d[:self.SUBJECT_CHARS].lower()
             for mark in self._BASELINE_MARKERS:
