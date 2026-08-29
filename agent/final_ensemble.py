@@ -55,12 +55,45 @@ OUT_DIR = os.path.join(ROOT, "logs", "final_ensemble")
 RESULT = os.path.join(ROOT, "logs", "ensemble_results.json")
 
 
-def load_best() -> dict:
-    p = os.path.join(ROOT, "logs", "best_metrics.json")
-    if not os.path.exists(p):
+def load_best(retarget: bool = False) -> dict:
+    """The configuration to ensemble.
+
+    Pinned to whatever ensemble_results.json already records, NOT to
+    logs/best_metrics.json, because best_metrics.json is a mutable pointer that
+    every subsequent search run overwrites. Found the hard way: an A/B arm
+    replaced it with a config scoring 0.60367, so re-running the documented
+    reproduce command would have silently rebuilt a WORSE ensemble on top of
+    the reported 0.60541 -- the same class of bug as the orphaned member
+    arrays, one level up. Re-targeting is a deliberate act, not a side effect
+    of having run the agent again.
+    """
+    res_p = os.path.join(ROOT, "logs", "ensemble_results.json")
+    best_p = os.path.join(ROOT, "logs", "best_metrics.json")
+    if os.path.exists(res_p) and not retarget:
+        with open(res_p) as fh:
+            res = json.load(fh)
+        if res.get("config") and res.get("source_node") is not None:
+            code = os.path.join(ROOT, "logs", "solutions",
+                                f"node_{res['source_node']:03d}.py")
+            member = os.path.join(OUT_DIR, f"seed_{(res.get('seeds_used') or [0])[0]:02d}",
+                                  "solution.py")
+            # prefer a member's own frozen script: logs/solutions/ belongs to
+            # whichever search run is currently on disk and drifts the same way.
+            if os.path.exists(member):
+                code = member
+            print(f"pinned to the recorded ensemble config (node "
+                  f"{res['source_node']}); pass --retarget to rebuild from "
+                  f"logs/best_metrics.json instead")
+            return {"iteration_id": res["source_node"],
+                    "menu_choices": res["config"], "code_path": code}
+    if not os.path.exists(best_p):
         raise SystemExit("logs/best_metrics.json missing -- run the agent first")
-    with open(p) as fh:
-        return json.load(fh)
+    with open(best_p) as fh:
+        best = json.load(fh)
+    if retarget:
+        print(f"! --retarget: rebuilding from logs/best_metrics.json (node "
+              f"{best['iteration_id']}). This REPLACES the recorded ensemble.")
+    return best
 
 
 def train_seeds(best: dict, seeds: list, timeout_s: int = 1200) -> list:
@@ -138,9 +171,13 @@ def main() -> None:
     ap.add_argument("--seeds", type=int, default=16)
     ap.add_argument("--timeout", type=int, default=1200)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--retarget", action="store_true",
+                    help="rebuild from logs/best_metrics.json instead of the "
+                         "config already recorded in ensemble_results.json. "
+                         "REPLACES the reported result -- deliberate only.")
     a = ap.parse_args()
 
-    best = load_best()
+    best = load_best(retarget=a.retarget)
     seeds = list(range(a.seeds))
     print(f"config (node {best['iteration_id']}): "
           f"{json.dumps(best['menu_choices'], sort_keys=True)}")

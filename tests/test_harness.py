@@ -2204,6 +2204,25 @@ def test_submission_artifacts_survive_fresh():
     finally:
         shutil.rmtree(d, ignore_errors=True)
 
+    # The reproduce command must not silently re-target. best_metrics.json is
+    # overwritten by every search run; an A/B arm replaced it with a config
+    # scoring 0.60367, which would have rebuilt a WORSE ensemble on top of the
+    # reported 0.60541 under the exact command the docs tell a judge to run.
+    from agent import final_ensemble as FE
+    live_res = json.load(open(os.path.join(_ROOT, "logs", "ensemble_results.json")))
+    live_best = json.load(open(os.path.join(_ROOT, "logs", "best_metrics.json")))
+    pinned = FE.load_best()
+    check("the rebuild pins to the RECORDED ensemble config",
+          pinned["menu_choices"] == live_res["config"])
+    check("...even when best_metrics.json has since moved on",
+          live_best["menu_choices"] != live_res["config"]
+          or pinned["menu_choices"] == live_best["menu_choices"])
+    check("re-targeting requires an explicit flag",
+          FE.load_best(retarget=True)["menu_choices"] == live_best["menu_choices"])
+    check("the pinned script is a frozen member, not a mutable solutions/ path",
+          "final_ensemble" in pinned["code_path"]
+          and os.path.exists(pinned["code_path"]))
+
 
 if __name__ == "__main__":
     for t in (test_safety_gate, test_validity, test_policy, test_convergence,
