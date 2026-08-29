@@ -2031,6 +2031,58 @@ def test_candidate_policy():
           '"type": "candidate_selection"' in lsrc and '"all": [c.as_dict()' in lsrc)
 
 
+def test_submission_matches_reported_result():
+    """The submission must be built from the ensemble the deliverable reports.
+
+    It previously was not: --ensemble rank-averaged the top-K nodes chosen BY
+    VALIDATION SCORE with DISTINCT configs, which is simultaneously the
+    +0.00081 selection bias and the heterogeneous blending that were both
+    measured and rejected here -- and it read the search journal, not the
+    submitted artifacts. A judge running it would have got a different number
+    than the one being claimed.
+    """
+    print("\n[submission matches the reported result]")
+    import shutil
+    import tempfile
+    import numpy as np
+    from agent import make_submission as MS
+
+    d = tempfile.mkdtemp()
+    try:
+        logs = os.path.join(d, "logs", "final_ensemble")
+        os.makedirs(logs)
+        seeds = [0, 1, 2]
+        for s in seeds:
+            os.makedirs(os.path.join(logs, f"seed_{s:02d}"))
+            np.save(os.path.join(logs, f"seed_{s:02d}", "scores_valid.npy"),
+                    np.arange(10, dtype=float) + s)
+        json.dump({"k": 3, "seeds_used": seeds, "source_node": 4,
+                   "members_dir": os.path.join("logs", "final_ensemble")},
+                  open(os.path.join(d, "logs", "ensemble_results.json"), "w"))
+
+        arr, meta = MS.final_ensemble_members(d, "valid")
+        check("submission rebuilds from the recorded ensemble members",
+              arr is not None and meta["k"] == 3)
+        check("it averages ALL recorded members, not a chosen subset",
+              len(meta["seeds_used"]) == 3)
+
+        # a missing member must NOT silently yield a partial average
+        shutil.rmtree(os.path.join(logs, "seed_02"))
+        arr2, meta2 = MS.final_ensemble_members(d, "valid")
+        check("a partial ensemble is REFUSED, not silently averaged",
+              arr2 is None and meta2 is None)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    src = open(os.path.join(_ROOT, "agent", "make_submission.py")).read()
+    check("the biased top-k path is no longer the default",
+          "if a.legacy_topk_ensemble:" in src)
+    check("the biased path warns that it is not the reported result",
+          "NOT the reported result" in src)
+    check("the legacy path documents BOTH measured biases",
+          "+0.00081" in src and "heterogeneous" in src)
+
+
 def test_evidence_strength():
     """Evidence must be graded against the noise floor, not by sign. The old
     test was a bare `>` comparison, which reads a 0.0001 difference as support
@@ -2169,6 +2221,7 @@ if __name__ == "__main__":
               test_research_state, test_research_state_no_side_effects,
               test_research_policy, test_failure_taxonomy,
               test_leakage_and_ensemble, test_candidate_policy,
+              test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_submission_artifacts_survive_fresh):
         t()

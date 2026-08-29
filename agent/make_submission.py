@@ -110,11 +110,59 @@ def _rank_normalize(x: np.ndarray) -> np.ndarray:
     return ranks / max(1, len(x) - 1)
 
 
-def top_k_distinct_nodes(root: str, k: int) -> list[dict]:
-    """Best k successful nodes with DISTINCT menu_choices, best first.
+def final_ensemble_members(root: str, split: str) -> tuple:
+    """The SUBMITTED ensemble: every seed of ONE configuration, no selection.
 
-    Distinctness matters: averaging three near-identical configurations adds no
-    diversity and therefore cancels no noise.
+    This is what logs/ensemble_results.json reports and what the deliverable
+    quotes, so it is what a submission must be built from. The legacy
+    top_k_distinct_nodes() path below does something materially different and
+    contradicts two measured findings on this project -- see its docstring --
+    which is why this is now the default source.
+    """
+    res_path = os.path.join(root, "logs", "ensemble_results.json")
+    if not os.path.exists(res_path):
+        return None, None
+    with open(res_path) as fh:
+        res = json.load(fh)
+    seeds = res.get("seeds_used") or []
+    mdir = os.path.join(root, res.get("members_dir") or
+                        os.path.join("logs", "final_ensemble"))
+    stacked, used = [], []
+    for s in seeds:
+        p = os.path.join(mdir, f"seed_{s:02d}", f"scores_{split}.npy")
+        if os.path.exists(p):
+            stacked.append(_rank_normalize(np.load(p)))
+            used.append(s)
+    if not stacked or len({len(x) for x in stacked}) != 1:
+        return None, None
+    # Refuse a partial rebuild: averaging a SUBSET of the recorded members is
+    # exactly the selection this ensemble is designed not to do, and it would
+    # silently produce a number that is not the one being reported.
+    if len(used) != len(seeds):
+        print(f"! final ensemble incomplete for split={split}: {len(used)}/"
+              f"{len(seeds)} member arrays present. Refusing to average a "
+              f"subset (that would be selection). Rebuild with: "
+              f"python3 -m agent.final_ensemble --seeds {len(seeds)}")
+        return None, None
+    return np.mean(np.stack(stacked, axis=0), axis=0), res
+
+
+def top_k_distinct_nodes(root: str, k: int) -> list[dict]:
+    """LEGACY. Best k successful nodes with DISTINCT menu_choices, best first.
+
+    Kept for inspection, but NOT the submission default, because it does two
+    things this project measured and rejected:
+
+      * it selects the top-k BY VALIDATION SCORE, which is the ensemble
+        selection bias measured here at +0.00081 -- an optimistic estimate,
+        not a better model;
+      * it forces DISTINCT configurations, i.e. heterogeneous blending, which
+        was measured and lost (gru4rec_seq + fm_numpy: genuinely decorrelated
+        at 0.9338, but a 2.1 sigma quality gap cancelled the gain).
+
+    It also reads logs/runs/, the SEARCH journal, so it would build a
+    submission from whatever run happens to be on disk rather than from the
+    reported result. Use --legacy-topk-ensemble to get it deliberately.
     """
     journal = os.path.join(root, "logs", "journal.jsonl")
     if not os.path.exists(journal):
@@ -167,8 +215,15 @@ def main():
                     help="the ONE final hidden-test evaluation; writes results/")
     ap.add_argument("--data_dir", default=os.path.join(KIT, "KuaiRand-Pure", "data"))
     ap.add_argument("--ensemble", action="store_true",
-                    help="rank-average the top-K distinct successful nodes instead "
-                         "of using the single best node")
+                    help="use the SUBMITTED ensemble (all seeds of the reported "
+                         "configuration, from logs/final_ensemble/) instead of a "
+                         "single node. This is the number the deliverable quotes.")
+    ap.add_argument("--legacy-topk-ensemble", action="store_true",
+                    help="DEPRECATED, biased. Rank-average the top-K nodes chosen "
+                         "BY VALIDATION SCORE with distinct configs. Selecting on "
+                         "validation was measured here at +0.00081 optimistic bias, "
+                         "and heterogeneous blending was measured and lost. Produces "
+                         "a number that is NOT the reported result.")
     ap.add_argument("--top-k", type=int, default=None,
                     help="K for --ensemble (default: config/llm_config.json "
                          "ensemble_top_k, or 3)")
@@ -196,19 +251,29 @@ def main():
     run_dir = os.path.join(_ROOT, "logs", "runs", f"node_{best['iteration_id']:03d}")
     single_scores = np.load(os.path.join(run_dir, f"scores_{a.split}.npy"))
 
-    members = top_k_distinct_nodes(_ROOT, k)
-    ens_scores = ensemble_scores(_ROOT, a.split, members) if len(members) > 1 else None
+    if a.legacy_topk_ensemble:
+        members = top_k_distinct_nodes(_ROOT, k)
+        ens_scores = ensemble_scores(_ROOT, a.split, members) if len(members) > 1 else None
+        ens_desc = f"LEGACY top-{k} distinct nodes {[m['iteration_id'] for m in members]}"
+        print("! --legacy-topk-ensemble selects members BY VALIDATION SCORE "
+              "(+0.00081 measured bias) and blends distinct configs (measured, "
+              "lost). This is NOT the reported result.")
+    else:
+        ens_scores, ens_meta = final_ensemble_members(_ROOT, a.split)
+        ens_desc = (f"submitted ensemble, k={ens_meta['k']} seeds "
+                    f"{ens_meta['seeds_used']} of node {ens_meta.get('source_node')} "
+                    f"(no selection)" if ens_meta else "")
 
     scores = single_scores
     which = f"best single node {best['iteration_id']}"
     if a.ensemble:
         if ens_scores is None:
-            print(f"! ensemble unavailable ({len(members)} distinct successful node(s) "
-                  f"with usable score arrays) — falling back to the single best node")
+            print("! ensemble unavailable — falling back to the single best node. "
+                  "For the reported result, build it first: "
+                  "python3 -m agent.final_ensemble --seeds 16")
         else:
             scores = ens_scores
-            which = (f"rank-averaged ensemble of nodes "
-                     f"{[m['iteration_id'] for m in members]}")
+            which = ens_desc
 
     out = a.out or os.path.join(_ROOT, f"submission_{a.split}.csv")
     print(f"loading official split rows ({a.data_dir}) ...")
