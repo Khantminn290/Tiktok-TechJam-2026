@@ -46,7 +46,7 @@ def load(path: str) -> list:
     return out
 
 
-def summarise(nodes: list, label: str) -> dict:
+def summarise(nodes: list, label: str, journal_path: str = "") -> dict:
     scored = [n for n in nodes if n.get("status") == "success" and n.get("metrics")]
     prim = [n["metrics"]["primary"] for n in scored]
     s = {"label": label, "iterations": len(nodes), "scored": len(scored),
@@ -81,6 +81,22 @@ def summarise(nodes: list, label: str) -> dict:
     s["path_b_candidates_generated"] = pb
     s["candidates_gated"] = gated
     s["auditable_decisions"] = dec > 0
+
+    # A declared Path B is not necessarily a real one. capability_report reads
+    # the scripts on disk and separates code that implements its own mechanism
+    # from code that merely calls train_lib.run() while claiming Path B. Only
+    # the first is evidence that the agent can modify the approach itself, so
+    # counting declarations alone would overstate the fix to the audit finding.
+    s["path_b_genuine"] = None
+    s["path_b_fake"] = None
+    if journal_path and os.path.exists(journal_path):
+        try:
+            from agent.capability_report import analyse
+            cap = analyse(journal_path)
+            s["path_b_genuine"] = cap.get("path_B_genuine")
+            s["path_b_fake"] = cap.get("path_B_fake")
+        except Exception:
+            pass
     if prim:
         d = max(prim) - BASELINE
         s["best_delta_sigma"] = round(d / SIGMA, 2)
@@ -97,7 +113,9 @@ def render(a: dict, b: dict) -> str:
     L = ["=" * 74, "A/B — single-proposal planner vs multi-candidate policy", "=" * 74,
          f"  {'':<32}{a['label']:>18}{b['label']:>18}", "-" * 74,
          "PROCESS (what a single run pair CAN show)",
-         row("Path B nodes implemented", "path_b_nodes"),
+         row("Path B nodes declared", "path_b_nodes"),
+         row("  ...GENUINE (own mechanism)", "path_b_genuine"),
+         row("  ...fake (delegates to lib)", "path_b_fake"),
          row("Path B candidates generated", "path_b_candidates_generated"),
          row("decision points recorded", "decision_points"),
          row("candidates generated", "candidates_generated"),
@@ -121,10 +139,20 @@ def render(a: dict, b: dict) -> str:
                  "\nso there were no alternatives to score and 'why not Path B?' had no"
                  "\nanswer. Arm B records the full candidate set for every decision.")
     if a["path_b_nodes"] == 0 and b["path_b_nodes"] > 0:
-        L.append(f"\nThe audit finding is addressed: Path B went from NEVER generated "
-                 f"({a['path_b_nodes']} nodes)\nto generated and selected "
-                 f"({b['path_b_nodes']} nodes, {b['path_b_candidates_generated']} "
-                 f"candidates offered).")
+        L.append(f"\nPath B went from NEVER generated ({a['path_b_nodes']} nodes) to "
+                 f"generated and selected\n({b['path_b_nodes']} declared, "
+                 f"{b['path_b_candidates_generated']} candidates offered). The audit "
+                 f"finding was that Path B\nwas never GENERATED; that part is fixed.")
+        g, f_ = b.get("path_b_genuine"), b.get("path_b_fake")
+        if g is not None and f_ is not None and b["path_b_nodes"]:
+            if f_ > g:
+                L.append(f"\nBUT ONLY {g} OF {g + f_} ARE GENUINE. The other {f_} declare "
+                         f"Path B and then call\ntrain_lib.run() -- Path A wearing a "
+                         f"Path B label. Selecting Path B is fixed;\nWRITING it is not, "
+                         f"and reporting the declaration count alone would hide that.")
+            else:
+                L.append(f"\nOf these, {g} implement their own mechanism and {f_} merely "
+                         f"delegate to\ntrain_lib.run().")
 
     L.append("\nCAVEAT ON SCORE: seed noise here is 0.0008, and these are two runs, not"
              "\ntwo samples of a policy. A score difference between single runs cannot"
@@ -141,8 +169,8 @@ def main() -> None:
     ap.add_argument("--json", default=None)
     args = ap.parse_args()
 
-    a = summarise(load(args.a), "A single-prop")
-    b = summarise(load(args.b), "B multi-cand")
+    a = summarise(load(args.a), "A single-prop", args.a)
+    b = summarise(load(args.b), "B multi-cand", args.b)
     print(render(a, b))
     if args.json:
         with open(args.json, "w") as fh:
