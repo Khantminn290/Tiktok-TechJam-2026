@@ -1,106 +1,172 @@
-# Handover
+# Handover — read this first
 
-## What this is
+You're picking up an autonomous ML research agent competing on **KuaiRand-Pure**
+(TikTok TechJam 2026, Track 2). This document is for a human starting cold. Ten
+minutes here and you'll know where things stand and what to do next.
 
-An autonomous agent that improves a KuaiRand-Pure ranking model on its own. It searches
-over **complete Python training scripts, not diffs**: every attempt is a *node* (a full
-script plus the validation score it earned), a policy picks which node to extend next,
-an LLM writes the next script, a sandboxed runner scores it, and the result is appended
-to `logs/journal.jsonl`. A run stops when it **converges** — the best validation score
-hasn't improved by more than 0.002 over the last 3 scored iterations — or hits the
-iteration, time, or spend cap. Read [README.md](README.md) for the architecture and
-[config/modification_menu.json](config/modification_menu.json) for the search space
-before changing any search logic.
+Branch: **`search-phase-complete`** (branched from
+`hardening/deliverables-and-integrity`). Not merged to `main` yet.
 
-## Get running in under 5 minutes
+---
 
-```bash
-git clone <repo> && cd Tiktok-TechJam-2026
-python3 -m venv .venv && source .venv/bin/activate
-pip install numpy torch openai          # torch is the slow one, ~2 min
+## 1. Where things stand
 
-cp .env.example .env
+**The search phase is finished and deliberately exhausted.** This is not a first
+attempt — it's the end of a long campaign in which nine distinct interventions
+were implemented, measured, and mostly ruled out. The number below survived
+multi-seed verification; several earlier "wins" did not.
+
+**Validated best configuration:**
+
+```
+loss:             bpr_pairwise
+user_history:     recency_weighted_pool
+multitask:        aux_click_like_forward
+model:            fm_numpy
+temporal:         hour_plus_dow
+training:         default
+neg_sampling:     uniform_1
+sample_weighting: per_row
+regularization:   l2_default
++ 5-seed rank-averaged ensemble
 ```
 
-**Ask KM for the shared OpenAI key** — it is not in this repo and must never be
-committed. Paste it into the single `OPENAI_API_KEY=` line in `.env` (which is
-gitignored). Nothing else in `.env` needs changing.
+**Score: `0.60515 ± 0.00022` validation primary** — mean and std over all 252
+possible 5-seed subsets of 10 trained seeds, not a single lucky run.
 
-Download the dataset once (see README Setup), then:
+**Delta over the official baseline (0.6016): `+0.00355` = `+4.44σ`**, where
+σ = 0.0008 is the baseline's own 5-seed standard deviation. Comfortably outside
+seed noise.
+
+A single (non-ensembled) model of this config scores **0.60367 ± 0.00027**, so
+roughly a third of the total gain comes from ensembling and the rest from the
+pointwise → BPR loss switch.
+
+**Two numbers to keep in perspective:** the metric ceiling is 0.8484, not 1.0
+(27% of users have zero positive labels, so nDCG can never reach 1 for them),
+and the official baseline already captures ~31% of the attainable range. Judge
+progress against the ceiling, not against 1.0.
+
+---
+
+## 2. What NOT to re-try
+
+These are all recorded in `config/modification_menu.json` under
+`notes.tested_dead_ends` (injected verbatim into every agent prompt), but they're
+here in plain English so you don't burn a session rediscovering them. **Each was
+measured on this dataset, not assumed.**
+
+| Don't re-try | Why it lost |
+|---|---|
+| **LambdaRank / position-discounted loss** | −13.7σ. Training lists average 43.5 impressions/user but evaluation lists average 5.6 — an @5 discount zeroes 78.6% of training pairs and collapses gradient to 0.04× BPR's. |
+| **Per-user gradient weighting** | Real harm, monotonic: −0.001 (sqrt) to −0.004 (full). The metric aggregates per-user, but the optimizer genuinely benefits from heavy users' extra impressions. |
+| **Hard-negative sampling** | −0.032 (t = −27.7). Concentrates training on the model's current top errors. |
+| **Popularity-biased negatives** | −0.037 (t = −118.7). Same failure mode, worse. |
+| **More negatives per positive** (2×, 4×) | Null to slightly negative. Uniform 1-per-positive is already right. |
+| **Snapshot / checkpoint ensembling** | Rejected by its own guard. Validation peaks at epoch 4 then declines, so top-N checkpoints are one peak plus worse neighbours — averaging dilutes. |
+| **Bagged / bootstrap ensemble members** | −0.00084 vs plain seed ensembling. Bootstrap *did* decorrelate members (rank-corr 0.900 vs 0.959) but cost −0.0028 in per-member quality. |
+| **Graded play-time targets** | Perfect null (t = −0.23). Adds nothing beyond binary `long_view` + click/like/forward. |
+| **Neural architectures** (DeepFM / DCN / DIN) | Statistically tied with numpy FM (t = +0.57) *and* crashed on 4 of 8 generated iterations vs 0 of 8 for FM. |
+| **L2 regularization** (1e-5, 1e-4) | True null, ±0.00013. |
+| **Bigger embeddings** (k = 8/16/32) | Organizers already measured this; no gain. |
+| **Exposure debiasing via the random log** | Withdrawn on analysis. long_view is 8.5% under random exposure vs 33.7% logged, but you're *scored on the logged distribution* — debiasing optimizes the wrong objective. The random log also only exists from 2022-04-22, i.e. the evaluation period. |
+
+**The pattern behind almost all of these:** anything that **concentrates or
+reweights** the training signal loses on this dataset, and any ensemble whose
+members aren't **both independent and comparably good** loses. Broad, uniform,
+unweighted signal keeps winning. Weigh a new idea against that before spending a
+session on it.
+
+---
+
+## 3. What's genuinely still open
+
+Not ruled out — never tested. These are the real remaining options:
+
+1. **Content-side video features.** `video_features_basic_pure.csv` has `tag`
+   (content category), `video_type`, `upload_type`, `music_id` — none currently
+   used. Caveat: the organizers measured "adding static features" as a dead end,
+   but that was on the weak pointwise baseline, and `tag` specifically is a
+   content signal rather than a popularity counter.
+2. **New engineered behavioural features.** The logs carry columns the cache
+   never loads: `is_follow`, `is_comment`, `is_profile_enter` (2.5% of rows),
+   `profile_stay_time`, `comment_stay_time`. Adding *breadth* of signal fits the
+   pattern that keeps working here.
+3. **Multi-config ensembling.** Every ensemble tested so far averaged members of
+   the *same* config differing only by seed. Averaging genuinely *different*
+   good configs (e.g. BPR+history vs BPR+multitask) could satisfy both ensemble
+   properties at once — independent *and* comparably good.
+
+`video_features_statistic_pure.csv` is **locked** in the menu and should stay
+locked: its counters span the evaluation window and risk target leakage.
+
+---
+
+## 4. How to run things
+
+Full detail is in `README.md` — this is just the map.
 
 ```bash
-python3 tests/test_harness.py     # 80 checks, no model calls, zero spend
-python3 run_agent.py --smoke      # ~$0.015, 3 iterations, proves you reach the model
+python3 tests/test_harness.py                      # 213 checks, no LLM, no training
+cd kuairand-starter-kit && python3 baseline.py --model fm && cd ..   # reproduce 0.6016
+python3 -m agent.baseline_repro                    # durable baseline artifact
+
+python3 run_agent.py --smoke                       # cheap plumbing check (~$0.02)
+python3 run_agent.py --fresh --max-spend-usd 3     # a real run
+python3 run_agent.py --reseed-top 3 --reseed-seeds 5   # multi-seed verification, no LLM
+python3 run_agent.py --fresh --parallel-k 3        # parallel worker mode
+
+python3 -m agent.report                            # readable run summary
+python3 -m agent.make_submission --split valid --score --ensemble
 ```
 
-`--smoke` ends with a **SMOKE TEST VERDICT** block. Read that, not the individual
-iteration errors: it tells you whether *your setup* works. Some smoke scripts may fail —
-the cheap test model sometimes writes buggy code, which is model quality, not a broken
-install. Only `PLUMBING BROKEN` means your setup is wrong.
+**Two traps that cost real time here:**
 
-## Before you run anything real
+- **Resuming into an already-converged journal silently does nothing.** It exits
+  0 and reports the *pre-existing* iteration count. Use `--fresh` (it archives,
+  never deletes). There's now a loud warning, but know the shape of it.
+- **Don't run two training jobs at once.** `--parallel-k` chmods the real data
+  directory for the duration of a round; a concurrent reseed or A/B will die
+  with `PermissionError`. There's no mutex yet — adding a lockfile guard is a
+  good small task for whoever picks this up.
 
-**We all share one $50 budget.** Always pass `--max-spend-usd` explicitly and start
-small — the default is $2 on purpose.
+**Heads-up on `logs/`:** it currently holds the *neural exploration* run (8
+nodes, all DeepFM/DCN) — itself a documented dead end, not the winning config.
+The winning config's evidence is in `logs/experiments/` and section 1 above.
+Reproducing the headline number needs a fresh run with that config.
 
-```bash
-python3 run_agent.py --fresh --max-spend-usd 5
-```
+---
 
-The loop stops *before* the call that would breach your ceiling, and prints running
-spend every iteration. Cost is computed from real API token counts against the rates in
-[config/model_rates.json](config/model_rates.json); a model missing from that table gets
-a deliberately expensive fallback rate so it stops early rather than overspending. See
-README → *Cost control*. For reference: a converged 8-iteration run on `gpt-5.4` cost
-**$0.12**.
+## 5. What's left before submission
 
-## Extending the search (the thing you'll probably do)
+1. **Final clean end-to-end run** with the exact config from section 1, so
+   `logs/` reflects the winning configuration rather than the neural detour.
+2. **Re-run `make_submission.py --ensemble`** against that fresh journal — the
+   current submission CSV is stale.
+3. **The hidden-test evaluation — one shot, never yet used.**
+   `python3 -m agent.make_submission --final-test-eval --ensemble`. A lockfile
+   (`results/final_evaluation.lock`) enforces one-time use; a second attempt
+   needs `--admin-override` and is logged. **Do not run this until the config is
+   final.** Everything to date is validation-only.
+4. **Devpost + README writeup.** The negative results are arguably the stronger
+   story: a systematic, measured account of *why* this benchmark's headroom is
+   narrow, backed by 11 documented dead-ends with mechanisms rather than
+   assertions.
 
-Everything the agent is allowed to change lives in
-[config/modification_menu.json](config/modification_menu.json). **Anything not in that
-file is invisible to the agent** — it cannot try what it cannot see, so this is where
-new ideas go. Add an option under an existing axis, or add a whole axis with a
-`priority` (lower = tried earlier). Use `requires` for cross-axis constraints and
-`"locked": true` for anything leakage-sensitive. Then implement the option in
-[runtime/train_lib.py](runtime/train_lib.py) and document it in
-[runtime/API.md](runtime/API.md), which is pasted into every prompt — if the agent
-can't find out how to use your option, it will guess and waste iterations.
-`config/modification_menu.md` records what the organisers already measured as dead ends;
-don't respend iterations there.
+---
 
-## Where results live
+## 6. House rules
 
-- `logs/journal.jsonl` — one line per iteration: hypothesis, menu choices, metrics,
-  errors, tokens, spend. This is also the competition's run-log deliverable.
-- `logs/best_solution.py` + `logs/best_metrics.json` — the current winning script.
-- `python3 -m agent.report` — readable summary; `--html` draws the search tree.
-
-The report shows delta over baseline twice: raw, and **in units of σ**, where σ = 0.0008
-is the official baseline's own run-to-run noise. Plain version: under ~2σ the gain could
-just be luck; above ~3σ it's probably real. Quote the σ number when you claim an
-improvement.
-
-Final submission runs **exactly once, at the end**:
-`python3 -m agent.make_submission --final-test-eval --ensemble`.
-
-## Known rough edges
-
-- **First training run builds a ~1 minute data cache.** Later runs load it in seconds.
-- **`torch` is only needed for the neural menu options**, but it's a big install.
-- **Smoke runs on the cheap model often produce failed scripts** — see the VERDICT note
-  above. Not a setup problem.
-- **`--ensemble` only helps with several comparably-good nodes.** On a 3-node run it
-  made things *worse* (0.6024 vs 0.6037); on an 8-node run it helped (+0.0025 vs
-  +0.0019). Always check the printed single-vs-ensemble table before trusting it.
-- **The Anthropic provider works but has never had a full paid run** — it initializes,
-  authenticates, and fails gracefully, that's all we've proven. OpenAI is the tested path.
-- **Runs are single-threaded**; expect 40–120 s of training per iteration on CPU. GPU is
-  used only if you set `KUAIRAND_DEVICE=auto` (or `mps`/`cuda`); default is CPU.
-- **Anything you do by hand during a run must be logged**:
-  `python3 -m agent.interventions "what you did"`. Autonomy is scored on that count.
-
-## Who to ask
-- **Code-level questions** — self-serve first: the policy is
-  [agent/policy.py](agent/policy.py) (~80 lines), the loop is
-  [agent/loop.py](agent/loop.py), the failure handling is
-  [agent/executor.py](agent/executor.py). Each is short and commented.
+- **Review every change.** Read diffs before committing (`CLAUDE.md` convention).
+- **Never trust a single-seed result.** This bit us three times: a "best" node
+  at 0.6035 was seed-lucky and a *different* node was genuinely better. Anything
+  claimed as a win gets `--reseed-top` with ≥5 seeds first. Quote gains in σ
+  (σ = 0.0008), not raw deltas.
+- **Never touch `kuairand-starter-kit/evaluate.py`.** It's the scoring ground
+  truth. Score through it; never reimplement a metric.
+- **Never train on test.** Generated code runs in a sandbox where the real data
+  directory is unreadable and the test split has its label columns physically
+  stripped. Don't work around it.
+- **Report negative results honestly.** Most of this project's value is in
+  well-measured failures. A clean null with a mechanism beats a marginal,
+  unverified bump.
