@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_001.py
-@@ -1,35 +1,29 @@
+@@ -1,35 +1,189 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -14,14 +14,146 @@
 -  * on failure: exit non-zero with a readable traceback on stderr.
 -  * never read test labels or compute test metrics (hidden-test discipline).
 -"""
++#!/usr/bin/env python3
  import argparse
  import json
  import os
  import sys
++import traceback
++import numpy as np
++import train_lib
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
-+import train_lib
++
++def parse_args():
++    ap = argparse.ArgumentParser()
++    ap.add_argument('--menu-choices', type=str, required=True)
++    ap.add_argument('--output-dir', type=str, required=True)
++    ap.add_argument('--seed', type=int, default=0)
++    return ap.parse_args()
++
++
++def pav_isotonic(y, w=None):
++    y = np.asarray(y, dtype=np.float64)
++    n = y.size
++    if w is None:
++        w = np.ones(n, dtype=np.float64)
++    else:
++        w = np.asarray(w, dtype=np.float64)
++    level = np.empty(n, dtype=np.float64)
++    weight = np.empty(n, dtype=np.float64)
++    start = np.empty(n, dtype=np.int64)
++    end = np.empty(n, dtype=np.int64)
++    m = 0
++    for i in range(n):
++        level[m] = y[i]
++        weight[m] = w[i]
++        start[m] = i
++        end[m] = i
++        while m > 0 and level[m - 1] > level[m]:
++            new_w = weight[m - 1] + weight[m]
++            new_level = (weight[m - 1] * level[m - 1] + weight[m] * level[m]) / new_w
++            level[m - 1] = new_level
++            weight[m - 1] = new_w
++            end[m - 1] = end[m]
++            m -= 1
++        m += 1
++    out = np.empty(n, dtype=np.float64)
++    for j in range(m):
++        out[start[j]:end[j] + 1] = level[j]
++    return out
++
++
++class IsotonicCalibrator:
++    def __init__(self):
++        self.x_sorted = None
++        self.y_iso = None
++
++    def fit(self, scores, labels):
++        scores = np.asarray(scores, dtype=np.float64)
++        labels = np.asarray(labels, dtype=np.float64)
++        order = np.argsort(scores, kind='mergesort')
++        s = scores[order]
++        y = labels[order]
++        uniq, idx, counts = np.unique(s, return_index=True, return_counts=True)
++        means = np.add.reduceat(y, idx) / counts
++        iso = pav_isotonic(means, counts.astype(np.float64))
++        self.x_sorted = uniq
++        self.y_iso = iso
++        return self
++
++    def transform(self, scores):
++        scores = np.asarray(scores, dtype=np.float64)
++        if self.x_sorted is None or self.y_iso is None:
++            raise RuntimeError('Calibrator not fit')
++        idx = np.searchsorted(self.x_sorted, scores, side='right') - 1
++        idx = np.clip(idx, 0, len(self.y_iso) - 1)
++        out = self.y_iso[idx].copy()
++        left_mask = scores < self.x_sorted[0]
++        if np.any(left_mask):
++            out[left_mask] = self.y_iso[0]
++        return out.astype(np.float32)
++
++
++def build_train_calibration(seed):
++    splits, meta = train_lib.load_cache()
++    train = splits['train']
++    user_ids = np.asarray(train['user'])
++    labels = np.asarray(train['long_view']).astype(np.float32)
++    rng = np.random.RandomState(seed)
++
++    unique_users = np.unique(user_ids)
++    perm_users = unique_users[rng.permutation(len(unique_users))]
++    cut = int(0.8 * len(perm_users))
++    fit_users = set(perm_users[:cut].tolist())
++    cal_mask = np.array([u not in fit_users for u in user_ids], dtype=bool)
++    fit_mask = ~cal_mask
++
++    if fit_mask.sum() == 0 or cal_mask.sum() == 0:
++        fit_mask = np.zeros_like(cal_mask)
++        fit_mask[: int(0.8 * len(cal_mask))] = True
++        rng.shuffle(fit_mask)
++        cal_mask = ~fit_mask
++
++    fit_splits = {}
++    for split_name, split in splits.items():
++        if split_name == 'train':
++            fit_splits[split_name] = {k: np.asarray(v)[fit_mask] for k, v in split.items()}
++        else:
++            fit_splits[split_name] = split
++
++    enc, dim, offsets, dims = train_lib.encode_features(fit_splits, meta, temporal='hour_plus_dow')
++    cfg = {
++        'loss': 'bpr_pairwise',
++        'neg_sampling': 'uniform_1',
++        'user_history': 'recency_weighted_pool',
++        'multitask': 'none',
++        'model': 'fm_numpy',
++        'temporal': 'hour_plus_dow',
++        'training': 'lower_lr_longer',
++        'data_extras': 'none',
++        'sample_weighting': 'per_row',
++        'regularization': 'l2_default',
++    }
++
++    def log(*args, **kwargs):
++        return None
++
++    model, _ = train_lib.train_numpy_fm(cfg, enc, fit_splits, meta, log)
++
++    cal_train = {k: np.asarray(v)[cal_mask] for k, v in train.items()}
++    cal_splits = {'train': cal_train, 'valid': splits['valid'], 'test': splits['test']}
++    enc_cal, _, _, _ = train_lib.encode_features(cal_splits, meta, temporal='hour_plus_dow')
++
++    H = None
++    if cfg['user_history'] != 'none':
++        hist = train_lib.History(fit_splits, meta['field_dims']['user'], cfg['user_history'])
++        H = hist.batch_vectors('train', np.arange(len(cal_train['user']), dtype=np.int64))
++
++    cal_scores = model.predict(enc_cal['train'], H)
++    cal_labels = np.asarray(cal_train['long_view']).astype(np.float32)
++    return cal_scores, cal_labels
  
  
  def main():
@@ -33,24 +165,53 @@
 -    choices = json.loads(a.menu_choices)
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', type=str, required=True)
-+    parser.add_argument('--output-dir', type=str, required=True)
-+    parser.add_argument('--seed', type=int, default=0)
-+    args = parser.parse_args()
-+
++    args = parse_args()
++    os.makedirs(args.output_dir, exist_ok=True)
 +    try:
-+        menu_choices = json.loads(args.menu_choices)
-+        os.makedirs(args.output_dir, exist_ok=True)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+        with open(metrics_path, 'w') as f:
++        _ = json.loads(args.menu_choices)
++
++        incumbent = {
++            'loss': 'bpr_pairwise',
++            'neg_sampling': 'uniform_1',
++            'user_history': 'recency_weighted_pool',
++            'multitask': 'none',
++            'model': 'fm_numpy',
++            'temporal': 'hour_plus_dow',
++            'training': 'lower_lr_longer',
++            'data_extras': 'none',
++            'sample_weighting': 'per_row',
++            'regularization': 'l2_default',
++        }
++
++        raw_metrics = train_lib.run(incumbent, args.output_dir, seed=args.seed)
++        valid_scores = np.load(os.path.join(args.output_dir, 'scores_valid.npy'))
++        test_scores = np.load(os.path.join(args.output_dir, 'scores_test.npy'))
++
++        cal_scores, cal_labels = build_train_calibration(args.seed)
++        calibrator = IsotonicCalibrator().fit(cal_scores, cal_labels)
++
++        valid_scores_cal = calibrator.transform(valid_scores)
++        test_scores_cal = calibrator.transform(test_scores)
++
++        splits, _ = train_lib.load_cache()
++        metrics = train_lib.evaluate(
++            splits['valid']['user_raw'],
++            splits['valid']['long_view'],
++            valid_scores_cal,
++        )
++
++        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
 +            json.dump({k: float(v) for k, v in metrics.items()}, f)
++        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), valid_scores_cal)
++        np.save(os.path.join(args.output_dir, 'scores_test.npy'), test_scores_cal)
 +    except Exception as e:
-+        print(f'ERROR: {e}', file=sys.stderr)
-+        raise
++        traceback.print_exc(file=sys.stderr)
++        sys.stderr.flush()
++        return 1
++    return 0
  
  
 -if __name__ == "__main__":
+-    main()
 +if __name__ == '__main__':
-     main()
++    sys.exit(main())

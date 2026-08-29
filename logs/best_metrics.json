@@ -1,23 +1,23 @@
 {
-  "iteration_id": 6,
+  "iteration_id": 0,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
-    "user_history": "mean_pool_positives",
+    "user_history": "recency_weighted_pool",
     "multitask": "none",
     "model": "fm_numpy",
-    "temporal": "none",
+    "temporal": "hour_plus_dow",
     "training": "lower_lr_longer",
     "data_extras": "none",
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "A clean ablation of the incumbent's training=default choice: keep the current best BPR+FM+mean-pooled-positive-history recipe fixed and switch only to training=lower_lr_longer. If the default BPR optimization is slightly under-converged or too coarse, a smaller step size with longer patience should yield a small but real lift in GAUC and nDCG@5 without changing the broad, uniform training signal that has consistently worked best on this dataset.",
+  "hypothesis": "Exploit the strongest known recipe by adding the still-helpful recency-weighted positive-history feature on top of the incumbent FM+BPR stack: recent long-viewed items should interact with candidate item IDs/authors to better capture short-term taste drift within each user's logged impression list, yielding a small but real lift in both GAUC and nDCG@5.",
   "valid_metrics": {
-    "GAUC": 0.6704195901998051,
-    "nDCG@5": 0.5369221882652637,
-    "primary": 0.6036708892325344
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_006.py",
-  "timestamp": 1788010043.8112051
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
+  "timestamp": 1788029758.783189
 }

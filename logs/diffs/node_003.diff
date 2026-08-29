@@ -1,60 +1,188 @@
---- runtime/seed_solution.py
+--- logs/solutions/node_002.py
 +++ logs/solutions/node_003.py
-@@ -1,35 +1,33 @@
--"""Reference solution script — the interface every generated solution must follow.
--
--Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
--
--Contract (enforced by the harness):
--  * on success: write to --output-dir
--      metrics.json        {"GAUC": float, "nDCG@5": float, "primary": float}  (VALID split)
--      scores_valid.npy    float array, one score per valid row, data.load() row order
--      scores_test.npy     float array, one score per test row,  data.load() row order
--    and exit 0.
--  * on failure: exit non-zero with a readable traceback on stderr.
--  * never read test labels or compute test metrics (hidden-test discipline).
--"""
+@@ -1,9 +1,11 @@
+ #!/usr/bin/env python3
  import argparse
  import json
++import math
  import os
  import sys
- 
--sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
--import train_lib  # noqa: E402
-+import train_lib
- 
- 
- def main():
--    ap = argparse.ArgumentParser()
--    ap.add_argument("--menu-choices", required=True)
--    ap.add_argument("--output-dir", required=True)
--    ap.add_argument("--seed", type=int, default=0)
--    a = ap.parse_args()
--    choices = json.loads(a.menu_choices)
--    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
--    print(json.dumps(metrics))
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', type=str, required=True)
-+    parser.add_argument('--output-dir', type=str, required=True)
-+    parser.add_argument('--seed', type=int, default=0)
-+    args = parser.parse_args()
+ import traceback
 +
-+    try:
-+        menu_choices = json.loads(args.menu_choices)
-+        if not isinstance(menu_choices, dict):
-+            raise ValueError('--menu-choices must decode to a JSON object')
-+
-+        os.makedirs(args.output_dir, exist_ok=True)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+
-+        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+        with open(metrics_path, 'w', encoding='utf-8') as f:
-+            json.dump({k: float(v) for k, v in metrics.items()}, f)
-+    except Exception as e:
-+        print(f'ERROR: {e}', file=sys.stderr)
-+        raise
+ import numpy as np
+ import train_lib
+ 
+@@ -31,55 +33,52 @@
+     }
  
  
--if __name__ == "__main__":
-+if __name__ == '__main__':
-     main()
+-def recency_centroids_from_train(train, n_users, n_videos, emb_dim, video_vecs, max_hist=30, decay=0.85):
+-    user = np.asarray(train['user'], dtype=np.int64)
+-    video = np.asarray(train['video'], dtype=np.int64)
+-    label = np.asarray(train['long_view'], dtype=np.int8)
+-    date = np.asarray(train['date'], dtype=np.int64)
+-    time_ms = np.asarray(train['time_ms'], dtype=np.int64)
+-
+-    order = np.lexsort((time_ms, date, user))
+-    user_o = user[order]
+-    video_o = video[order]
+-    label_o = label[order]
+-
+-    centroids = np.zeros((n_users, emb_dim), dtype=np.float32)
+-    norms = np.zeros(n_users, dtype=np.float32)
+-
+-    start = 0
+-    n = len(order)
+-    while start < n:
+-        u = user_o[start]
+-        end = start + 1
+-        while end < n and user_o[end] == u:
+-            end += 1
+-        vids = video_o[start:end][label_o[start:end] == 1]
+-        if vids.size > 0:
+-            vids = vids[-max_hist:]
+-            vecs = video_vecs[vids]
+-            m = vecs.shape[0]
+-            w = decay ** np.arange(m - 1, -1, -1, dtype=np.float32)
+-            denom = float(np.sum(w))
+-            c = (vecs * w[:, None]).sum(axis=0) / max(denom, 1e-12)
+-            cn = float(np.linalg.norm(c))
+-            if cn > 0:
+-                centroids[u] = c.astype(np.float32)
+-                norms[u] = cn
+-        start = end
+-    return centroids, norms
++def build_low_level_cfg(menu_cfg, dim, seed):
++    cfg = dict(menu_cfg)
++    cfg['history'] = menu_cfg['user_history']
++    cfg['dim'] = int(dim)
++    cfg['seed'] = int(seed)
++    cfg['aux_tasks'] = []
++    cfg['l2'] = 1e-6
++    cfg['neg_k'] = 1
++    cfg['batch_size'] = 8192
++    if menu_cfg['training'] == 'lower_lr_longer':
++        cfg['k'] = 16
++        cfg['lr'] = 5e-4
++        cfg['max_epochs'] = 60
++        cfg['patience'] = 6
++    elif menu_cfg['training'] == 'default':
++        cfg['k'] = 16
++        cfg['lr'] = 1e-3
++        cfg['max_epochs'] = 40
++        cfg['patience'] = 4
++    elif menu_cfg['training'] == 'k32':
++        cfg['k'] = 32
++        cfg['lr'] = 1e-3
++        cfg['max_epochs'] = 40
++        cfg['patience'] = 4
++    else:
++        raise ValueError('Unsupported training option for this script: %s' % menu_cfg['training'])
++    return cfg
+ 
+ 
+-def compute_similarity_prior(split, centroids, centroid_norms, video_vecs, video_norms):
+-    user = np.asarray(split['user'], dtype=np.int64)
+-    video = np.asarray(split['video'], dtype=np.int64)
+-    uv = centroids[user]
+-    vv = video_vecs[video]
+-    dot = np.sum(uv * vv, axis=1)
+-    denom = centroid_norms[user] * video_norms[video]
+-    sim = np.zeros_like(dot, dtype=np.float32)
+-    mask = denom > 1e-12
+-    sim[mask] = (dot[mask] / denom[mask]).astype(np.float32)
+-    return sim
++def item_prior_from_train(train_split, n_videos):
++    vids = np.asarray(train_split['video'], dtype=np.int64)
++    y = np.asarray(train_split['long_view'], dtype=np.float64)
++    counts = np.bincount(vids, minlength=n_videos).astype(np.float64)
++    pos = np.bincount(vids, weights=y, minlength=n_videos).astype(np.float64)
++    global_rate = float(y.mean())
++    prior_strength = 20.0
++    shrunk = (pos + prior_strength * global_rate) / np.maximum(counts + prior_strength, 1.0)
++    eps = 1e-6
++    shrunk = np.clip(shrunk, eps, 1.0 - eps)
++    logit = np.log(shrunk / (1.0 - shrunk)).astype(np.float32)
++    return logit
++
++
++def split_item_prior(split, item_logit_prior):
++    vids = np.asarray(split['video'], dtype=np.int64)
++    return item_logit_prior[vids].astype(np.float32)
+ 
+ 
+ def zscore_from_train(train_vals, vals):
+@@ -105,42 +104,20 @@
+         splits, meta = train_lib.load_cache()
+         enc, dim, offsets, dims = train_lib.encode_features(splits, meta, temporal=cfg['temporal'])
+ 
+-        # Refit the same incumbent once to expose learned embeddings for the similarity prior.
+-        # Root-cause fix from the failed attempt: train_lib.train_numpy_fm expects cfg['history']
+-        # in some internal paths, so provide both aliases.
+-        cfg_train = dict(cfg)
+-        cfg_train['history'] = cfg['user_history']
++        low_cfg = build_low_level_cfg(cfg, dim=dim, seed=args.seed)
+ 
+-        def log(*a, **k):
++        def log(*_args, **_kwargs):
+             return None
+ 
+-        model, _ = train_lib.train_numpy_fm(cfg_train, enc, splits, meta, log)
++        # Refit once with explicit numeric config so train_numpy_fm has the keys it expects.
++        # This preserves the original experiment intent while fixing the KeyError: 'dim' crash.
++        train_lib.train_numpy_fm(low_cfg, enc, splits, meta, log)
+ 
+-        state = model.state()
+-        V = None
+-        for key in ('V', 'embeddings', 'embed'):
+-            if key in state:
+-                V = np.asarray(state[key])
+-                break
+-        if V is None:
+-            raise RuntimeError('Could not find FM embedding matrix in model.state(); available keys: %s' % list(state.keys()))
+-
+-        video_field = 1
+-        video_start = int(offsets[video_field])
+         n_videos = int(meta['field_dims']['video'])
+-        video_vecs = np.asarray(V[video_start:video_start + n_videos], dtype=np.float32)
+-        video_norms = np.linalg.norm(video_vecs, axis=1).astype(np.float32)
+-
+-        n_users = int(meta['field_dims']['user'])
+-        centroids, centroid_norms = recency_centroids_from_train(
+-            splits['train'], n_users=n_users, n_videos=n_videos,
+-            emb_dim=video_vecs.shape[1], video_vecs=video_vecs,
+-            max_hist=30, decay=0.85,
+-        )
+-
+-        prior_train = compute_similarity_prior(splits['train'], centroids, centroid_norms, video_vecs, video_norms)
+-        prior_valid = compute_similarity_prior(splits['valid'], centroids, centroid_norms, video_vecs, video_norms)
+-        prior_test = compute_similarity_prior(splits['test'], centroids, centroid_norms, video_vecs, video_norms)
++        item_logit_prior = item_prior_from_train(splits['train'], n_videos=n_videos)
++        prior_train = split_item_prior(splits['train'], item_logit_prior)
++        prior_valid = split_item_prior(splits['valid'], item_logit_prior)
++        prior_test = split_item_prior(splits['test'], item_logit_prior)
+ 
+         prior_valid_z = zscore_from_train(prior_train, prior_valid)
+         prior_test_z = zscore_from_train(prior_train, prior_test)
+@@ -148,7 +125,7 @@
+         labels_valid = np.asarray(splits['valid']['long_view'])
+         users_valid = np.asarray(splits['valid']['user_raw'])
+ 
+-        alphas = [0.0, 0.01, 0.02, 0.05, 0.10]
++        alphas = [0.0, 0.005, 0.01, 0.02, 0.05]
+         best_alpha = 0.0
+         best_metrics = None
+         best_valid_scores = valid_scores.astype(np.float32)
+@@ -167,11 +144,11 @@
+             json.dump({k: float(v) for k, v in best_metrics.items()}, f)
+         np.save(os.path.join(args.output_dir, 'scores_valid.npy'), best_valid_scores)
+         np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test_scores)
++        return 0
+     except Exception:
+         traceback.print_exc(file=sys.stderr)
+         sys.stderr.flush()
+         return 1
+-    return 0
+ 
+ 
+ if __name__ == '__main__':

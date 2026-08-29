@@ -397,3 +397,59 @@ def render_probe_for_prompt(res: dict) -> str:
         L.append("This did NOT clear the probe. Do not spend a training run on "
                  "it; it is recorded so it will not be proposed again.")
     return "\n".join(L)
+
+
+def render_discovery_log(path: str = REGISTRY) -> str:
+    """The audit trail of autonomous feature research, for a human reader.
+
+    This is the evidence that the agent did research rather than picked from a
+    list: for each candidate, what it observed, what it hypothesised, the code
+    it wrote, what the probe measured, and what was decided.
+    """
+    reg = load_registry(path)
+    if not reg:
+        return "no feature research recorded yet"
+    L = []
+    for e in reg:
+        p = e.get("probe") or {}
+        L += ["=" * 74,
+              f"[FEATURE DISCOVERY]  {e.get('name')}",
+              "=" * 74,
+              f"Hypothesis      : {e.get('hypothesis', '')}",
+              f"Mechanism       : {e.get('mechanism', '')}",
+              f"Incremental     : {e.get('incremental_value', '')}",
+              f"Leakage check   : {e.get('leakage_check', '')}",
+              f"Source columns  : {e.get('source_columns', '')}"]
+        lk = (p.get("checks") or {}).get("leakage") or {}
+        L.append(f"Leakage gate    : "
+                 f"{'REFUSED' if lk.get('block') or lk.get('label_leaks') else 'PASS'} "
+                 f"(fatal {lk.get('fatal', 0)}, label-leaks "
+                 f"{len(lk.get('label_leaks') or [])})")
+        for f, d in (p.get("per_feature") or {}).items():
+            L.append(f"Probe           : coverage {d.get('coverage')}, "
+                     f"varies within user {d.get('varies_within_user_frac')}, "
+                     f"standalone wAUC {d.get('standalone_wAUC')}, "
+                     f"incremental {d.get('incremental_sigma')} sigma")
+            if d.get("verdict"):
+                L.append(f"                  {d['verdict']}")
+        x = e.get("experiment")
+        if x:
+            L.append(f"Full experiment : baseline {x.get('control_mean')} -> "
+                     f"candidate {x.get('feature_mean')}  "
+                     f"delta {x.get('paired_delta'):+.5f} "
+                     f"({x.get('sigma')} sigma, wins {x.get('wins')})")
+        L += [f"Decision        : {e.get('status')}",
+              f"Reason          : {e.get('reason', '')}",
+              f"Builder         : {len((e.get('source') or '').splitlines())} lines "
+              f"of agent-written code",
+              ""]
+    n_prop = len(reg)
+    n_rej = sum(1 for e in reg if e.get("status") == REJECTED)
+    L += ["-" * 74,
+          f"{n_prop} candidate(s) researched, {n_rej} rejected outright, "
+          f"none re-proposed (deduplicated by name and by builder body)."]
+    return "\n".join(L)
+
+
+if __name__ == "__main__":
+    print(render_discovery_log())

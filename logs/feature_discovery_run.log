@@ -1,0 +1,94 @@
+preflight OK — provider=openai model=gpt-5.4 (key from $OPENAI_API_KEY, verified)
+  rate card: $2.50/1M in, $15.00/1M out
+  spend ceiling: $2.00 | draft_count=7 | max_iterations=5
+archived previous run to /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/archive_20260830_025425
+kept submission artifacts in place: ab_test, ensemble_results.json, feature_registry.jsonl, final_ensemble
+agent run started: max_iterations=5, wall_clock_limit=6.0h, llm=openai:gpt-5.4, draft_count=7, spend_ceiling=$2.00 ($2.50/1M in, $15.00/1M out), ε=0.002, N=3
+[iter 0] action=draft — only 0 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=exploitation (no stronger signal; refine the incumbent)
+  [feature discovery] declined: No new feature is sufficiently justified from the provided evidence alone. The strongest a
+  [planner] 3 candidates (1 path-B), selected: #0 path=A util=0.00059
+[iter 0] SUCCESS primary 0.6050 (GAUC 0.6720 nDCG@5 0.5379) | best=0.6050 (node 0) | 70s train, 16321 tok
+[iter 0] spend $0.0949 / $2.00 ceiling (5%) | next est $0.0495 | openai:gpt-5.4
+[iter 1] action=draft — only 1 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=ablation (the current best contains components with no isolated evidence)
+/Users/khantminn/Desktop/Tiktok-TechJam-2026/agent/feature_lab.py:198: RuntimeWarning: All-NaN slice encountered
+  varies = [float(np.nanmax(vb[s:e]) - np.nanmin(vb[s:e])) > tol
+  [FEATURE DISCOVERY] user_author_recent_long_view_rate -> PROBED (no usable residual signal (best -0.05 sigma, under the 0.0004 bar) -- cheap to r)
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00027
+  [failure] class=evaluation_failure retry_worthwhile=True
+[iter 1] ERROR (71s): KeyError: 'history'
+[iter 1] spend $0.2424 / $2.00 ceiling (12%) | next est $0.0768 | openai:gpt-5.4
+[iter 2] action=debug target=1 — last attempt (node 1) errored; debug chain length 0 < 2, feeding the error trace back to fix it
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [feature discovery] declined: No new feature is sufficiently justified from the current evidence. The strongest feature 
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00004
+  [mechanism audit] warning: MECHANISM NOT EVIDENCED -- the hypothesis claims sequence but the code shows no sign of it.
+  [failure] class=evaluation_failure retry_worthwhile=True
+[iter 2] ERROR (70s): KeyError: 'dim'
+[iter 2] spend $0.3748 / $2.00 ceiling (19%) | next est $0.0847 | openai:gpt-5.4
+[iter 3] action=debug target=2 — last attempt (node 2) errored; debug chain length 1 < 2, feeding the error trace back to fix it
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [feature discovery] declined: No new feature is well-justified from the current evidence. The registry already rejects t
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00004
+  [failure] class=evaluation_failure retry_worthwhile=True
+[iter 3] ERROR (70s): KeyError: 'bs'
+[iter 3] spend $0.5028 / $2.00 ceiling (25%) | next est $0.0847 | openai:gpt-5.4
+[iter 4] action=draft — abandoning node 3: its debug chain already failed 2 times; only 4 attempts exist (< draft_count=7); drafting a fresh combination, prioritizing untried high-priority axes
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [feature discovery] declined: The evidence does not justify a new feature proposal right now. The strongest cautions are
+  [planner] 3 candidates (1 path-B), selected: #2 path=B util=0.00001
+[iter 4] SUCCESS primary 0.6050 (GAUC 0.6720 nDCG@5 0.5379) | best=0.6050 (node 0) | 70s train, 17707 tok
+[iter 4] spend $0.6094 / $2.00 ceiling (30%) | next est $0.0847 | openai:gpt-5.4
+
+=== RUN FINISHED ===
+{
+  "stop_reason": "iteration cap reached (5)",
+  "iterations_used": 5,
+  "iteration_cap": 5,
+  "best_node": 0,
+  "best_valid_metrics": {
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
+  },
+  "delta_valid_primary_over_baseline": 0.0034,
+  "total_llm_tokens": {
+    "input_tokens": 147375,
+    "output_tokens": 16066,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "calls": 20,
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "input_plus_output": 163441
+  },
+  "total_training_wall_clock_s": 351.3,
+  "delta_in_baseline_seed_sigmas": 4.21,
+  "total_agent_wall_clock_s": 496.0,
+  "gpu_hours": 0.0,
+  "gpu_seconds_measured": 0.0,
+  "devices_used": [
+    "cpu"
+  ],
+  "spend": {
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "total_usd": 0.609428,
+    "ceiling_usd": 2.0,
+    "iterations_billed": 20,
+    "mean_usd_per_iteration": 0.030471,
+    "max_usd_per_iteration": 0.084655,
+    "rate_card": "$2.50/1M in, $15.00/1M out"
+  },
+  "draft_count": 7,
+  "manual_interventions": 0,
+  "convergence_rule": {
+    "epsilon": 0.002,
+    "N": 3,
+    "counted_iterations": "scored (successful) only"
+  }
+}
+
+best solution: /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/best_solution.py
+generate a submission with: python3 -m agent.make_submission

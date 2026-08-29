@@ -1,8 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [HELPED] iter 1 -- The remaining broad, additive signal family that has not been directly tested in the current stronge
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6046 (previous best n/a).
-
 ### [HELPED] iter 2 -- A sequential additive signal may still improve within-user ranking even though set-based history poo
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6033 (previous best n/a).
 
@@ -44,4 +41,7 @@ menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_hi
 
 ### [HELPED] iter 6 -- A clean ablation of the incumbent's training=default choice: keep the current best BPR+FM+mean-poole
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6037 (previous best 0.6034).
+
+### [HELPED] iter 0 -- Exploit the strongest known recipe by adding the still-helpful recency-weighted positive-history fea
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6050 as the first scored node (no prior best to compare against).
 

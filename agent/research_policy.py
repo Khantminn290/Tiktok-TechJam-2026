@@ -168,21 +168,33 @@ def decide_category(state, nodes: list, iteration_budget_left: int = 50) -> dict
                              if scored else None)}
 
 
+# A probe needs a MINIMUM NUMBER of runs to pay off, and that is an absolute
+# quantity, not a fraction: two iterations left is late whatever the cap.
+LATE_ITERATIONS = 5
+MIDDLE_ITERATIONS = 15
+
+
 def _phase(left: int, total: int) -> str:
     """What the remaining budget is FOR. The planner was told which objective to
     pursue but never how much runway it had, so a speculative probe and a
-    closing-out confirmation looked equally affordable at iteration 48."""
+    closing-out confirmation looked equally affordable at iteration 48.
+
+    Judged on BOTH the absolute runs remaining and the fraction, taking the
+    more conservative. Fraction alone got this wrong: with 5 iterations used
+    and 2 left the implied budget is 7, so 2 remaining read as 29% and came out
+    MIDDLE -- when two runs is plainly late-stage.
+    """
     if total <= 0:
         return "unknown"
     frac = left / total
-    if frac > 0.6:
-        return ("EARLY -- runway to explore; a probe that resolves an open "
-                "direction is worth more than a marginal tweak")
-    if frac > 0.25:
+    if left <= LATE_ITERATIONS or frac <= 0.25:
+        return ("LATE -- confirm, combine and stabilise; a speculative probe "
+                "that cannot pay off within the remaining runs is not affordable")
+    if left <= MIDDLE_ITERATIONS or frac <= 0.6:
         return ("MIDDLE -- explore and exploit; prefer mechanisms with isolated "
                 "evidence, but open questions are still affordable")
-    return ("LATE -- confirm, combine and stabilise; a speculative probe that "
-            "cannot pay off within the remaining runs is not affordable")
+    return ("EARLY -- runway to explore; a probe that resolves an open "
+            "direction is worth more than a marginal tweak")
 
 
 def render_decision(d: dict) -> str:

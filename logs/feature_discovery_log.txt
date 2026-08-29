@@ -1,0 +1,33 @@
+==========================================================================
+[FEATURE DISCOVERY]  user_author_affinity_residual
+==========================================================================
+Hypothesis      : a user's deviation from an author's global long_view rate carries personalisation the author embedding cannot
+Mechanism       : user-by-author interaction, varies within a user's list because authors differ across impressions
+Incremental     : the model has a user embedding and an author embedding but their FM dot product is estimated on 1.6% co-occurrence
+Leakage check   : all counts from splits['train'] only; smoothing prior is a train-derived author rate
+Source columns  : user,author,long_view(train only)
+Leakage gate    : PASS (fatal 0, label-leaks 0)
+Probe           : coverage 1.0, varies within user 0.1673, standalone wAUC 0.4927, incremental -0.35 sigma
+                  REDUNDANT -- model already encodes it
+Full experiment : baseline 0.60446 -> candidate 0.59125  delta -0.01322 (-16.52 sigma, wins 0/3)
+Decision        : REJECTED
+Reason          : probe said no usable residual signal (-0.35 sigma); the full 3-seed experiment CONFIRMED it at -0.01322 (-16.52 sigma), 0/3 wins, t=-122.8. Only 16.7% of users see more than one author, so the feature is near-constant within most users and the extra embedding field costs more than it carries.
+Builder         : 21 lines of agent-written code
+
+==========================================================================
+[FEATURE DISCOVERY]  user_author_recent_long_view_rate
+==========================================================================
+Hypothesis      : A temporally causal user-by-author affinity feature should help within-user ranking because it varies across impressions for the same user, captures whether this user has recently tended to long-view content from this author, and is not recoverable from user/video/author embeddings alone when the same user is shown multiple authors in a session/day. Given the current best uses recency-weighted user history, this is a feature-level analogue focused on a higher-signal interaction likely aligned with long_view.
+Mechanism       : For each impression, compute the user's exponentially recency-weighted historical long_view rate for that author using only earlier training impressions, with a backoff to the user's global recency-weighted long_view rate when author-specific history is sparse. This represents short-term personalized preference drift toward specific authors.
+Incremental     : Existing embeddings can model static user-author affinity only through learned latent interactions from training, but they do not expose a causal, time-varying state that changes across rows for the same user based on immediately preceding behavior. Because the value updates over time and differs across candidate authors within one user's ranked list, it adds context-dependent interaction signal not reducible to item identity alone.
+Leakage check   : The feature is built by processing impressions in chronological order using date, hourmin, and time_ms, and each row's value is emitted before updating state with that row's own outcome. Outcome columns are read only from splits['train']; valid/test rows never access their labels and only query state accumulated from earlier training events.
+Source columns  : user, author, date, hourmin, time_ms, long_view (train only)
+Leakage gate    : PASS (fatal 0, label-leaks 0)
+Probe           : coverage 0.9841, varies within user 0.1643, standalone wAUC 0.4972, incremental -0.05 sigma
+                  REDUNDANT -- model already encodes it
+Decision        : PROBED
+Reason          : no usable residual signal (best -0.05 sigma, under the 0.0004 bar) -- cheap to run anyway, but the probe does not justify it
+Builder         : 129 lines of agent-written code
+
+--------------------------------------------------------------------------
+2 candidate(s) researched, 1 rejected outright, none re-proposed (deduplicated by name and by builder body).

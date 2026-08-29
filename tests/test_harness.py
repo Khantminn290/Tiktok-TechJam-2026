@@ -2260,6 +2260,29 @@ def test_feature_discovery():
     check("probe results are recorded to the registry",
           "FL.record(entry)" in lsrc)
 
+    # the demonstrable audit trail, and the real run behind it
+    live = FL.load_registry()
+    if live:
+        log = FL.render_discovery_log()
+        check("the discovery log renders hypothesis, probe and decision",
+              all(k in log for k in ("[FEATURE DISCOVERY]", "Hypothesis",
+                                     "Leakage gate", "Probe", "Decision")))
+        agent_made = [e for e in live
+                      if not str(e.get("created_by", "")).startswith("human")]
+        check("the AGENT proposed at least one feature itself",
+              len(agent_made) >= 1, f"{len(live)} entries, {len(agent_made)} agent")
+        if agent_made:
+            e = agent_made[0]
+            check("its proposal carries every required research field",
+                  FL.validate_proposal(e) == [], f"{FL.validate_proposal(e)}")
+            check("it is NOT a menu axis value (genuinely outside the menu)",
+                  e["name"] not in {o for ax in Menu(MENU_PATH).axes
+                                    for o in Menu(MENU_PATH).options(ax)})
+            check("it wrote a real builder, not a feature name",
+                  len(str(e.get("source", "")).splitlines()) > 20)
+            check("its probe measured incremental value, and it was recorded",
+                  e.get("probe", {}).get("best_incremental_sigma") is not None)
+
 
 def test_mechanism_audit():
     """A declaration is not evidence and a clean exit is not evidence. This
