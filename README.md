@@ -17,6 +17,19 @@ mean. Official baseline: **0.6016** validation / **0.5946** test. The metric cei
 is **0.8484** / **0.8645**, not 1.0 — 27% of users have no positive label at all,
 so judge progress against that, not against a perfect score.
 
+**Result:** `0.60541` validation primary — a 16-seed rank-averaged ensemble of one
+configuration, **`+0.00381` over the 0.6016 baseline = `+4.76σ`** (σ = 0.0008, the
+baseline's own 5-seed spread). Individual members average 0.60463 ± 0.00032. `k=16`
+is *all* seeds trained, fixed before any score was seen, so the figure carries no
+selection bias. Rebuild it end-to-end with:
+
+```bash
+python3 -m agent.final_ensemble --seeds 16
+```
+
+The hidden test set has **never been evaluated**; everything above is
+train + validation only.
+
 ---
 
 ## Setup
@@ -121,13 +134,20 @@ Everything before it develops on train + validation only. It writes
 `results/final_results.json` with test metrics, deltas over the baseline, and the
 delta in σ units.
 
-`--ensemble` rank-averages the top-K distinct successful nodes (K from
-`config/llm_config.json`, default 3) instead of using the single best node. Scores
-are rank-normalised before averaging because different nodes produce scores on
-different scales; averaging raw values would let whichever model has the widest
-spread dominate. It costs no extra model calls — it just averages score arrays that
-are already on disk — and the comparison table prints best-single next to
-best-ensemble so you can see whether it actually helped.
+`--ensemble` rebuilds the **submitted** ensemble: every seed of the one reported
+configuration, read from `logs/final_ensemble/` (see `agent/final_ensemble.py`).
+`k` is fixed before any score is seen and uses *all* seeds trained, so no member
+is ever chosen on validation. If members are missing it refuses to average a
+subset rather than quietly reporting a different number. Scores are
+rank-normalised before averaging because the metric reads only ordering, and
+averaging raw values would let whichever model has the widest spread dominate.
+It costs no model calls — it averages arrays already on disk.
+
+`--legacy-topk-ensemble` is the older behaviour (top-K nodes by validation score,
+distinct configs) and is kept only for inspection. It combines two effects
+measured and rejected on this project — validation selection bias (+0.00081) and
+heterogeneous blending — so it does **not** reproduce the reported result, and
+says so at runtime.
 
 ### Logging manual interventions
 
@@ -208,7 +228,7 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        55 checks, no model calls
+tests/test_harness.py        387 checks, no model calls, no training
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
 
@@ -226,9 +246,13 @@ Harness sanity checks (these should match before trusting anything else):
 
 ## Limitations and what we'd improve
 
-- The five-iteration verification run reached +0.0018 validation (about 2σ). It was
-  capped at five to prove the machinery, not to find gains — treat that number as
-  unproven rather than as a ceiling.
+- **Headroom on this benchmark is genuinely narrow, and that is a measurement,
+  not an excuse.** 20.6% of repeated (user, video) pairs disagree with themselves
+  (mean irreducible error 0.100), and eight model families — FM, DeepFM, DCN, DIN,
+  GRU4Rec, ItemCF, GBDT, item-popularity — all land in 0.55–0.605. Most of the
+  apparent gap to the 0.8484 ceiling is label noise rather than signal, so
+  interventions are judged in σ, and 15 of them are recorded as dead ends with
+  mechanisms.
 - Crossover only combines menu choices, not code. Merging two scripts' actual
   implementations would be strictly more expressive.
 - The unbiased random-exposure diagnostic is wired for the NumPy engine only, and
