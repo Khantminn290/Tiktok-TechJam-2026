@@ -229,6 +229,7 @@ def main() -> None:
         "seen. No subset search was performed. k_curve is diagnostic only; "
         "best-subset selection was measured to carry +0.00081 optimistic bias.")
     r["reproduce"] = "python3 -m agent.final_ensemble --seeds %d" % a.seeds
+    r["extra_member_dirs"] = []      # set only if a second config is adopted
     # Provenance: a score is only reproducible if the code and data that
     # produced it are identified. Recorded at write time, never edited.
     r["code_version"] = _git_sha()
