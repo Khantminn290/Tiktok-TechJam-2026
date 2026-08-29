@@ -1,5 +1,5 @@
 {
-  "iteration_id": 5,
+  "iteration_id": 4,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
@@ -12,12 +12,12 @@
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "Test whether the strongest proven broad-signal recipe improves further by replacing auxiliary click/like/forward heads with no multitask supervision, isolating whether the current gain is really coming from recency-weighted history + temporal context + lower_lr_longer BPR rather than auxiliary-task gradient interference. This is meaningfully different from the sibling proposal and all prior attempts because it changes the multitask axis while keeping the current best FM/BPR/history/schedule stack intact.",
+  "hypothesis": "A clean ablation of the current best recipe's multitask auxiliary heads will reveal whether aux_click_like_forward is carrying real ranking signal or just noise: keep the strongest broad-signal FM+BPR backbone fixed and remove only the auxiliary tasks. Because node 1 scored 0.6046 with aux_click_like_forward while otherwise-similar broad BPR recipes have been near 0.6050 without extras in experience memory, I expect little to no gain and possibly a slight improvement from simplifying the objective.",
   "valid_metrics": {
     "GAUC": 0.6720477510874213,
     "nDCG@5": 0.5378881530235174,
     "primary": 0.6049679520554694
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_005.py",
-  "timestamp": 1787992088.381043
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_004.py",
+  "timestamp": 1787998048.022221
 }

@@ -1,0 +1,19 @@
+{
+  "arm": "A (single-proposal planner, --n-candidates=0)",
+  "iterations": 11,
+  "scored": 11,
+  "best_primary": 0.6049679520554694,
+  "paths": {
+    "A": 9,
+    "B": 0
+  },
+  "model_families": [
+    "fm_numpy",
+    "gru4rec_seq"
+  ],
+  "categories": {
+    "exploration": 3,
+    "confirmation": 3,
+    "ablation": 3
+  }
+}

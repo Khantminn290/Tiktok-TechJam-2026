@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_002.py
-@@ -1,35 +1,30 @@
+@@ -1,35 +1,32 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -18,7 +18,6 @@
  import json
  import os
  import sys
-+import traceback
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
@@ -35,8 +34,8 @@
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
 +    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', required=True)
-+    parser.add_argument('--output-dir', required=True)
++    parser.add_argument('--menu-choices', type=str, required=True)
++    parser.add_argument('--output-dir', type=str, required=True)
 +    parser.add_argument('--seed', type=int, default=0)
 +    args = parser.parse_args()
 +
@@ -45,13 +44,17 @@
 +        os.makedirs(args.output_dir, exist_ok=True)
 +        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
 +        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+        with open(metrics_path, 'w') as f:
-+            json.dump({k: float(v) for k, v in metrics.items()}, f)
-+    except Exception:
++        if not os.path.exists(metrics_path):
++            with open(metrics_path, 'w') as f:
++                json.dump({k: float(v) for k, v in metrics.items()}, f)
++        return 0
++    except Exception as e:
++        import traceback
 +        traceback.print_exc(file=sys.stderr)
-+        sys.exit(1)
++        return 1
  
  
 -if __name__ == "__main__":
+-    main()
 +if __name__ == '__main__':
-     main()
++    sys.exit(main())

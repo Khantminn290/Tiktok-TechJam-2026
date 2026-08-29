@@ -2,7 +2,6 @@ import argparse
 import json
 import os
 import sys
-import traceback
 
 import train_lib
 
@@ -18,11 +17,11 @@ def main():
         menu_choices = json.loads(args.menu_choices)
         os.makedirs(args.output_dir, exist_ok=True)
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
+        with open(os.path.join(args.output_dir, 'metrics.json'), 'w', encoding='utf-8') as f:
             json.dump({k: float(v) for k, v in metrics.items()}, f)
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+    except Exception as e:
+        print(f'ERROR: {e}', file=sys.stderr)
+        raise
 
 
 if __name__ == '__main__':
