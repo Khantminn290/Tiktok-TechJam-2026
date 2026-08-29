@@ -44,6 +44,41 @@ def sigmoid(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -30, 30)))
 
 
+def bayesian_prior_scores(splits: dict, mode: str) -> dict:
+    """Train-only smoothed item/author long-view logits for valid/test ranking."""
+    if mode == "none":
+        return {name: np.zeros(len(s["user"]), dtype=np.float32)
+                for name, s in splits.items()}
+    if mode not in ("bayesian_item_author", "recency_bayesian_item_author"):
+        raise ValueError(f"unknown score_prior mode: {mode}")
+
+    tr = splits["train"]
+    y = tr["long_view"].astype(np.float64)
+    if mode == "recency_bayesian_item_author":
+        age = tr["time_ms"].max() - tr["time_ms"].astype(np.float64)
+        w = np.exp(-age / (3.0 * 86400e3))
+    else:
+        w = np.ones(len(y), dtype=np.float64)
+    global_rate = float(np.sum(w * y) / np.maximum(np.sum(w), 1.0))
+    global_rate = float(np.clip(global_rate, 1e-5, 1.0 - 1e-5))
+    global_logit = np.log(global_rate / (1.0 - global_rate))
+
+    def table(field: str, strength: float) -> np.ndarray:
+        n = int(max(np.max(s[field]) for s in splits.values())) + 1
+        count = np.zeros(n, dtype=np.float64)
+        positive = np.zeros(n, dtype=np.float64)
+        np.add.at(count, tr[field], w)
+        np.add.at(positive, tr[field], w * y)
+        rate = (positive + strength * global_rate) / (count + strength)
+        rate = np.clip(rate, 1e-5, 1.0 - 1e-5)
+        return np.log(rate / (1.0 - rate)) - global_logit
+
+    video = table("video", 20.0)
+    author = table("author", 100.0)
+    return {name: (0.7 * video[s["video"]] + 0.3 * author[s["author"]]).astype(np.float32)
+            for name, s in splits.items()}
+
+
 GPU_DEVICES = ("cuda", "mps")
 
 
@@ -811,6 +846,13 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
     write_resource_json(output_dir, device, train_seconds)
 
     sv, st = np.asarray(res["scores_valid"]), np.asarray(res["scores_test"])
+    prior_mode = menu_choices.get("score_prior", "none")
+    if prior_mode != "none":
+        priors = bayesian_prior_scores(splits, prior_mode)
+        blend_weight = 0.25 if prior_mode == "bayesian_item_author" else 0.30
+        sv = sv + blend_weight * priors["valid"]
+        st = st + blend_weight * priors["test"]
+        log(f"  score prior: {prior_mode} (weight={blend_weight:.2f}, train-only)")
     va = evaluate(list(splits["valid"]["user_raw"]), splits["valid"]["long_view"], sv)
     # float() is REQUIRED, not cosmetic: evaluate() propagates the label array's
     # dtype, so under numpy >= 2 (NEP 50 casting rules) these are np.float32 and

@@ -31,7 +31,7 @@ TASK (fixed, do not reinterpret):
 YOUR OUTPUT — exactly ONE JSON object, nothing else (no prose before or after):
 {
   "hypothesis": "<what you try and WHY it should raise valid GAUC/nDCG@5 — judged text>",
-  "menu_choices": {"loss": "...", "user_history": "...", "multitask": "...",
+  "menu_choices": {"loss": "...", "score_prior": "...", "user_history": "...", "multitask": "...",
                     "model": "...", "temporal": "...", "training": "...",
                     "data_extras": "..."},
   "code": "<the COMPLETE runnable python solution script — full file, not a diff>",
@@ -67,7 +67,10 @@ def _summarize_node(n: Node) -> str:
 
 def _read_code(n: Node) -> str:
     try:
-        with open(n.code_path) as fh:
+        path = n.code_path
+        if path and not os.path.isabs(path):
+            path = os.path.join(os.path.dirname(_HERE), path)
+        with open(path) as fh:
             return fh.read()
     except OSError:
         return "<code file missing>"
@@ -99,8 +102,8 @@ def build_prompt(action: str, target: Node | None, reason: str,
     if action == "draft":
         parts.append(
             "## Instructions\nPropose a FRESH combination not attempted yet. "
-            "Bias toward the highest-priority unexplored axes (loss function and "
-            "user_history are the organizers' top recommendations). One clear "
+            "Bias toward the highest-priority unexplored axes (loss, score_prior, "
+            "and user_history). One clear "
             "hypothesis per draft — do not change every axis at once.")
     elif action == "improve":
         parts.append(

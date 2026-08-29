@@ -12,10 +12,17 @@ metrics = train_lib.run(menu_choices_dict, output_dir, seed=0)
 ```
 
 `train_lib.run` handles everything: cached data loading, feature encoding,
-the loss / user_history / multitask / model / temporal / training axes, early
+the loss / score_prior / user_history / multitask / model / temporal / training axes, early
 stopping on valid primary, and writing `metrics.json`, `scores_valid.npy`,
 `scores_test.npy` to `output_dir`. A solution that only picks menu options is
 just `seed_solution.py`.
+
+`score_prior` is a model-agnostic, train-only post-training ranking signal. The
+`bayesian_item_author` option estimates smoothed long-view logits for videos and
+authors; `recency_bayesian_item_author` exponentially downweights older training
+rows. Both shrink rare/unseen entities to the training global mean and blend the
+centered prior logit with the model logit. Validation/test labels are never read.
+The primitive is available as `train_lib.bayesian_prior_scores(splits, mode)`.
 
 ## Path B — custom code (for ideas beyond the menu)
 

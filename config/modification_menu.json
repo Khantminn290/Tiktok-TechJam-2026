@@ -12,8 +12,17 @@
         "listwise_softmax_plus_pointwise": {"description": "Weighted hybrid: listwise softmax + pointwise logloss. Keeps calibrated head while aligning with ranking."}
       }
     },
-    "user_history": {
+    "score_prior": {
       "priority": 2,
+      "description": "Leakage-safe empirical-Bayes ranking prior learned only from the training window, then blended with the model logit. Item and author long-view rates provide a low-variance memorization path that complements interaction models; smoothing protects rare entities and the recency variant targets temporal drift.",
+      "options": {
+        "none": {"description": "No post-training prior blend; use the model score directly."},
+        "bayesian_item_author": {"description": "Blend the model logit with smoothed train-only item and author long-view logits. Uses global-prior shrinkage for rare and unseen entities. Same-seed baseline check: +0.0002 primary (weak control)."},
+        "recency_bayesian_item_author": {"description": "As above, but exponentially downweight older training interactions so the prior follows recent preference and catalog trends. Same-seed baseline check: +0.0009 primary; prefer this variant."}
+      }
+    },
+    "user_history": {
+      "priority": 3,
       "description": "Behavior-sequence features. Baseline uses zero history; each user has hundreds of train interactions. Second-ranked unexplored direction (DIN/SIM family). NOTE: purely user-side features only work through interaction with item-side features — first-order user terms are constant within a user and cannot change within-user ranking.",
       "options": {
         "none": {"description": "Baseline: no history."},
@@ -23,7 +32,7 @@
       }
     },
     "multitask": {
-      "priority": 3,
+      "priority": 4,
       "description": "Multi-feedback auxiliary tasks. Log has is_click, is_like, is_follow, is_comment, is_forward, play_time_ms on EVERY impression (no sample-selection bias for long_view). Third-ranked direction.",
       "options": {
         "none": {"description": "Single task: long_view only."},
@@ -33,7 +42,7 @@
       }
     },
     "model": {
-      "priority": 4,
+      "priority": 5,
       "description": "Scoring model. Tested dead-end: raising FM capacity (k=8/16/32) does NOT help, so model swaps rank below loss/history/multitask. Torch 2.3 (CPU) is available.",
       "options": {
         "fm_numpy": {"description": "Baseline: numpy Factorization Machine."},
@@ -42,7 +51,7 @@
       }
     },
     "temporal": {
-      "priority": 5,
+      "priority": 6,
       "description": "Time features and train→eval distribution shift (hourmin, date). Sixth-ranked direction. Remember: a time feature only matters through interaction with item-side features.",
       "options": {
         "none": {"description": "Baseline: no time features."},
@@ -51,7 +60,7 @@
       }
     },
     "training": {
-      "priority": 6,
+      "priority": 7,
       "description": "Optimization schedule. Tested dead-end: capacity k=8/16/32 barely moves the score — prefer schedule changes that serve the loss axis over raw capacity.",
       "options": {
         "default": {"description": "Baseline: k=16, lr=1e-3, batch 8192, max 40 epochs, patience 4."},
@@ -61,7 +70,7 @@
       }
     },
     "data_extras": {
-      "priority": 7,
+      "priority": 8,
       "description": "Extra data sources beyond the two standard logs. Leakage-sensitive: locked options are mechanically unselectable without a human-set override flag.",
       "options": {
         "none": {"description": "Standard logs only."},

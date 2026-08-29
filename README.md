@@ -152,12 +152,13 @@ own measured findings:
 | Priority | Axis | What it changes |
 |---|---|---|
 | 1 | `loss` | pointwise → BPR pairwise / listwise softmax / hybrid |
-| 2 | `user_history` | behaviour-sequence pooling, DIN-style attention |
-| 3 | `multitask` | auxiliary heads on click / like / forward, censored watch-time |
-| 4 | `model` | FM → DeepFM / DCN |
-| 5 | `temporal` | hour-of-day, day-of-week |
-| 6 | `training` | schedules, two-stage fine-tuning |
-| 7 | `data_extras` | extra data sources — **two options here are locked** |
+| 2 | `score_prior` | train-only Bayesian item/author propensity blend |
+| 3 | `user_history` | behaviour-sequence pooling, DIN-style attention |
+| 4 | `multitask` | auxiliary heads on click / like / forward, censored watch-time |
+| 5 | `model` | FM → DeepFM / DCN |
+| 6 | `temporal` | hour-of-day, day-of-week |
+| 7 | `training` | schedules, two-stage fine-tuning |
+| 8 | `data_extras` | extra data sources — **two options here are locked** |
 
 `config/modification_menu.md` records the reasoning and the two approaches the
 organisers already measured as dead ends (more static features; larger embedding
@@ -209,7 +210,17 @@ config/
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
 tests/test_harness.py        55 checks, no model calls
-logs/                        journal.jsonl, solutions/, best_*, final_summary.json
+logs/
+  nodes/node_NNN/            one self-contained folder per research iteration
+    solution.py              complete generated script
+    record.json              hypothesis, choices, metrics, errors, usage
+    metrics.json             validation metrics (successful nodes)
+    resource.json            measured compute (when produced)
+    scores_*.npy             prediction artifacts (local, Git-ignored)
+  smoke/                     isolated smoke-test journal and nodes
+  history/                   prior run-level summaries; nodes stay in nodes/
+  journal.jsonl              compact index of all active research nodes
+  best_* / final_summary     current run summary artifacts
 ```
 
 ---
@@ -240,5 +251,6 @@ Harness sanity checks (these should match before trusting anything else):
 ## Team
 
 Solo participant. Every agent-authored script is journaled per iteration in
-`logs/journal.jsonl` with its hypothesis, and the full source is kept in
-`logs/solutions/`.
+`logs/journal.jsonl` with its hypothesis. Every node is self-contained under
+`logs/nodes/node_NNN/`, so its source, record, metrics, errors, and local prediction
+artifacts can be inspected without cross-referencing `solutions/` and `runs/`.

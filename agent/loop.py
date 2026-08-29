@@ -35,17 +35,16 @@ class AgentLoop:
                  inject_error_at: int | None = None,
                  allow_locked_options: bool = False,
                  max_spend_usd: float = 2.0, draft_count: int | None = None,
-                 test_model: bool = False):
+                 test_model: bool = False, log_dir: str | None = None):
         self.root = root
-        self.log_dir = os.path.join(root, "logs")
-        self.solutions_dir = os.path.join(self.log_dir, "solutions")
-        self.runs_dir = os.path.join(self.log_dir, "runs")
-        os.makedirs(self.solutions_dir, exist_ok=True)
-        os.makedirs(self.runs_dir, exist_ok=True)
+        self.log_dir = log_dir or os.path.join(root, "logs")
+        self.nodes_dir = os.path.join(self.log_dir, "nodes")
+        os.makedirs(self.nodes_dir, exist_ok=True)
         self.menu = Menu(os.path.join(root, "config", "modification_menu.json"),
                          allow_locked_options=allow_locked_options)
         self.llm = LLMClient(model=llm_model, test=test_model)
-        self.tree = ExperimentTree(self.log_dir)
+        self.tree = ExperimentTree(self.log_dir, self.nodes_dir,
+                                   project_root=self.root)
         self.max_iterations = max_iterations
         self.wall_clock_limit_s = wall_clock_limit_h * 3600
         self.exec_timeout_s = exec_timeout_s
@@ -122,7 +121,7 @@ class AgentLoop:
                                                draft_count=self.draft_count)
         # a node that failed before any code existed (LLM failure) can't be debugged
         if action == "debug" and target is not None and not (
-                target.code_path and os.path.exists(target.code_path)):
+                target.code_path and os.path.exists(self.tree.resolve_code_path(target))):
             failed_id = target.iteration_id
             action, target = "draft", None
             reason = (f"node {failed_id} failed before any code was written "
@@ -131,8 +130,10 @@ class AgentLoop:
         print(f"[iter {it}] action={action}"
               f"{'' if target is None else f' target={target.iteration_id}'} — {reason}")
 
-        code_path = os.path.join(self.solutions_dir, f"node_{it:03d}.py")
-        run_dir = os.path.join(self.runs_dir, f"node_{it:03d}")
+        node_dir = os.path.join(self.nodes_dir, f"node_{it:03d}")
+        os.makedirs(node_dir, exist_ok=True)
+        code_path = os.path.join(node_dir, "solution.py")
+        run_dir = node_dir
         events = []
         prompt = build_prompt(action, target, reason, self.tree, self.menu)
 
@@ -190,7 +191,8 @@ class AgentLoop:
                     metrics=res.metrics, error_trace=res.error_trace,
                     tokens_used=sum(usage.values()),
                     wall_clock_seconds=res.wall_clock_seconds, timestamp=now(),
-                    code_path=code_path, expected_effect=obj["expected_effect"],
+                    code_path=os.path.relpath(code_path, self.root),
+                    expected_effect=obj["expected_effect"],
                     decide_reason=reason, token_breakdown=usage, events=events)
         self.tree.add(node)
         if res.ok:

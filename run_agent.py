@@ -25,17 +25,19 @@ from agent.pricing import RateTable  # noqa: E402
 
 
 def archive_logs(log_dir: str) -> None:
-    """Move a previous run's logs aside so the next run starts at iteration 0."""
+    """Archive run-level metadata while keeping all node bundles together."""
     import shutil
     import time
     if not os.path.exists(os.path.join(log_dir, "journal.jsonl")):
         return
-    dest = os.path.join(log_dir, f"archive_{time.strftime('%Y%m%d_%H%M%S')}")
+    history = os.path.join(log_dir, "history")
+    dest = os.path.join(history, f"run_{time.strftime('%Y%m%d_%H%M%S')}")
     os.makedirs(dest, exist_ok=True)
-    for name in os.listdir(log_dir):
-        if name.startswith("archive_"):
-            continue
-        shutil.move(os.path.join(log_dir, name), os.path.join(dest, name))
+    for name in ("journal.jsonl", "best_solution.py", "best_metrics.json",
+                 "final_summary.json", "tree.html", "interventions.jsonl"):
+        source = os.path.join(log_dir, name)
+        if os.path.exists(source):
+            shutil.move(source, os.path.join(dest, name))
     print(f"archived previous run to {dest}")
 
 
@@ -81,7 +83,23 @@ def main():
                     help="archive any existing logs/ into logs/archive_<ts>/ and start "
                          "iteration 0 from scratch (default: resume the journal, which "
                          "is how a crashed run continues where it left off)")
+    ap.add_argument("--force-next-iteration", action="store_true",
+                    help="development only: append exactly one iteration to an already "
+                         "converged journal, without archiving logs or replacing the "
+                         "previous final_summary.json")
+    ap.add_argument("--force-iterations", type=int, default=0, metavar="N",
+                    help="development only: append exactly N iterations to an already "
+                         "converged journal under one spend ceiling; preserves the "
+                         "previous final_summary.json")
     a = ap.parse_args()
+
+    forced_iterations = max(a.force_iterations, 1 if a.force_next_iteration else 0)
+    if a.force_iterations < 0:
+        ap.error("--force-iterations must be non-negative")
+    if forced_iterations and a.fresh:
+        ap.error("forced continuation cannot be combined with --fresh")
+    if forced_iterations and a.smoke:
+        ap.error("forced continuation cannot be combined with --smoke")
 
     if a.smoke:
         a.max_iterations = min(a.max_iterations, 3)
@@ -113,8 +131,10 @@ def main():
     if a.smoke:
         print("  SMOKE TEST: plumbing check only — not a scored run.")
 
+    main_log_dir = os.path.join(_ROOT, "logs")
+    log_dir = os.path.join(main_log_dir, "smoke") if a.smoke else main_log_dir
     if a.fresh:
-        archive_logs(os.path.join(_ROOT, "logs"))
+        archive_logs(log_dir)
 
     loop = AgentLoop(
         root=_ROOT,
@@ -128,7 +148,27 @@ def main():
         max_spend_usd=a.max_spend_usd,
         draft_count=a.draft_count,
         test_model=a.smoke,
+        log_dir=log_dir,
     )
+    if forced_iterations:
+        completed = []
+        for _ in range(forced_iterations):
+            if len(loop.tree.nodes) >= loop.max_iterations:
+                print(f"forced continuation stopped at iteration cap "
+                      f"({loop.max_iterations})")
+                break
+            over, reason = loop.spend.would_exceed()
+            if over:
+                print(f"forced continuation stopped: {reason}")
+                break
+            completed.append(loop.iterate())
+        ids = [n.iteration_id for n in completed]
+        print(f"\nforced continuation complete: nodes {ids}; "
+              f"statuses={[n.status for n in completed]}. "
+              f"Existing final_summary.json was preserved.")
+        print("Run `python -m agent.report` to inspect the extended journal.")
+        return
+
     summary = loop.run()
 
     if a.smoke:

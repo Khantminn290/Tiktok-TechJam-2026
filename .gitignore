@@ -5,15 +5,23 @@ kuairand-starter-kit/KuaiRand-Pure.tar.gz
 # generated submission files
 submission*.csv
 
+# local benchmark score arrays (metrics/resource summaries remain committable)
+results/**/scores_*.npy
+
 # secrets — never commit API keys
 .env
 
 # derived data cache (rebuilt automatically on first train_lib use)
 runtime/cache/
 
-# per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
-logs/runs/
-logs/archive_*/
+# per-node prediction arrays are reproducible and too large for Git. The compact
+# node script, record, metrics, and resource files remain committed together.
+logs/nodes/**/scores_*.npy
+logs/smoke/nodes/**/scores_*.npy
+logs/smoke/
+
+# local pre-migration backups
+.local-log-backups/
 
 # local build/spec notes, not part of the deliverable
 claude_code_build_prompt.md

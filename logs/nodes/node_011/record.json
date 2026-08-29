@@ -1,0 +1,44 @@
+{
+  "iteration_id": 11,
+  "parent_id": 10,
+  "action": "improve",
+  "menu_choices": {
+    "loss": "bpr_pairwise",
+    "score_prior": "recency_bayesian_item_author",
+    "user_history": "din_attention",
+    "multitask": "aux_click_like_forward",
+    "model": "deepfm_mlp",
+    "temporal": "none",
+    "training": "lower_lr_longer",
+    "data_extras": "none"
+  },
+  "hypothesis": "Move from FM to a small MLP interaction model with DIN-style user-history attention while keeping the strongest ranking recipe found so far (BPR, recency prior, aux tasks, lower-lr schedule). The current best FM already uses mean-pooled positives, but pooled history is query-agnostic: every candidate for a user sees the same history vector. Within-user ranking should benefit if the user representation depends on the candidate item, because different impressions should attend to different past positives. The menu already exposes this as din_attention and requires an MLP-based model. DeepFM should also capture higher-order interactions among user/item/author/tab/history that FM cannot. This is a focused attempt to unlock extra nDCG@5 by improving top-of-list personalization while retaining the recency Bayesian prior as a low-variance memorization path.",
+  "status": "error",
+  "metrics": null,
+  "error_trace": "exit code 1\n--- stderr (tail) ---\nERROR: solution failed\nTraceback (most recent call last):\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\logs\\solutions\\node_011.py\", line 23, in main\n    metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\runtime\\train_lib.py\", line 843, in run\n    res = train_torch(cfg, enc, splits, meta, log)\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\runtime\\train_lib.py\", line 682, in train_torch\n    net = Net().to(dev)\n          ~~~^^\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\runtime\\train_lib.py\", line 647, in __init__\n    self.aux_heads[t] = nn.Linear(in_dim, 1)\n    ~~~~~~~~~~~~~~^^^\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\.venv\\Lib\\site-packages\\torch\\nn\\modules\\container.py\", line 558, in __setitem__\n    self.add_module(key, module)\n    ~~~~~~~~~~~~~~~^^^^^^^^^^^^^\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\.venv\\Lib\\site-packages\\torch\\nn\\modules\\module.py\", line 659, in add_module\n    raise KeyError(f\"attribute '{name}' already exists\")\nKeyError: \"attribute 'forward' already exists\"\n\n--- stdout (tail) ---\n  torch device: cpu\n",
+  "tokens_used": 6011,
+  "wall_clock_seconds": 30.32661461830139,
+  "timestamp": 1787927351.851462,
+  "code_path": "logs\\nodes\\node_011\\solution.py",
+  "expected_effect": "+0.001 to +0.004 primary if candidate-aware history helps top-5 ordering; upside mainly through nDCG@5, with GAUC flat to slightly up.",
+  "decide_reason": "extending global best node 10 (valid primary 0.6040); its neighborhood is not exhausted",
+  "token_breakdown": {
+    "input_tokens": 2660,
+    "output_tokens": 535,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 2816
+  },
+  "events": [
+    {
+      "type": "execution_error",
+      "error_head": "exit code 1\n--- stderr (tail) ---\nERROR: solution failed\nTraceback (most recent call last):\n  File \"C:\\Users\\Min Wai Phyo\\Documents\\Projects\\Tiktok-TechJam-2026\\logs\\solutions\\node_011.py\", line 23, in main\n    metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)\n  File \"C:\\Users\\M"
+    },
+    {
+      "type": "spend",
+      "iteration_usd": 0.015379,
+      "run_total_usd": 0.041615,
+      "provider": "openai",
+      "model": "gpt-5.4"
+    }
+  ]
+}

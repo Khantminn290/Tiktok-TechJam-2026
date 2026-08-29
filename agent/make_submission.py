@@ -83,7 +83,7 @@ def ensemble_scores(root: str, split: str, nodes: list[dict]) -> np.ndarray | No
     """Rank-average the saved score arrays of the given nodes. No model calls."""
     stacked = []
     for n in nodes:
-        p = os.path.join(root, "logs", "runs",
+        p = os.path.join(root, "logs", "nodes",
                          f"node_{n['iteration_id']:03d}", f"scores_{split}.npy")
         if not os.path.exists(p):
             continue
@@ -128,7 +128,7 @@ def main():
         sys.exit("no best node yet (logs/best_metrics.json missing) — run the agent first")
     with open(best_meta_path) as fh:
         best = json.load(fh)
-    run_dir = os.path.join(_ROOT, "logs", "runs", f"node_{best['iteration_id']:03d}")
+    run_dir = os.path.join(_ROOT, "logs", "nodes", f"node_{best['iteration_id']:03d}")
     single_scores = np.load(os.path.join(run_dir, f"scores_{a.split}.npy"))
 
     members = top_k_distinct_nodes(_ROOT, k)
