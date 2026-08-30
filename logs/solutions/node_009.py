@@ -17,17 +17,17 @@ def main():
         menu_choices = json.loads(args.menu_choices)
         if not isinstance(menu_choices, dict):
             raise ValueError('--menu-choices must decode to a JSON object')
-
         os.makedirs(args.output_dir, exist_ok=True)
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-
         metrics_path = os.path.join(args.output_dir, 'metrics.json')
-        with open(metrics_path, 'w') as f:
-            json.dump({k: float(v) for k, v in metrics.items()}, f)
+        if os.path.exists(metrics_path):
+            with open(metrics_path, 'w') as f:
+                json.dump({k: float(v) for k, v in metrics.items()}, f)
+        return 0
     except Exception as e:
-        sys.stderr.write(str(e) + '\n')
-        raise
+        print(str(e), file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

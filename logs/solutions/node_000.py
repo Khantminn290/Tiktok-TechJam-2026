@@ -2,15 +2,14 @@ import argparse
 import json
 import os
 import sys
-import traceback
 
 import train_lib
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--menu-choices', required=True, type=str)
-    parser.add_argument('--output-dir', required=True, type=str)
+    parser.add_argument('--menu-choices', required=True)
+    parser.add_argument('--output-dir', required=True)
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()
 
@@ -23,13 +22,24 @@ def main():
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
 
         metrics_path = os.path.join(args.output_dir, 'metrics.json')
-        with open(metrics_path, 'w', encoding='utf-8') as f:
-            json.dump({k: float(v) for k, v in metrics.items()}, f)
+        if not os.path.exists(metrics_path):
+            with open(metrics_path, 'w') as f:
+                json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+        required = [
+            os.path.join(args.output_dir, 'metrics.json'),
+            os.path.join(args.output_dir, 'scores_valid.npy'),
+            os.path.join(args.output_dir, 'scores_test.npy'),
+        ]
+        missing = [p for p in required if not os.path.exists(p)]
+        if missing:
+            raise RuntimeError('train_lib.run completed but did not create required outputs: ' + ', '.join(missing))
+
+        return 0
     except Exception as e:
-        sys.stderr.write(f'ERROR: {e}\n')
-        sys.stderr.write(traceback.format_exc())
-        sys.exit(1)
+        print(str(e), file=sys.stderr)
+        return 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

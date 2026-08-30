@@ -1,23 +1,12 @@
 {
-  "iteration_id": 2,
-  "menu_choices": {
-    "loss": "bpr_pairwise",
-    "neg_sampling": "uniform_1",
-    "user_history": "none",
-    "multitask": "none",
-    "model": "gru4rec_seq",
-    "temporal": "none",
-    "training": "lower_lr_longer",
-    "data_extras": "none",
-    "sample_weighting": "per_row",
-    "regularization": "l2_default"
-  },
-  "hypothesis": "The observed gru4rec_seq gain at 0.60294 may come from the sequential architecture rather than from pointwise supervision; rerunning the same GRU4Rec-style scaffold with BPR isolates whether pointwise_logloss was incidental in node 1. If this BPR version matches or exceeds 0.6029, the branch is real and the loss choice is not essential; if it drops clearly, the short validation lists vs much longer train histories likely make pointwise supervision specifically beneficial for this sequential model.",
+  "iteration_id": 7,
+  "menu_choices": {},
+  "hypothesis": "Validation-fitted checkpoint choice is likely overstating or misreading tiny single-run differences in this near-noise-floor regime; training the incumbent once while capturing every epoch’s VALID predictions, then using held-out user-split selection_rule_test to compare single-best-epoch against simple top-N checkpoint averages should give a less biased final checkpoint rule and a cleaner confirmation signal for whether checkpoint combination truly helps this branch.",
   "valid_metrics": {
-    "GAUC": 0.6697579334026141,
-    "nDCG@5": 0.5363557345999813,
-    "primary": 0.6030568340012977
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_002.py",
-  "timestamp": 1788086910.2221289
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_007.py",
+  "timestamp": 1788102770.600616
 }

@@ -1,0 +1,57 @@
+[
+  {
+    "label": "phase4",
+    "nodes": 11,
+    "confirmation_runs": 1,
+    "paired_experiments": 1,
+    "single_seed_exploratory_runs": 10,
+    "distinct_seeds_used": [
+      0,
+      1,
+      2
+    ],
+    "results_promoted": 0,
+    "paired_evidence_states": {
+      "UNCONFIRMED": 1
+    },
+    "allocations_recorded": 10,
+    "confirmations_queued": 1,
+    "automatic_repair_attempts": 2,
+    "automatic_repairs_succeeded": 1,
+    "iterations_consumed": 11,
+    "preflight_rejections": 0,
+    "preflight_stages": {},
+    "experiments_completed": 8,
+    "experiments_crashed": 3,
+    "training_wall_clock_s": 885.0,
+    "path_b_attempts": 6,
+    "path_b_crashes": 3,
+    "path_b_crash_rate": 0.5,
+    "orchestration_only_misuse": 0,
+    "repeated_identical_failures": 1,
+    "failure_classes": {
+      "evaluation_failure": 3
+    },
+    "tool_calls": {
+      "get_user_history_stats": 10,
+      "get_within_user_auc": 17,
+      "hardcoded_constants": 7,
+      "free_recombination": 3,
+      "selection_pressure": 1,
+      "selection_rule_test": 1
+    },
+    "tool_call_total": 39,
+    "nodes_with_inquiry": 10,
+    "inquiry_complete": 10,
+    "capability_named": 10,
+    "capability_named_valid": 10,
+    "promotion_criterion_stated": 10,
+    "categories": {
+      "confirmation": 10,
+      "exploration": 1
+    },
+    "confirmation_nodes": 10,
+    "best_primary": 0.60497,
+    "manual_interventions": 0
+  }
+]

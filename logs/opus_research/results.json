@@ -1,0 +1,262 @@
+{
+  "generated_utc": "2026-08-30T15:18:43Z",
+  "generator": "python3 -m agent.results_report",
+  "dataset_scope": "KuaiRand-Pure only",
+  "metric": {
+    "source_file": "kuairand-starter-kit/evaluate.py",
+    "label": "long_view",
+    "metrics": [
+      "GAUC",
+      "nDCG@5"
+    ],
+    "primary": "mean(GAUC, nDCG@5)",
+    "k": 5,
+    "tier": "VERIFIED",
+    "note": "The evaluator is authoritative. Where the brief's prose and the starter kit disagree, the kit scores the submission, so the kit wins. Benchmark code is not modified."
+  },
+  "incumbent": {
+    "reported": {
+      "primary": 0.60541,
+      "GAUC": 0.67212,
+      "nDCG@5": 0.5387
+    },
+    "k": 16,
+    "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+    "provenance": {
+      "schema": "provenance/1",
+      "stamped_utc": "2026-08-30T07:27:48Z",
+      "git": {
+        "sha": "024238f2b9ec52f2b66976fab592772fd80370d7",
+        "short_sha": "024238f2b9ec",
+        "branch": "opus-research-agent",
+        "dirty": true,
+        "dirty_files": 2
+      },
+      "data": {
+        "available": true,
+        "sha256": "60fa8bc44d1e3d59",
+        "splits": {
+          "train": {
+            "rows": 1141112,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          },
+          "valid": {
+            "rows": 124909,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          },
+          "test": {
+            "rows": 170588,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          }
+        },
+        "dataset": "KuaiRand-Pure"
+      },
+      "config_sha": "81de49d8b7af7421",
+      "seeds": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "code": {
+        "agent/final_ensemble.py": "9820a3ce2b696609",
+        "agent/ensemble.py": "ee3e8e4433c4ae07",
+        "runtime/train_lib.py": "9cf4dd7adc0fb108"
+      },
+      "evaluation": "kuairand-starter-kit/evaluate.py on the valid split",
+      "dataset_scope": "KuaiRand-Pure only",
+      "aggregation": "rank_normalise_then_mean",
+      "members_dir": "logs/final_ensemble",
+      "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+      "verified": "recomputed from stored member predictions; metrics matched the reported values exactly"
+    },
+    "tier": "VERIFIED",
+    "verified": true,
+    "recomputed": {
+      "primary": 0.60541,
+      "GAUC": 0.67212,
+      "nDCG@5": 0.5387
+    },
+    "aggregation": "rank_normalise_then_mean",
+    "members": 16,
+    "issues": []
+  },
+  "harness": {
+    "tier": "VERIFIED",
+    "passed": 796,
+    "failed": 0,
+    "exit_code": 0,
+    "seconds": 8.4
+  },
+  "convergence": {
+    "epsilon": 0.000477,
+    "epsilon_sigma": 0.6,
+    "N": 3,
+    "noise_floor": 0.0008,
+    "tier": "VERIFIED",
+    "note": "calibrated to the upward drift a running maximum shows by luck over N iterations, not hand-picked"
+  },
+  "latest_run": {
+    "label": "latest",
+    "nodes": 11,
+    "confirmation_runs": 1,
+    "paired_experiments": 1,
+    "single_seed_exploratory_runs": 10,
+    "distinct_seeds_used": [
+      0,
+      1,
+      2
+    ],
+    "results_promoted": 0,
+    "paired_evidence_states": {
+      "UNCONFIRMED": 1
+    },
+    "allocations_recorded": 10,
+    "confirmations_queued": 1,
+    "automatic_repair_attempts": 2,
+    "automatic_repairs_succeeded": 1,
+    "iterations_consumed": 11,
+    "preflight_rejections": 0,
+    "preflight_stages": {},
+    "experiments_completed": 8,
+    "experiments_crashed": 3,
+    "training_wall_clock_s": 885.0,
+    "path_b_attempts": 6,
+    "path_b_crashes": 3,
+    "path_b_crash_rate": 0.5,
+    "orchestration_only_misuse": 0,
+    "repeated_identical_failures": 1,
+    "failure_classes": {
+      "evaluation_failure": 3
+    },
+    "tool_calls": {
+      "get_user_history_stats": 10,
+      "get_within_user_auc": 17,
+      "hardcoded_constants": 7,
+      "free_recombination": 3,
+      "selection_pressure": 1,
+      "selection_rule_test": 1
+    },
+    "tool_call_total": 39,
+    "nodes_with_inquiry": 10,
+    "inquiry_complete": 10,
+    "capability_named": 10,
+    "capability_named_valid": 10,
+    "promotion_criterion_stated": 10,
+    "categories": {
+      "exploration": 1,
+      "confirmation": 10
+    },
+    "confirmation_nodes": 10,
+    "best_primary": 0.60497,
+    "manual_interventions": 0,
+    "tier": "OBSERVED",
+    "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
+    "budget_ledger": {
+      "max_iterations": 12,
+      "max_training_runs": 90,
+      "training_runs_used": 16,
+      "training_runs_left": 74,
+      "training_crashes": 3
+    },
+    "counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
+    "llm_spend_usd": 1.571477,
+    "agent_wall_clock_s": 1495.2,
+    "devices": [
+      "cpu"
+    ],
+    "llm_tokens_total": 237246
+  },
+  "path_b": {
+    "features_probed": 8,
+    "probe_statuses": {
+      "REJECTED": 6,
+      "PROBED": 2
+    },
+    "features_stored_with_lineage": 0,
+    "features_trained_paired": 0,
+    "end_to_end_complete": false,
+    "tier": "OBSERVED",
+    "note": "end-to-end means a proposed feature cleared the probe AND was retrained from its stored source in a paired experiment"
+  },
+  "confirmations": {
+    "paired_experiments_run": 1,
+    "states": {
+      "UNCONFIRMED": 1
+    },
+    "promoted": 0,
+    "tier": "OBSERVED",
+    "rule": "only CONFIRMED may change the submitted system; a single-seed result is PRELIMINARY at any effect size"
+  },
+  "budget_counting_rule": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
+  "hidden_test_evaluated": false
+}

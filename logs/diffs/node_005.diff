@@ -1,142 +1,128 @@
 --- logs/solutions/node_004.py
 +++ logs/solutions/node_005.py
-@@ -40,6 +40,7 @@
+@@ -5,7 +5,7 @@
+ import numpy as np
  
- def build_cfg_from_menu(menu, seed):
-     cfg = dict(menu)
+ import train_lib
+-from research_tools import incumbent_cfg, selection_rule_test
++from research_tools import incumbent_cfg
+ from evaluate import evaluate
+ 
+ 
+@@ -21,18 +21,21 @@
+     os.makedirs(output_dir, exist_ok=True)
+     with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
+         json.dump({k: float(v) for k, v in metrics.items()}, f)
+-    np.save(os.path.join(output_dir, 'scores_valid.npy'), scores_valid)
+-    np.save(os.path.join(output_dir, 'scores_test.npy'), scores_test)
++    np.save(os.path.join(output_dir, 'scores_valid.npy'), np.asarray(scores_valid, dtype=np.float64))
++    np.save(os.path.join(output_dir, 'scores_test.npy'), np.asarray(scores_test, dtype=np.float64))
+ 
+ 
+ def main():
+     args = parse_args()
+     try:
++        # Parse for CLI contract compatibility; experiment ignores menu overrides by design.
+         _ = json.loads(args.menu_choices)
+ 
+         splits, meta = train_lib.load_cache()
+ 
+-        cfg, enc = incumbent_cfg(splits, meta,
++        cfg, enc = incumbent_cfg(
++            splits,
++            meta,
+             loss='bpr_pairwise',
+             neg_sampling='uniform_1',
+             user_history='recency_weighted_pool',
+@@ -65,66 +68,21 @@
+         if not epoch_records:
+             raise RuntimeError('capture_epoch_scores returned no epochs')
+ 
+-        epoch_ids = [int(t[0]) for t in epoch_records]
+-        epoch_valid_scores = [np.asarray(t[2], dtype=np.float64) for t in epoch_records]
+-        epoch_primaries = [float(t[1]) for t in epoch_records]
+-
+         n_epochs = len(epoch_records)
+         if len(saved_states) < n_epochs:
+-            raise RuntimeError(f'captured {n_epochs} epoch score snapshots but only {len(saved_states)} model states')
++            raise RuntimeError('captured fewer model states than epoch score snapshots')
+         if len(saved_states) > n_epochs:
+             saved_states = saved_states[:n_epochs]
+ 
+-        order = np.argsort(np.asarray(epoch_primaries))[::-1]
+-        best_idx = int(order[0])
+-        top2 = sorted(order[:min(2, n_epochs)].tolist())
+-        top3 = sorted(order[:min(3, n_epochs)].tolist())
+-        suffix2 = sorted(list(range(max(0, best_idx - 1), min(n_epochs, best_idx + 1))))
+-        suffix3 = sorted(list(range(max(0, best_idx - 1), min(n_epochs, best_idx + 2))))
++        epoch_primaries = np.asarray([float(t[1]) for t in epoch_records], dtype=np.float64)
++        epoch_valid_scores = [np.asarray(t[2], dtype=np.float64) for t in epoch_records]
+ 
+-        candidate_defs = {
+-            'best1': [best_idx],
+-            'top2_avg': top2,
+-            'top3_avg': top3,
+-            'best_suffix2': suffix2,
+-            'best_suffix3': suffix3,
+-        }
++        top_k = min(5, n_epochs)
++        top_idxs = np.argsort(epoch_primaries)[::-1][:top_k]
++        top_idxs = sorted(int(i) for i in top_idxs.tolist())
+ 
+-        # Deduplicate any identical index sets while preserving at least best1.
+-        uniq = {}
+-        for name, idxs in candidate_defs.items():
+-            key = tuple(idxs)
+-            if key not in uniq:
+-                uniq[key] = name
+-        candidate_defs = {name: list(key) for key, name in uniq.items()}
+-        if 'best1' not in candidate_defs:
+-            candidate_defs['best1'] = [best_idx]
++        scores_valid = np.mean(np.stack([epoch_valid_scores[i] for i in top_idxs], axis=0), axis=0)
+ 
+-        rules = {}
+-        for name, idxs in candidate_defs.items():
+-            avg_scores = np.mean(np.stack([epoch_valid_scores[i] for i in idxs], axis=0), axis=0)
+-            rules[name] = np.asarray(avg_scores, dtype=np.float64)
+-
+-        valid_user_ids = splits['valid']['user_raw']
+-        valid_labels = splits['valid']['long_view']
+-
+-        srt = selection_rule_test(valid_user_ids, valid_labels, rules)
+-
+-        chosen_rule = srt.get('reference_rule', 'best1')
+-        if chosen_rule not in rules:
+-            best_name = None
+-            best_score = -1e18
+-            for name, info in srt.get('rules', {}).items():
+-                score = info.get('mean', info.get('score', -1e18))
+-                if score > best_score and name in rules:
+-                    best_score = score
+-                    best_name = name
+-            chosen_rule = best_name if best_name is not None else 'best1'
+-
+-        chosen_idxs = candidate_defs[chosen_rule]
+-        scores_valid = rules[chosen_rule]
+-
+-        # Reconstruct test predictions for the chosen checkpoints by replaying saved states.
+         dim = int(enc['train'].max()) + 1
+         model = train_lib.RankFM(
+             dim=dim,
+@@ -144,14 +102,15 @@
+             H_test = history.pooled['test']
+ 
+         test_preds = []
+-        for idx in chosen_idxs:
++        for idx in top_idxs:
+             model.load_state(saved_states[idx])
+             pred = model.predict(X_test, H_test)
+             test_preds.append(np.asarray(pred, dtype=np.float64))
+         scores_test = np.mean(np.stack(test_preds, axis=0), axis=0)
+ 
+-        metrics = evaluate(valid_user_ids, valid_labels, scores_valid)
++        metrics = evaluate(splits['valid']['user_raw'], splits['valid']['long_view'], scores_valid)
+         write_outputs(args.output_dir, metrics, scores_valid, scores_test)
 +
-     training = cfg.get("training", "default")
-     if training == "default":
-         cfg.setdefault("k", 16)
-@@ -80,6 +81,7 @@
-     else:
-         raise ValueError("Unknown regularization: %s" % reg)
- 
-+    cfg["history"] = cfg.get("user_history", "none")
-     cfg.setdefault("n_checkpoints", 1)
-     cfg.setdefault("checkpoint_combine", False)
-     cfg["seed"] = seed
-@@ -106,8 +108,8 @@
-     return float(evaluate(user_ids, labels, scores)["primary"])
- 
- 
--def mean_selected_predictions(preds, idxs):
--    arr = np.stack([preds[j] for j in idxs], axis=0)
-+def mean_selected_predictions(masked_preds, idxs):
-+    arr = np.stack([masked_preds[j] for j in idxs], axis=0)
-     return np.mean(arr, axis=0)
- 
- 
-@@ -129,26 +131,14 @@
-     if len(preds) == 0:
-         return
- 
--    full_argmax_idx = int(np.argmax(np.asarray(primaries)))
-+    full_argmax_idx = int(np.argmax(np.asarray(primaries, dtype=np.float64)))
-     full_argmax_metrics = evaluate(valid_user_ids, valid_labels, preds[full_argmax_idx])
- 
--    candidate_rules = []
--    candidate_rules.append({
--        "name": "single_best_epoch",
--        "kind": "single"
--    })
-+    candidate_rules = [{"name": "single_best_epoch", "kind": "single"}]
-     if len(preds) >= 2:
--        candidate_rules.append({
--            "name": "top2_avg",
--            "kind": "topk_avg",
--            "k": 2
--        })
-+        candidate_rules.append({"name": "top2_avg", "kind": "topk_avg", "k": 2})
-     if len(preds) >= 3:
--        candidate_rules.append({
--            "name": "top3_avg",
--            "kind": "topk_avg",
--            "k": 3
--        })
-+        candidate_rules.append({"name": "top3_avg", "kind": "topk_avg", "k": 3})
- 
-     splits = user_half_splits(valid_user_ids, n_splits=6, seed=seed)
-     details = []
-@@ -156,17 +146,20 @@
-     baseline_scores = []
- 
-     for split_id, (sel_mask, eval_mask) in enumerate(splits):
--        for direction, choose_mask, score_mask, tag in [
--            (0, sel_mask, eval_mask, "a_to_b"),
--            (1, eval_mask, sel_mask, "b_to_a"),
--        ]:
-+        directions = [
-+            (sel_mask, eval_mask, "a_to_b"),
-+            (eval_mask, sel_mask, "b_to_a"),
-+        ]
-+        for choose_mask, score_mask, tag in directions:
-             choose_users = valid_user_ids[choose_mask]
-             choose_labels = valid_labels[choose_mask]
-             score_users = valid_user_ids[score_mask]
-             score_labels = valid_labels[score_mask]
- 
--            choose_primary_by_epoch = [eval_primary(choose_users, choose_labels, p[choose_mask]) for p in preds]
--            choose_primary_by_epoch = np.asarray(choose_primary_by_epoch, dtype=np.float64)
-+            choose_primary_by_epoch = np.asarray(
-+                [eval_primary(choose_users, choose_labels, p[choose_mask]) for p in preds],
-+                dtype=np.float64,
-+            )
- 
-             baseline = evaluate(score_users, score_labels, preds[full_argmax_idx][score_mask])
-             baseline_scores.append(float(baseline["primary"]))
-@@ -176,30 +169,31 @@
-                 "direction": tag,
-                 "full_valid_argmax_epoch": int(epochs[full_argmax_idx]),
-                 "full_valid_argmax_primary_on_scored_half": float(baseline["primary"]),
--                "rule_results": []
-+                "rule_results": [],
-             }
- 
-+            masked_preds = [p[score_mask] for p in preds]
-             for rule in candidate_rules:
-                 if rule["kind"] == "single":
-                     chosen_idx = int(np.argmax(choose_primary_by_epoch))
--                    pred_scored = preds[chosen_idx][score_mask]
-+                    pred_scored = masked_preds[chosen_idx]
-                     met = evaluate(score_users, score_labels, pred_scored)
-                     heldout_scores[rule["name"]].append(float(met["primary"]))
-                     row["rule_results"].append({
-                         "rule": rule["name"],
-                         "selected_epochs": [int(epochs[chosen_idx])],
--                        "heldout_primary": float(met["primary"])
-+                        "heldout_primary": float(met["primary"]),
-                     })
-                 elif rule["kind"] == "topk_avg":
-                     k = int(rule["k"])
-                     idxs = np.argsort(choose_primary_by_epoch)[::-1][:k]
--                    pred_scored = mean_selected_predictions([p[score_mask] for p in preds], idxs)
-+                    pred_scored = mean_selected_predictions(masked_preds, idxs)
-                     met = evaluate(score_users, score_labels, pred_scored)
-                     heldout_scores[rule["name"]].append(float(met["primary"]))
-                     row["rule_results"].append({
-                         "rule": rule["name"],
-                         "selected_epochs": [int(epochs[j]) for j in idxs.tolist()],
--                        "heldout_primary": float(met["primary"])
-+                        "heldout_primary": float(met["primary"]),
-                     })
-             details.append(row)
- 
-@@ -211,7 +205,7 @@
-         "heldout_user_split_summary": {
-             "mean_primary_full_valid_argmax": float(np.mean(np.asarray(baseline_scores, dtype=np.float64))) if baseline_scores else float(full_argmax_metrics["primary"])
-         },
--        "heldout_user_split_details": details
-+        "heldout_user_split_details": details,
-     }
- 
-     for rule in candidate_rules:
-@@ -219,7 +213,7 @@
-         base = np.asarray(baseline_scores, dtype=np.float64)
-         summary["heldout_user_split_summary"][rule["name"]] = {
-             "mean_primary": float(np.mean(vals)) if len(vals) else None,
--            "delta_vs_full_valid_argmax": float(np.mean(vals - base)) if len(vals) and len(base) == len(vals) else None
-+            "delta_vs_full_valid_argmax": float(np.mean(vals - base)) if len(vals) and len(base) == len(vals) else None,
-         }
- 
-     with open(os.path.join(output_dir, "checkpoint_selection_analysis.json"), "w") as f:
+     except Exception as e:
+         sys.stderr.write(str(e) + '\n')
+         raise

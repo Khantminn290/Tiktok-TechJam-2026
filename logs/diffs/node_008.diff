@@ -1,0 +1,202 @@
+--- logs/solutions/node_007.py
++++ logs/solutions/node_008.py
+@@ -29,7 +29,6 @@
+ 
+ 
+ def _scores_for_rule(rule_name, epoch_scores):
+-    # epoch_scores: list of (epoch:int, valid_primary:float, valid_scores:np.ndarray)
+     primaries = np.array([float(t[1]) for t in epoch_scores], dtype=float)
+     order = np.argsort(-primaries)
+ 
+@@ -46,98 +45,127 @@
+     raise ValueError("Unknown rule: %s" % rule_name)
+ 
+ 
+-def _pick_rule(epoch_scores, user_ids, labels):
++def _mean_score_from_rule_info(info):
++    if isinstance(info, dict):
++        for key in ("mean", "score", "primary"):
++            if key in info and info[key] is not None:
++                return float(info[key])
++    elif info is not None:
++        return float(info)
++    return None
++
++
++def _run_selection_rule_test(user_ids, labels, epoch_scores):
+     candidates = ["best_epoch", "top2_mean", "top3_mean", "top5_mean"]
+-    candidates = [c for c in candidates if not (c == "top5_mean" and len(epoch_scores) < 5)]
++    if len(epoch_scores) < 5:
++        candidates = [c for c in candidates if c != "top5_mean"]
++    if len(epoch_scores) < 3:
++        candidates = [c for c in candidates if c != "top3_mean"]
++    if len(epoch_scores) < 2:
++        candidates = [c for c in candidates if c != "top2_mean"]
+ 
+     pred_map = {name: _scores_for_rule(name, epoch_scores) for name in candidates}
+ 
+-    # selection_rule_test requires concrete rules; pass prediction vectors directly.
+-    # If the helper fails for any reason, fall back to unbiased-free but safe best_epoch.
+-    chosen = "best_epoch"
+-    report = {"status": "fallback", "reason": "selection_rule_test not run"}
++    report = {
++        "status": "not_run",
++        "reason": None,
++        "candidate_rules": candidates,
++        "winner": None,
++    }
++
+     try:
+-        rule_payload = {name: pred_map[name] for name in candidates}
+-        res = selection_rule_test(user_ids=user_ids, labels=labels, rules=rule_payload)
+-        report = res
+-        best_score = None
++        res = selection_rule_test(user_ids=user_ids, labels=labels, rules=pred_map)
++        report = {
++            "status": "ok",
++            "candidate_rules": candidates,
++            "raw": res,
++            "winner": None,
++        }
+         best_name = None
++        best_val = None
+         for name, info in res.get("rules", {}).items():
+-            if isinstance(info, dict):
+-                score = info.get("mean")
+-                if score is None:
+-                    score = info.get("score")
+-                if score is None:
+-                    score = info.get("primary")
+-            else:
+-                score = info
++            score = _mean_score_from_rule_info(info)
+             if score is None:
+                 continue
+-            score = float(score)
+-            if (best_score is None) or (score > best_score):
+-                best_score = score
++            if best_val is None or score > best_val:
++                best_val = score
+                 best_name = name
+         if best_name in pred_map:
+-            chosen = best_name
++            report["winner"] = best_name
+     except Exception as e:
+-        report = {"status": "fallback", "reason": str(e)}
++        report = {
++            "status": "fallback",
++            "reason": str(e),
++            "candidate_rules": candidates,
++            "winner": None,
++        }
+ 
+-    return chosen, pred_map[chosen], report, pred_map
++    return report
+ 
+ 
+ def main():
+     parser = argparse.ArgumentParser()
+-    parser.add_argument('--menu-choices', required=True)
+-    parser.add_argument('--output-dir', required=True)
+-    parser.add_argument('--seed', type=int, default=0)
++    parser.add_argument("--menu-choices", required=True)
++    parser.add_argument("--output-dir", required=True)
++    parser.add_argument("--seed", type=int, default=0)
+     args = parser.parse_args()
+ 
+     try:
+         menu_choices = json.loads(args.menu_choices)
+         if not isinstance(menu_choices, dict):
+-            raise ValueError('--menu-choices must decode to a JSON object')
++            raise ValueError("--menu-choices must decode to a JSON object")
+ 
+         os.makedirs(args.output_dir, exist_ok=True)
+ 
+         splits, meta = train_lib.load_cache()
+         base_menu = _build_base_menu(menu_choices)
+         cfg, enc = incumbent_cfg(splits, meta, **base_menu)
+-        cfg['seed'] = args.seed
+-        cfg['capture_epoch_scores'] = []
++        cfg["seed"] = int(args.seed)
++        cfg["capture_epoch_scores"] = []
+ 
+         res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
+ 
+-        epoch_scores = cfg['capture_epoch_scores']
+-        if not epoch_scores:
+-            raise RuntimeError('No per-epoch scores captured; cannot test checkpoint rules')
++        scores_valid = np.array(res["scores_valid"], dtype=np.float32)
++        scores_test = np.array(res["scores_test"], dtype=np.float32)
++        metrics = evaluate(splits["valid"]["user_raw"], splits["valid"]["long_view"], scores_valid)
+ 
+-        user_ids = splits['valid']['user_raw']
+-        labels = splits['valid']['long_view']
+-
+-        chosen_rule, scores_valid, selection_report, pred_map = _pick_rule(epoch_scores, user_ids, labels)
+-
+-        # Test output exists only for the trained model's final built-in selection.
+-        # For custom checkpoint selection among VALID-captured candidates, only VALID can be re-ranked exactly.
+-        # To satisfy the contract without reading test labels, write the model's blind test scores.
+-        scores_test = np.array(res['scores_test'], dtype=np.float32)
+-        scores_valid = np.array(scores_valid, dtype=np.float32)
+-
+-        metrics = evaluate(user_ids, labels, scores_valid)
+-
+-        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
++        with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
+             json.dump({k: float(v) for k, v in metrics.items()}, f)
+ 
+-        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), scores_valid)
+-        np.save(os.path.join(args.output_dir, 'scores_test.npy'), scores_test)
++        np.save(os.path.join(args.output_dir, "scores_valid.npy"), scores_valid)
++        np.save(os.path.join(args.output_dir, "scores_test.npy"), scores_test)
+ 
+-        with open(os.path.join(args.output_dir, 'selection_report.json'), 'w') as f:
+-            json.dump({
+-                'chosen_rule': chosen_rule,
+-                'n_epochs': int(len(epoch_scores)),
+-                'candidate_rules': list(pred_map.keys()),
+-                'selection_report': selection_report,
+-                'base_menu': base_menu,
+-            }, f)
++        epoch_scores = cfg.get("capture_epoch_scores", [])
++        selection_report = {
++            "base_menu": base_menu,
++            "n_epochs_captured": int(len(epoch_scores)),
++            "final_output_rule": "train_lib_internal_selection",
++            "valid_metrics_of_final_output": {k: float(v) for k, v in metrics.items()},
++        }
++
++        if epoch_scores:
++            selection_report["checkpoint_rule_test"] = _run_selection_rule_test(
++                user_ids=splits["valid"]["user_raw"],
++                labels=splits["valid"]["long_view"],
++                epoch_scores=epoch_scores,
++            )
++
++            per_rule_valid = {}
++            for rule_name in selection_report["checkpoint_rule_test"]["candidate_rules"]:
++                rule_scores = _scores_for_rule(rule_name, epoch_scores)
++                rule_metrics = evaluate(splits["valid"]["user_raw"], splits["valid"]["long_view"], rule_scores)
++                per_rule_valid[rule_name] = {k: float(v) for k, v in rule_metrics.items()}
++            selection_report["in_sample_valid_metrics_by_rule"] = per_rule_valid
++        else:
++            selection_report["checkpoint_rule_test"] = {
++                "status": "no_epoch_scores",
++                "reason": "capture_epoch_scores was empty",
++                "candidate_rules": [],
++                "winner": None,
++            }
++
++        with open(os.path.join(args.output_dir, "selection_report.json"), "w") as f:
++            json.dump(selection_report, f)
+ 
+         return 0
+     except Exception as e:
+@@ -145,5 +173,5 @@
+         return 1
+ 
+ 
+-if __name__ == '__main__':
++if __name__ == "__main__":
+     sys.exit(main())

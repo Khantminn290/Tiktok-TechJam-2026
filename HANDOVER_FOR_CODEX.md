@@ -11,11 +11,19 @@ hidden-test guard.**
 | 1 — Path B reliability | **complete** | 749→778 tests; live Path B smoke succeeded |
 | 2 — Competition profile | **complete** | `--competition`, resolved config printed, unsafe combos refused |
 | 3 — Budget accounting | **complete** | `budget.Ledger`, training-runs cap, confirmation affordability |
-| 4 — Clean benchmark run | in progress | see "current action" |
-| 5 — Generated documentation | not started | |
-| 6 — 1K/27K transfer | not started | datasets not mounted (see CODE_REVIEW.md) |
+| 4 — Clean benchmark run | **complete** | `logs/opus_research/phase4_competition_run.jsonl`, `RESULTS.md` |
+| 5 — Generated documentation | **complete** | `python3 -m agent.results_report` |
+| 6 — 1K/27K transfer | **blocked, plan written** | `TRANSFER_PLAN.md` — datasets not on disk |
 
-- Tests: **778 passed, 0 failed** (`python3 tests/test_harness.py`)
+### Phase 4 note — the run predates two commits
+
+The competition run was launched at `d7e97c1`. While it ran it exposed the next
+failure layer (`selection_rule_test() missing 1 required positional argument`),
+and the `call_arity` preflight stage that prevents it was committed *after* the
+run started. So the Phase 4 journal reflects `d7e97c1`, not HEAD. Re-run to see
+the arity stage in effect.
+
+- Tests: **796 passed, 0 failed** (`python3 tests/test_harness.py`)
 - Incumbent: **0.60541** verified (`python3 -m agent.verify_incumbent`)
 - Hidden test: untouched, no `results/final_evaluation.lock`
 
@@ -79,6 +87,62 @@ executions**. The counting rule, applied everywhere and stated in reports
 - An exhausted training-run budget stops the run with an explicit reason.
 - Crashed training executions are counted, not forgiven.
 - `final_summary` carries the full ledger plus the counting note.
+
+## Phase 5 — Generated documentation (complete)
+
+`python3 -m agent.results_report [--run-tests]` writes `RESULTS.md` from
+artifacts, never from memory: the incumbent is **recomputed** at generation
+time, the convergence threshold is read from `agent.loop`, the metric is read
+from `kuairand-starter-kit/evaluate.py`, and run counters come from the journal
+and the budget ledger.
+
+Every figure is tiered **VERIFIED / OBSERVED / OPEN** and the tiers are not
+blurred: an unexecuted harness reports OPEN rather than assuming it passes, and
+generating while a run holds the data lock degrades to OPEN rather than
+reporting the quoted incumbent as though it had been verified.
+
+Evaluator note included in the output: where the brief's prose and the starter
+kit disagree, `evaluate.py` scores the submission, so `long_view` / GAUC /
+nDCG@5 / their mean is authoritative. Benchmark code is untouched.
+
+Corrected one stale README claim the generated evidence disproves (convergence
+stated as a hard-coded 0.002; it is calibrated to 0.00048 = 0.60σ).
+
+## Phase 6 — Transfer (blocked)
+
+Only KuaiRand-Pure is on disk; 1K and 27K are not mounted anywhere. Per the
+brief, `TRANSFER_PLAN.md` is a ready-to-run design, **not** a result. The
+critical constraint recorded there: Pure's valid/test come from the
+2022-04-22..05-08 window, so auxiliary pretraining must be cut at
+`date <= 2022-04-21` or the model sees the interactions it is scored on.
+
+## Phase 4 — Clean competition run (complete)
+
+Ran `--competition --fresh --wall-clock-limit-h 2.0`. Converged legitimately at
+iteration 10: the running best gained **0.00000** over 3 scored iterations, well
+under the calibrated ε.
+
+| | |
+|---|---|
+| best single run | **0.60497** (= the incumbent's own single-seed level) |
+| outer-loop nodes / iterations consumed | 11 / 11 |
+| **training runs used** | **16 of 90** (the confirmation was 6 of them) |
+| experiments completed / crashed | 8 / 3 |
+| **Path B crash rate** | **50%** (was 71% pre-architecture, 92% in the prior run) |
+| orchestration-only misuse | 0 |
+| paired confirmations run / promoted | 1 / **0** |
+| automatic repairs attempted / recovered | 2 / **1** |
+| **manual interventions** | **0** |
+| LLM tokens / spend | 237,246 / **$1.57** of $6.00 |
+| training wall-clock | 885s, cpu |
+
+Behaviour worth noting: the profile's `min_branching_iterations` got the policy
+out of the drafting phase for the first time in this project's history — nodes
+7–10 were `improve` actions extending the best node, and node 7 reached 0.60497.
+The confirmation returned UNCONFIRMED (t=1.86) and correctly promoted nothing.
+
+**No score improvement.** 0.60497 is a single seed and equals the incumbent's
+single-seed value; the submitted 16-seed ensemble remains 0.60541.
 
 ## Files changed
 
