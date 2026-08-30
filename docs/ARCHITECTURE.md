@@ -295,6 +295,47 @@ not.
 
 ---
 
+## 6b. Closing the ensembling gap (2026-08-31)
+
+A gap worth naming because it changed what could honestly be claimed.
+
+The submitted result is a 16-seed ensemble. The agent's search space had ten
+axes — loss, negative sampling, history, multitask, model, temporal, training,
+data extras, sample weighting, regularisation — and **ensembling was not one of
+them**. So the largest measured gain available, about 1σ, was captured by a
+human running `agent.final_ensemble --seeds 16` after the agent had stopped.
+
+The uncomfortable version of the claim: *the agent found the configuration; a
+person performed the operation that turned it into the submitted number.*
+
+`agent/ensemble_experiment.py` makes it an action the loop schedules itself,
+once a configuration is CONFIRMED or has scored repeatedly — averaging seeds of
+a configuration that is not actually good just buys a precise estimate of a
+mediocre number.
+
+**The measurement is against the MEAN member, never the best one.** The best of
+k draws sits above the mean by construction, so comparing against it would
+report a gain even when ensembling does nothing.
+
+Verified end to end, reproducing the submitted number from scratch:
+
+```
+members  0.60497  0.60393  0.60449  0.60424  0.60479  0.60516
+mean     0.60460 +/- 0.00042   ->   ensemble 0.60541
+gain     +0.00081 (+1.02 sigma)     ->   CONFIRMED
+```
+
+That is the submitted 0.60541 to five decimals, from six seeds, by the agent's
+own action. The full path from configuration to submitted score is now inside
+the agent's action space.
+
+**What this does not change:** the autonomy classification below. Ensembling is
+a capability that was *given* to the agent, which is the definition of Level B.
+It makes the pipeline end-to-end autonomous; it does not make the agent an
+independent discoverer.
+
+---
+
 ## 7. Honest autonomy classification: **Level B — capability transfer**
 
 This is unchanged by the architecture work, and deliberately so.
