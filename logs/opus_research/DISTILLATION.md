@@ -140,3 +140,51 @@ Three separate results in this run turned on the same point:
 
 That sentence is carried into the agent's planning prompt, because it is the
 part most likely to generalise beyond this dataset.
+
+---
+
+## CAPABILITY: `validity.audit_comparison()` — added after the leakage audit
+
+**Research observation that motivated it.** The teacher run got the same class of
+question wrong three times, and each time the error was invisible in the score:
+a "+0.46 sigma" aggregation win that was the best of five rules on one split; a
+stopping epoch chosen by argmax over ~40 validation evaluations; and a *working*
+method left rejected because its guard compared it against a checkpoint selected
+on the same data. None of these are detectable by looking at a number.
+
+**The Opus decision that demonstrated it.** Ask, before believing anything: how
+many seeds, were the arms paired, how many variants were compared before this one
+won, and was the winner chosen on the data now scoring it?
+
+**Why it generalises.** It grades the *design* rather than the effect, so it
+transfers to any task. The load-bearing part is quantifying selection pressure:
+picking the best of five noisy comparisons yields about **+0.96 sigma** on this
+benchmark with no real effect — larger than the +0.46 sigma that was briefly
+believed. That one number kills the false positive on sight.
+
+**How the agent invokes it.** `validity.audit_comparison(delta, n_seeds, paired,
+n_candidates_compared, selected_on_eval_data, confirmed_out_of_sample)` →
+severity, verdict, and per-finding messages. Advisory, never blocking: it cannot
+know intent, so it reports what a number is worth rather than refusing an
+experiment.
+
+**Evidence it works.** Replayed against the three real cases: E4 → FATAL, E5 →
+WARN only, single-seed-at-any-size → FATAL.
+
+---
+
+## Autonomy classification — corrected
+
+| Demonstration | Level | Why |
+|---|---|---|
+| First self-test (checkpoint averaging) | **C — knowledge replay** | the prompt stated the finding, the effect size, the exact parameters and the caveat; every element of the "discovery" traces back to that text |
+| Feature discovery (`user_author_recent_long_view_rate`) | **B — capability transfer** | the agent was given a probe and a builder contract, not the feature. It invented the feature, wrote 129 lines implementing it, and the probe rejected it. The *idea* was its own; the *method* was transferred |
+| Feature declines citing the registry | **B — capability transfer** | it read accumulated negative knowledge and declined rather than re-running |
+
+The first row is the one I originally overclaimed. It is corrected in
+`AUTONOMY_AUDIT.md`, in the commit history, and here.
+
+**What honest Level-B transfer looks like:** the agent receives the *capability*
+and the *methodological principle*, never the answer. It must still decide the
+principle applies, choose the tool, and interpret the result. A stated result is
+replay; a method the agent must decide when to apply is transfer.
