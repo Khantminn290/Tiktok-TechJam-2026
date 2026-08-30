@@ -25,11 +25,25 @@ import data_tools  # noqa: E402
 MAX_TOOL_CALLS = 4          # per iteration
 SANDBOX_CACHE = os.path.join(RUNTIME, "cache_sandbox")
 
+# The earlier wording said only that profiling is not free and to prefer an
+# empty list. Measured consequence: across two clean autonomy runs the agent
+# requested ZERO tools in 10 of 10 iterations -- it was doing what it was told,
+# and so never ran the measurement that would show which part of the pipeline
+# was binding. The guidance is now symmetric: cheap when you do not know what is
+# binding, skip when you do.
 INSPECT_SCHEMA_HINT = """Respond with exactly ONE JSON object:
 {"requests": [{"tool": "<name>", "args": {...}}, ...]}
-Ask for at most %d measurements. Ask for NOTHING (an empty list) if the
-history already tells you what you need -- profiling is not free, and an
-iteration spent measuring is an iteration not spent testing an idea.""" % MAX_TOOL_CALLS
+Ask for at most %d measurements.
+
+WHEN TO MEASURE. A measurement is worth an iteration's fraction when you do not
+know WHICH PART of the pipeline is limiting the score -- for example when many
+different configurations keep landing within noise of each other, which means
+the thing that matters is not the option you are choosing. Most of these
+diagnostics are free (no training); only training_dynamics costs a run.
+
+WHEN NOT TO. Skip if the history already answers your question, or if you are
+confirming a specific hypothesis you can test directly. An empty list is a fine
+answer then.""" % MAX_TOOL_CALLS
 
 
 def build_inspect_prompt(menu, tree, experience_text: str) -> str:

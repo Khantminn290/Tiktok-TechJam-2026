@@ -1,20 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [DEAD_END] iter 1 -- A clean ablation of the incumbent's multitask choice by adding only the lightweight aux_click head o
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "aux_click", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6032, below the then-current best 0.6034 -- not worth repeating as-is.
-
-### [DEAD_END] iter 3 -- A clean loss ablation should reveal whether the incumbent's small lift over the FM baseline is actua
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6021, below the then-current best 0.6034 -- not worth repeating as-is.
-
-### [HELPED] iter 6 -- A clean ablation of the incumbent's training=default choice: keep the current best BPR+FM+mean-poole
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "mean_pool_positives", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6037 (previous best 0.6034).
-
-### [HELPED] iter 0 -- Exploit the strongest known recipe by adding the still-helpful recency-weighted positive-history fea
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6050 as the first scored node (no prior best to compare against).
-
-### [HELPED] iter 0 -- Probe the only remaining major standalone model family that may capture information missing from set
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6033 as the first scored node (no prior best to compare against).
-
 ### [HELPED] iter 1 -- A clean model ablation should swap the incumbent's gru4rec_seq for fm_numpy while holding the rest o
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6042 from 0.6033 (+0.00089 = +1.1 sigma).
 
@@ -41,4 +26,16 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [NEUTRAL] iter 4 -- Confirm the strongest history-based FM branch seen in the broader frontier: keeping the proven FM+BP
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "lr": 0.001, "epochs": 10, "patience": 3, "bs": 512} scored 0.6018 vs the then-best 0.6022 (-0.00041 = -0.5 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
+
+### [HELPED] iter 0 -- A more fully tuned DIN-style DeepFM run may slightly beat the best FM recipe by using candidate-cond
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "din_attention", "multitask": "none", "model": "deepfm_mlp", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 32, "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 3, "checkpoint_combine": true} scored 0.6022 as the first scored node (no prior best to compare against).
+
+### [HELPED] iter 1 -- A clean loss ablation of the current incumbent should swap only bpr_pairwise for pointwise_logloss w
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "din_attention", "multitask": "none", "model": "deepfm_mlp", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 32, "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 3, "checkpoint_combine": true} raised valid primary to 0.6043 from 0.6022 (+0.00213 = +2.7 sigma).
+
+### [DEAD_END] iter 3 -- A clean architecture ablation should switch the incumbent pointwise setup from DeepFM+DIN to plain n
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 32, "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 3, "checkpoint_combine": true} scored 0.6015 vs the then-best 0.6043 (-0.00284 = -3.6 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [NEUTRAL] iter 4 -- The current best single run may be slightly inflated by combining multiple checkpoints selected usin
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "din_attention", "multitask": "none", "model": "deepfm_mlp", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 32, "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 1, "checkpoint_combine": false} scored 0.6043 vs the then-best 0.6043 (+0.00000 = +0.0 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 
