@@ -3053,6 +3053,76 @@ def _profile_args(**kw):
     return ns
 
 
+def test_results_report_is_generated_not_retyped():
+    """Documentation must be derivable from artifacts, or it rots."""
+    print("\n[generated results report]")
+    from agent import results_report as RR
+
+    d = RR.build(run_tests=False)
+
+    # The metric must be read off the evaluator, which is authoritative where
+    # the brief's prose disagrees with it.
+    met = d["metric"]
+    check("the metric is read from the starter kit's evaluator",
+          met["source_file"].endswith("evaluate.py") and met["tier"] == RR.VERIFIED)
+    check("the positive label is long_view, taken from that file",
+          met["label"] == "long_view")
+    check("primary is the mean of GAUC and nDCG@5",
+          met["primary"] == "mean(GAUC, nDCG@5)")
+    check("the report says the evaluator wins over the brief's prose",
+          "authoritative" in met["note"] and "not modified" in met["note"])
+
+    # The incumbent is RECOMPUTED at generation time, not quoted.
+    #
+    # The dataset is chmod'd unreadable while an agent run's subprocess is
+    # executing, so generation during a live run legitimately cannot recompute.
+    # That must DEGRADE (report OPEN with the reason) rather than crash or, far
+    # worse, silently report the quoted value as if it had been verified.
+    inc = d["incumbent"]
+    locked = "PermissionError" in str(inc.get("verify_error") or "")
+    if locked:
+        check("generation during a live run degrades to OPEN, not a false VERIFIED",
+              inc["tier"] == RR.OPEN and "recomputed" not in inc,
+              "the dataset is locked by a running experiment")
+    else:
+        check("the incumbent is recomputed during generation",
+              inc.get("verified") is True and inc["tier"] == RR.VERIFIED,
+              str(inc.get("issues") or inc.get("verify_error")))
+        check("...and matches the reported value exactly",
+              inc["recomputed"]["primary"] == inc["reported"]["primary"] == 0.60541)
+
+    # The convergence threshold comes from the code in force, not from prose.
+    from agent.loop import EPSILON
+    check("the convergence threshold is read from the loop",
+          abs(d["convergence"]["epsilon"] - round(EPSILON, 6)) < 1e-9,
+          "a retyped threshold is exactly what went stale before")
+
+    # Tiers must be distinguishable, and an unmeasured thing must not claim to
+    # be verified.
+    check("an unexecuted harness is OPEN, not assumed passing",
+          d["harness"]["tier"] == RR.OPEN)
+    txt = RR.render(d)
+    check("the rendering explains its three tiers",
+          all(t in txt for t in (RR.VERIFIED, RR.OBSERVED, RR.OPEN)))
+    check("it states the dataset scope and hidden-test status",
+          "KuaiRand-Pure only" in txt and "hidden test evaluated" in txt.lower())
+    check("it states how a paired confirmation is counted",
+          "6 training executions" in txt)
+    check("it reports whether Path B completed end to end",
+          "end-to-end complete" in txt)
+    check("it reports the manual-intervention count",
+          "manual interventions" in txt.lower() or
+          d["latest_run"].get("tier") == RR.OPEN)
+
+    # Writing must be idempotent and self-contained.
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "R.md")
+        with open(out, "w") as fh:
+            fh.write(RR.render(d))
+        check("the report writes to a file from one command",
+              os.path.getsize(out) > 500)
+
+
 def test_competition_profile():
     """One explicit profile, and it must not overrule what the user asked for."""
     print("\n[competition profile]")
@@ -3281,6 +3351,32 @@ def test_return_shape_contract():
                               "v = res['scores_valid']\n"))
         check("indexing the returned dict passes the shape stage",
               r["failed_stage"] != P.RETURN_SHAPE)
+
+    # Stage 4: a missing required argument, the layer beneath return shapes.
+    with tempfile.TemporaryDirectory() as td2:
+        q = os.path.join(td2, "arity.py")
+        with open(q, "w") as fh:
+            fh.write("from research_tools import selection_rule_test\n"
+                     "out = selection_rule_test(pe, users, labels)\n")
+        r = P.preflight(q)
+        check("a missing required argument is caught before training",
+              not r["ok"] and r["failed_stage"] == P.CALL_ARITY,
+              "cost 73s of training to discover in a real run")
+        check("...and the message names the missing parameter",
+              "rules" in json.dumps(r["issues"]))
+        with open(q, "w") as fh:
+            fh.write("from research_tools import selection_rule_test\n"
+                     "a = selection_rule_test(pe, u, l, rules)\n"
+                     "b = selection_rule_test(pe, u, l, rules=r, n_splits=2)\n")
+        check("correct calls, positional or keyword, are not flagged",
+              P.preflight(q)["failed_stage"] != P.CALL_ARITY)
+        with open(q, "w") as fh:
+            fh.write("from research_tools import selection_rule_test\n"
+                     "a = selection_rule_test(*args, **kw)\n")
+        check("a call using *args/**kwargs is not falsely rejected",
+              P.preflight(q)["failed_stage"] != P.CALL_ARITY,
+              "a false rejection costs the agent an attempt for nothing")
+
 
 
 def test_contract_is_executable_from_generated_code():
@@ -4297,6 +4393,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,
               test_confirmation_defers_when_runs_exhausted,
               test_return_shape_contract,

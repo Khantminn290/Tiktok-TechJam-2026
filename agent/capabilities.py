@@ -84,6 +84,11 @@ class Capability:
     # Every Path B crash in the last run was a call site disagreeing with one of
     # these, so they are data rather than documentation.
     returns: dict = field(default_factory=dict)
+    # Machine-readable signature: {"required": [...], "optional": [...],
+    # "var_keyword": bool}. A call site missing a required argument is a
+    # TypeError that costs a full training run to discover -- observed as
+    # `selection_rule_test() missing 1 required positional argument: 'rules'`.
+    params: dict = field(default_factory=dict)
     example: str = ""               # correct usage, copy-pasteable
 
     @property
@@ -153,7 +158,8 @@ register(Capability(
                   "within-user variation returns an AUC near 0.5 that means "
                   "'no variation', not 'no signal'.",
     returns={"kind": "dict", "keys": ["auc", "n_users", "coverage"]},
-    example='d = get_within_user_auc("play_time_ms")'))
+    example='d = get_within_user_auc("play_time_ms")',
+    params={"required": ["feature"], "optional": ["split", "cache_dir"]}))
 
 register(Capability(
     name="get_user_history_stats", kind=MEASURE,
@@ -169,7 +175,8 @@ register(Capability(
                "data, not evidence that any particular mechanism will help.",
     failure_modes="Unknown split name raises KeyError.",
     returns={"kind": "dict", "keys": ["mean", "p50", "p90", "n_users"]},
-    example='d = get_user_history_stats("train")'))
+    example='d = get_user_history_stats("train")',
+    params={"required": [], "optional": ["split", "cache_dir"]}))
 
 register(Capability(
     name="get_label_rate_by_segment", kind=MEASURE,
@@ -184,7 +191,8 @@ register(Capability(
                "ranking gain; the metric ranks inside users, not across them.",
     failure_modes="Unknown feature raises KeyError; sparse bins give noisy rates.",
     returns={"kind": "dict", "keys": ["bins", "rates", "counts"]},
-    example='d = get_label_rate_by_segment("duration_ms")'))
+    example='d = get_label_rate_by_segment("duration_ms")',
+    params={"required": ["feature"], "optional": ["n_bins", "cache_dir"]}))
 
 register(Capability(
     name="get_feature_stats", kind=MEASURE,
@@ -199,7 +207,8 @@ register(Capability(
                "tolerance rather than testing equality.",
     failure_modes="Unknown feature raises KeyError.",
     returns={"kind": "dict", "keys": ["mean", "std", "min", "max", "missing"]},
-    example='d = get_feature_stats("duration_ms")'))
+    example='d = get_feature_stats("duration_ms")',
+    params={"required": ["feature"], "optional": ["split", "cache_dir"]}))
 
 register(Capability(
     name="hardcoded_constants", kind=INSPECT,
@@ -266,7 +275,8 @@ register(Capability(
     failure_modes="Passing scores for a single epoch makes the comparison "
                   "meaningless; shapes must line up with users/labels.",
     returns={"kind": "dict", "keys": ["reference_rule", "n_evaluations", "rules"]},
-    example='out = selection_rule_test(per_epoch, users, labels, rules)'))
+    example='out = selection_rule_test(per_epoch, users, labels, rules)',
+    params={"required": ["per_epoch_scores", "users", "labels", "rules"], "optional": ["n_splits", "seed"]}))
 
 register(Capability(
     name="free_recombination", kind=ENSEMBLE,
@@ -284,7 +294,8 @@ register(Capability(
                "a result; the resampled win-rate is the evidence.",
     failure_modes="Fewer members than `subset` silently shrinks the subset.",
     returns={"kind": "dict", "keys": ["reference_rule", "n_subsets", "rules"]},
-    example='out = free_recombination(members, users, labels, rules)'))
+    example='out = free_recombination(members, users, labels, rules)',
+    params={"required": ["member_scores", "users", "labels", "rules"], "optional": ["n_subsets", "subset", "seed"]}))
 
 register(Capability(
     name="audit_comparison", kind=CONFIRM,
@@ -303,7 +314,8 @@ register(Capability(
     failure_modes="Garbage in: if n_candidates_compared understates how many "
                   "things were really tried, the audit understates the risk.",
     returns={"kind": "dict", "keys": ["delta", "sigma", "severity", "verdict", "findings", "trustworthy"]},
-    example='a = audit_comparison(delta, n_seeds=5, paired=True)'))
+    example='a = audit_comparison(delta, n_seeds=5, paired=True)',
+    params={"required": ["delta"], "optional": ["n_seeds", "paired", "n_candidates_compared", "selected_on_eval_data", "seed_sd", "confirmed_out_of_sample"]}))
 
 register(Capability(
     name="selection_pressure", kind=CONFIRM,
@@ -319,7 +331,8 @@ register(Capability(
     validation="Assumes independent comparisons at the benchmark noise floor.",
     failure_modes="None; pure arithmetic.",
     returns={"kind": "dict", "keys": ["n", "expected_max_delta", "expected_max_sigma", "reading"]},
-    example='sp = selection_pressure(5)'))
+    example='sp = selection_pressure(5)',
+    params={"required": ["n_candidates_compared"], "optional": ["seed_sd"]}))
 
 register(Capability(
     name="pipeline_override", kind=MODIFY,
@@ -355,7 +368,8 @@ register(Capability(
     failure_modes="Needs the loaded splits and meta. Overriding 'multitask' "
                   "also rebuilds 'aux_tasks' for you.",
     returns={"kind": "tuple", "arity": 2, "names": ["cfg", "enc"]},
-    example="cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)"))
+    example="cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)",
+    params={"required": ["splits", "meta"], "optional": ["choices"], "var_keyword": True}))
 
 register(Capability(
     name="train_numpy_fm", kind=TRAIN,
@@ -396,7 +410,9 @@ register(Capability(
         "# per-epoch test vector -- test scores exist only in res['scores_test'].\n"
         "for epoch, valid_primary, valid_scores_at_epoch in "
         "cfg['capture_epoch_scores']:\n"
-        "    ...")))
+        "    ..."),
+    params={"required": ["cfg", "enc", "splits", "meta", "log"],
+            "optional": []}))
 
 register(Capability(
     name="capture_epoch_scores", kind=MEASURE,
@@ -441,7 +457,8 @@ register(Capability(
     failure_modes="Misaligned array lengths raise; scores must be in the cache's "
                   "row order.",
     returns={"kind": "dict", "keys": ["GAUC", "nDCG@5", "primary"]},
-    example='m = evaluate(list(users), labels, scores); print(m["primary"])'))
+    example='m = evaluate(list(users), labels, scores); print(m["primary"])',
+    params={"required": ["users", "labels", "scores"], "optional": []}))
 
 
 # ------------------------------------------------------------------ lookups ---

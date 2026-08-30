@@ -17,11 +17,18 @@ never pays for an import resolution:
     1. SYNTAX        ast.parse
     2. IMPORTS       every imported module is on the contract's allow-list
     3. CAPABILITY    every `module.attr` the script calls actually EXISTS,
-                     resolved by importing in a subprocess -- this is the
-                     stage that catches the failure above
-    4. CONFIG        menu_choices validate against the menu and its bounds
-    5. LEAKAGE       the existing static label-leakage review
-    6. SMOKE         the script's own import block executes cleanly
+                     resolved by importing in a subprocess
+    4. CALL_ARITY    every required argument is supplied
+    5. RETURN_SHAPE  the call site agrees with the declared return shape
+    6. CONFIG        menu_choices validate against the menu and its bounds
+    7. LEAKAGE       the existing static label-leakage review
+    8. SMOKE         the script's own import block executes cleanly
+
+Stages 4 and 5 were added because fixing stage 3 exposed the layer beneath it.
+Once the agent stopped calling functions that do not exist, it started calling
+existing ones wrongly: destructuring a dict as a tuple, unpacking a 3-tuple
+capture entry into 4 names, and omitting a required argument. Each cost a full
+training run -- 42s, 71s, 73s, 983s -- to learn something already written down.
 
 Everything returns STRUCTURED FEEDBACK. A preflight failure is not a dead end;
 it is a message telling the agent precisely what is wrong and what exists
@@ -48,8 +55,10 @@ from . import leakage_check  # noqa: E402
 
 SYNTAX, IMPORTS, CAPABILITY = "syntax", "imports", "capability"
 RETURN_SHAPE = "return_shape"
+CALL_ARITY = "call_arity"
 CONFIG, LEAKAGE, SMOKE = "config", "leakage", "smoke"
-STAGES = (SYNTAX, IMPORTS, CAPABILITY, RETURN_SHAPE, CONFIG, LEAKAGE, SMOKE)
+STAGES = (SYNTAX, IMPORTS, CAPABILITY, CALL_ARITY, RETURN_SHAPE,
+          CONFIG, LEAKAGE, SMOKE)
 
 # Modules generated code may import: the contract's own list, plus the ordinary
 # scientific-Python surface any experiment needs.
@@ -190,6 +199,53 @@ def _called_capability(node: ast.AST) -> str | None:
     if isinstance(f, ast.Name):
         return f.id
     return None
+
+
+def check_call_arity(tree: ast.AST) -> list:
+    """Is every required argument actually supplied?
+
+    The layer under return shapes, and the next one the agent hit once shapes
+    were fixed: `selection_rule_test() missing 1 required positional argument:
+    'rules'` — 73 seconds of training spent to learn a signature the contract
+    already knows.
+
+    Deliberately conservative. It only complains when a call supplies FEWER
+    arguments than there are required parameters and cannot be doing so through
+    *args/**kwargs, because a false rejection costs the agent an attempt for no
+    reason.
+    """
+    issues = []
+    known = caps.all_capabilities()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _called_capability(node)
+        cap = known.get(name) if name else None
+        if cap is None or not cap.params:
+            continue
+        required = list(cap.params.get("required") or [])
+        if not required:
+            continue
+        # Unpacking into the call could supply anything; say nothing.
+        if any(isinstance(a, ast.Starred) for a in node.args) or \
+           any(k.arg is None for k in node.keywords):
+            continue
+        supplied = len(node.args) + len({k.arg for k in node.keywords if k.arg})
+        if supplied >= len(required):
+            continue
+        given_kw = {k.arg for k in node.keywords if k.arg}
+        missing = [p for p in required[len(node.args):] if p not in given_kw]
+        if not missing:
+            continue
+        issues.append(Issue(
+            CALL_ARITY,
+            f"`{name}` requires {len(required)} argument(s) "
+            f"({', '.join(required)}); this call supplies {supplied}, missing "
+            f"{', '.join(missing)}", node.lineno,
+            (cap.example or f"Required: {', '.join(required)}."
+                            + (f" Optional: {', '.join(cap.params.get('optional') or [])}."
+                               if cap.params.get("optional") else ""))))
+    return issues
 
 
 def check_return_shapes(tree: ast.AST) -> list:
@@ -405,6 +461,8 @@ def preflight(code_path: str, menu_choices: dict | None = None, menu=None,
             issues = check_imports(tree)
         elif stage == CAPABILITY:
             issues = check_capabilities(tree)
+        elif stage == CALL_ARITY:
+            issues = check_call_arity(tree)
         elif stage == RETURN_SHAPE:
             issues = check_return_shapes(tree)
         elif stage == CONFIG:

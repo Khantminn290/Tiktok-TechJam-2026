@@ -103,8 +103,28 @@ python3 run_agent.py --fresh --max-spend-usd 15
 
 Whoever kicks off a scored run sets `--max-spend-usd` deliberately — the default is
 **$2**, low on purpose so nobody burns the shared key by accident. The run stops at
-whichever comes first: convergence (ε = 0.002 over N = 3 scored iterations), 50
-iterations, 6 hours, or the spend ceiling.
+whichever comes first: convergence (ε over N = 3 scored iterations), the
+iteration cap, the **training-run** cap, the wall-clock ceiling, or the spend
+ceiling.
+
+ε is **not** a hand-picked constant — it is calibrated to this benchmark's noise
+as the upward drift a running maximum shows by luck over N iterations
+(currently 0.00048, or 0.60σ; see `agent/validity.py::convergence_epsilon`).
+The earlier hard-coded 0.002 was 2.5σ and stopped runs on differences larger
+than anything the benchmark still had to offer.
+
+Note that an outer iteration is **not** one training run: a paired 3-seed
+confirmation is one node and six training executions, which is why there is a
+separate `--max-training-runs` cap. For a run that demonstrates the full
+system, use `--competition` (prints its fully resolved configuration before
+spending anything).
+
+Current figures — test count, incumbent, convergence threshold, latest run —
+are generated, not retyped:
+
+```bash
+python3 -m agent.results_report --run-tests    # writes RESULTS.md
+```
 
 Useful flags: `--fresh` (archive previous logs and start at iteration 0; without it
 the agent *resumes* the journal, which is how a crashed run continues),
