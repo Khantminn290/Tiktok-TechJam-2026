@@ -3053,6 +3053,79 @@ def _profile_args(**kw):
     return ns
 
 
+def test_streamlit_dashboard_executes():
+    """The dashboard must actually run, and must not be able to promote anything.
+
+    Streamlit serves its shell over HTTP whether or not the script works -- the
+    script only executes when a session connects -- so an HTTP 200 proves
+    nothing. This executes app.py top to bottom against a stub, which is what
+    catches a real API misuse.
+    """
+    print("\n[streamlit dashboard]")
+    app = os.path.join(_ROOT, "app.py")
+    if not os.path.exists(app):
+        check("app.py exists", False)
+        return
+
+    src = open(app).read()
+    check("app.py parses", bool(__import__("ast").parse(src)))
+
+    # It must not wire the one-shot hidden-test evaluation to a button.
+    check("the one-time hidden-test eval is NOT behind a button",
+          "--final-test-eval" not in src.split("st.code(")[0]
+          or "subprocess" not in src.split("--final-test-eval")[1][:400],
+          "that evaluation runs once for the whole project")
+    check("...and the app says so explicitly",
+          "runs exactly once" in src)
+
+    # Execute against a stub, in a subprocess so a stub cannot pollute pytest.
+    stub = (
+        "import sys, runpy\n"
+        "class Ctx:\n"
+        "    def __enter__(self): return self\n"
+        "    def __exit__(self, *a): return False\n"
+        "class N:\n"
+        "    def __getattr__(self, k):\n"
+        "        def fn(*a, **kw):\n"
+        "            if k == 'columns':\n"
+        "                n = a[0] if a else 1\n"
+        "                n = len(n) if isinstance(n,(list,tuple)) else n\n"
+        "                return [N() for _ in range(n)]\n"
+        "            if k == 'tabs': return [Ctx() for _ in a[0]]\n"
+        "            if k in ('container','expander','spinner','form'): return Ctx()\n"
+        "            if k == 'checkbox': return False\n"
+        "            if k == 'button': return False\n"
+        "            if k == 'selectbox': return a[1][0] if len(a)>1 and a[1] else None\n"
+        "            if k == 'number_input': return a[3] if len(a)>3 else 1\n"
+        "            return None\n"
+        "        return fn\n"
+        "    def __enter__(self): return self\n"
+        "    def __exit__(self, *a): return False\n"
+        "st = N(); st.session_state = {}\n"
+        "sys.modules['streamlit'] = st\n"
+        f"sys.path.insert(0, {_ROOT!r})\n"
+        f"runpy.run_path({app!r}, run_name='__main__')\n"
+        "print('OK')\n")
+    import subprocess as _sp
+    r = _sp.run([sys.executable, "-c", stub], capture_output=True,
+                text=True, cwd=_ROOT, timeout=300)
+    # A run costs money and holds the dataset lock. Starting one must take two
+    # deliberate actions, so nothing incidental -- a rerun, a stray truthy
+    # widget -- can launch a billed run.
+    run_tab = src.split("Start a run")[-1]
+    check("starting a run requires an explicit arming checkbox",
+          "arm_run" in run_tab and "armed" in run_tab)
+    check("...and the launch is guarded by BOTH the checkbox and the button",
+          "if go and armed and not running:" in run_tab)
+    check("...and every launch is written to a log with a timestamp",
+          "launched from the dashboard at" in run_tab,
+          "an unattributable run is the thing to avoid")
+
+    check("the dashboard executes top to bottom without error",
+          r.stdout.strip().endswith("OK"),
+          (r.stderr or "").strip().splitlines()[-1][:160] if r.stderr else "")
+
+
 def test_live_view_state():
     """The live view must show error RECOVERY, not just errors.
 
@@ -3249,8 +3322,18 @@ def test_results_report_is_generated_not_retyped():
     check("it reports the manual-intervention count",
           "manual interventions" in txt.lower() or
           d["latest_run"].get("tier") == RR.OPEN)
-    with open(os.path.join(_ROOT, "logs", "final_summary.json")) as fh:
-        provider_tokens = (json.load(fh).get("total_llm_tokens") or {}).get("input_plus_output")
+    # A summary may legitimately be absent: `--fresh` archives it, and a run
+    # that was interrupted never wrote one. That is a valid repo state, not a
+    # test failure -- the harness must not require a completed run to exist.
+    fs_path = os.path.join(_ROOT, "logs", "final_summary.json")
+    provider_tokens = None
+    if os.path.exists(fs_path):
+        try:
+            with open(fs_path) as fh:
+                provider_tokens = ((json.load(fh).get("total_llm_tokens") or {})
+                                   .get("input_plus_output"))
+        except (OSError, json.JSONDecodeError):
+            provider_tokens = None
     if provider_tokens is not None and d["latest_run"].get("tier") == RR.OBSERVED:
         check("the report prefers provider token totals over partial node sums",
               d["latest_run"]["llm_tokens_total"] == provider_tokens
@@ -4583,6 +4666,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,

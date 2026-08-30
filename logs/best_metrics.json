@@ -1,12 +1,23 @@
 {
-  "iteration_id": 9,
-  "menu_choices": {},
-  "hypothesis": "Confirm whether node 8's 0.60413 is partly a validation-selection artefact by replacing same-valid best-epoch choice with a held-out user-split-stable checkpoint rule inside the same FM+BPR+recency run. A small average over the best 2-3 epochs may help single-model GAUC/nDCG@5 if the rule is chosen for stability across validation-user splits rather than by the optimistic argmax on the same users it scores.",
-  "valid_metrics": {
-    "GAUC": 0.6722885728946539,
-    "nDCG@5": 0.538253811788693,
-    "primary": 0.6052711923416735
+  "iteration_id": 0,
+  "menu_choices": {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "none",
+    "multitask": "none",
+    "model": "gru4rec_seq",
+    "temporal": "none",
+    "training": "lower_lr_longer",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default"
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_009.py",
-  "timestamp": 1788105753.325165
+  "hypothesis": "A standalone GRU4Rec-style sequential model with BPR and a conservative longer/lower-LR schedule may modestly improve within-user ranking over the baseline FM by exploiting train-period order information in users' long_view histories, which set-based history mechanisms and plain FM cannot represent. This specifically tests the still-open standalone merit of sequence modelling rather than heterogeneous blending, whose failure does not rule out single-model gains.",
+  "valid_metrics": {
+    "GAUC": 0.6697579334026141,
+    "nDCG@5": 0.5363557345999813,
+    "primary": 0.6030568340012977
+  },
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
+  "timestamp": 1788110424.455013
 }

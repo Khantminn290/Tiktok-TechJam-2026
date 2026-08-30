@@ -1,8 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [CRASHED] iter 0 -- Because validation ranking lists are very short (median 4 impressions/user) while training users con
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} failed with unknown: Fix exactly this and resubmit. Do not change your hypothesis: the experiment has not been tested yet. -- Cause unclear. Reduce the experiment to the smallest version that still tests the hypothesis and re-run to localise the fault.
-
 ### [HELPED] iter 1 -- Root cause of the last failure was purely mechanical: the script imported `traceback`, which is not
 menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6029 as the first scored node (no prior best to compare against).
 
@@ -41,4 +38,7 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [NEUTRAL] iter 4 -- Confirm the stronger incumbent-style FM branch in a fresh single run: fm_numpy with BPR, recency-wei
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6032 (+0.00054 = +0.7 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
+
+### [HELPED] iter 0 -- A standalone GRU4Rec-style sequential model with BPR and a conservative longer/lower-LR schedule may
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6031 as the first scored node (no prior best to compare against).
 

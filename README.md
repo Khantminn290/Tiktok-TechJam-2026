@@ -39,6 +39,7 @@ git clone <this repo> && cd Tiktok-TechJam-2026
 
 # 1. dependencies
 python3 -m pip install numpy torch openai        # add `anthropic` only if PROVIDER=anthropic
+python3 -m pip install streamlit                 # optional: the dashboard (streamlit run app.py)
 
 # 2. dataset (~45 MB download, ~194 MB extracted; not committed)
 cd kuairand-starter-kit
@@ -137,8 +138,28 @@ python3 -m agent.report              # per-iteration history, spend, tokens, GPU
 python3 -m agent.results_report --run-tests   # regenerate RESULTS.md from artifacts
 ```
 
-**Watch it work, live.** Start this in a second terminal *before* kicking off a
-run and leave it open — it polls every 3s, so new decisions, errors and
+### The dashboard (easiest way to see all of this)
+
+```bash
+python3 -m pip install streamlit
+streamlit run app.py                 # http://localhost:8501
+```
+
+Five tabs, in the order someone actually evaluates this: **Live tree** (the
+search as it grows, with decisions, errors and recoveries), **Results** (the
+generated report, plus a button that re-verifies `0.60541` from the stored
+predictions), **Iterations** (every node, filterable, with the raw journal
+record and the script the agent wrote), **Judging criteria** (each competition
+criterion mapped to evidence in this repo, including what we are *not*
+claiming), and **Run** (start a run; the resolved configuration is shown first).
+
+The dashboard is a window, not a decision-maker: evidence tiers are recomputed
+there, so a single-seed result displays as PRELIMINARY however good it looks,
+and the one-time hidden-test evaluation is deliberately **not** wired to a
+button.
+
+**Or watch it in a terminal-free page.** Start this *before* kicking off a run
+and leave it open — it polls every 3s, so new decisions, errors and
 recoveries appear as they happen. This is the view to screen-record:
 
 ```bash
@@ -273,6 +294,7 @@ agent/
   make_submission.py         submission CSV, ensembling, one-time test eval
   report.py                  journal -> human-readable report
   live.py                    live view for a running agent (localhost:8000)
+app.py                       Streamlit dashboard (streamlit run app.py)
   viz.py                     journal -> static experiment-tree page
   results_report.py          artifacts -> RESULTS.md, tiered VERIFIED/OBSERVED/OPEN
   capabilities.py            the capability contract (what/where/cost/returns)
