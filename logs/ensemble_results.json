@@ -89,5 +89,122 @@
     "valid_rows": 124909
   },
   "evaluator": "kuairand-starter-kit/evaluate.py (never modified)",
-  "hidden_test_used": false
+  "hidden_test_used": false,
+  "provenance": {
+    "schema": "provenance/1",
+    "stamped_utc": "2026-08-30T07:27:48Z",
+    "git": {
+      "sha": "024238f2b9ec52f2b66976fab592772fd80370d7",
+      "short_sha": "024238f2b9ec",
+      "branch": "opus-research-agent",
+      "dirty": true,
+      "dirty_files": 2
+    },
+    "data": {
+      "available": true,
+      "sha256": "60fa8bc44d1e3d59",
+      "splits": {
+        "train": {
+          "rows": 1141112,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        },
+        "valid": {
+          "rows": 124909,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        },
+        "test": {
+          "rows": 170588,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        }
+      },
+      "dataset": "KuaiRand-Pure"
+    },
+    "config_sha": "81de49d8b7af7421",
+    "seeds": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "code": {
+      "agent/final_ensemble.py": "9820a3ce2b696609",
+      "agent/ensemble.py": "ee3e8e4433c4ae07",
+      "runtime/train_lib.py": "9cf4dd7adc0fb108"
+    },
+    "evaluation": "kuairand-starter-kit/evaluate.py on the valid split",
+    "dataset_scope": "KuaiRand-Pure only",
+    "aggregation": "rank_normalise_then_mean",
+    "members_dir": "logs/final_ensemble",
+    "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+    "verified": "recomputed from stored member predictions; metrics matched the reported values exactly"
+  }
 }

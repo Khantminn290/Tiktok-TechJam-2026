@@ -3004,6 +3004,398 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_capability_contract():
+    """One registry, and it must not be able to lie about itself."""
+    print("\n[capability contract]")
+    from agent import capabilities as C
+
+    caps = C.all_capabilities()
+    check("every capability declares a known kind",
+          all(c.kind in C.KINDS for c in caps.values()))
+    check("every capability declares at least one invocation context",
+          all(c.contexts for c in caps.values()))
+    check("every import-invoked capability names its module",
+          all(c.module for c in caps.values() if c.invoked_by_import))
+    check("a capability available without an import says how it IS invoked",
+          all("menu_choices" in c.inputs or "menu_choices" in c.purpose
+              for c in caps.values() if c.importable and not c.invoked_by_import),
+          "config-set capabilities must not imply a module that does not exist")
+    check("every capability states its failure modes and validation needs",
+          all(c.failure_modes and c.validation for c in caps.values()))
+
+    # The defect this whole subsystem exists to fix.
+    orch = C.orchestration_only()
+    check("orchestration-only capabilities exist and are identified",
+          "training_dynamics" in orch and "hardcoded_constants" in orch)
+    check("each orchestration-only capability says what to use INSTEAD",
+          all(caps[n].instead for n in orch),
+          "an unusable tool with no alternative is a dead end, not a contract")
+
+    # A capability advertised as importable must ACTUALLY import. This is the
+    # test that would have failed before the fix, and the reason a fake shim is
+    # not an acceptable answer.
+    import importlib
+    import sys as _s
+    _rt = os.path.join(_ROOT, "runtime")
+    _kit = os.path.join(_ROOT, "kuairand-starter-kit")
+    for p in (_rt, _kit):
+        if p not in _s.path:
+            _s.path.insert(0, p)
+    missing = []
+    for name, c in caps.items():
+        if not c.invoked_by_import:
+            continue
+        try:
+            mod = importlib.import_module(c.module)
+        except Exception as e:                       # noqa: BLE001
+            missing.append(f"{c.module} ({type(e).__name__})")
+            continue
+        if not hasattr(mod, name):
+            missing.append(f"{c.module}.{name}")
+    check("every capability advertised as importable really is importable",
+          not missing, f"missing: {missing}" if missing else "all resolve")
+
+    # ...and the converse: nothing orchestration-only may be reachable from the
+    # generated-code surface, or the distinction is decorative.
+    import research_tools as RT
+    leaked = [n for n in orch if hasattr(RT, n)]
+    check("orchestration-only capabilities are NOT exposed in research_tools",
+          not leaked, f"leaked: {leaked}" if leaked else "none")
+
+    txt = C.render_for_prompt()
+    check("the prompt rendering names the orchestration-only boundary",
+          "ORCHESTRATION-ONLY" in txt and "training_dynamics" in txt)
+    check("the contract is serialisable as data",
+          isinstance(json.loads(C.as_json()), dict))
+
+    # Purposes are agent-visible: a purpose containing a research OUTCOME would
+    # turn the tool list into an answer key.
+    import re as _re
+    leaky = [n for n, c in caps.items()
+             if _re.search(r"[+-]?\d+\.\d+\s*sigma|\+0\.\d{4}", c.purpose)]
+    check("no capability PURPOSE leaks a measured research outcome",
+          not leaky, f"leaky: {leaky}" if leaky else "clean")
+
+
+def test_preflight():
+    """Catch the broken script before it costs a training run."""
+    print("\n[preflight]")
+    from agent import preflight as P
+
+    with tempfile.TemporaryDirectory() as td:
+        def write(name, src):
+            p = os.path.join(td, name)
+            with open(p, "w") as fh:
+                fh.write(src)
+            return p
+
+        # 1. syntax
+        r = P.preflight(write("bad.py", "def f(:\n    pass\n"))
+        check("syntax errors are caught", not r["ok"] and r["failed_stage"] == P.SYNTAX)
+        check("a syntax failure spends no training time",
+              r["spent_training_time"] is False)
+
+        # 2. imports outside the allow-list
+        r = P.preflight(write("imp.py", "import requests\n"))
+        check("a module outside the allow-list is rejected",
+              not r["ok"] and r["failed_stage"] == P.IMPORTS)
+        r = P.preflight(write("agentimp.py", "from agent import pipeline_lab\n"))
+        check("importing the agent package from generated code is rejected",
+              not r["ok"] and r["failed_stage"] == P.IMPORTS)
+        check("...and the message explains that runtime/ is the surface",
+              "research_tools" in json.dumps(r["issues"]))
+
+        # 3. THE MEASURED FAILURE: an orchestration-only capability
+        r = P.preflight(write("orch.py",
+                              "import train_lib\n"
+                              "d = train_lib.training_dynamics(max_epochs=40)\n"))
+        check("calling an orchestration-only capability is caught",
+              not r["ok"] and r["failed_stage"] == P.CAPABILITY)
+        check("...and the feedback names the mechanism to use instead",
+              "capture_epoch_scores" in r["feedback"],
+              "the repair must be actionable, not just a refusal")
+
+        # 4. a plain non-existent attribute, with a suggestion
+        r = P.preflight(write("typo.py",
+                              "import train_lib\nx = train_lib.train_numpy_fmm\n"))
+        check("a misspelled API is caught before running",
+              not r["ok"] and r["failed_stage"] == P.CAPABILITY)
+        check("...and a close match is suggested",
+              "train_numpy_fm" in json.dumps(r["issues"]))
+
+        # 5. the reference solution must survive every stage
+        r = P.preflight(os.path.join(_ROOT, "runtime", "seed_solution.py"))
+        check("the reference solution passes all preflight stages",
+              r["ok"] and set(r["stages_run"]) == set(P.STAGES),
+              f"stages={r['stages_run']} issues={r['issues']}")
+
+        # 6. cheapest-first: an early failure must not pay for later stages
+        r = P.preflight(write("bad2.py", "def f(:\n"))
+        check("stages stop at the first failure",
+              r["stages_run"] == [P.SYNTAX])
+
+    # 7. config validation really validates
+    m = Menu(MENU_PATH)
+    bad = m.default_choices()
+    bad["model"] = "not_a_real_model"
+    r = P.check_config(bad, m)
+    check("an invalid configuration is caught by preflight", bool(r))
+
+
+def test_budget_accounting():
+    """A rejected script is not a spent experiment."""
+    print("\n[budget accounting]")
+    from agent import budget as B
+
+    def node(status, trace=None, wall=0.0, metrics=None):
+        return Node(0, None, "draft", {}, "hypothesis", status, metrics, trace,
+                    100, wall, time.time(), "")
+
+    pre = node("error", "PREFLIGHT REJECTED THIS SCRIPT — never executed", 0.0)
+    crash = node("error", "Traceback ... IndexError", 42.0)
+    ok = node("success", None, 60.0, {"primary": 0.604})
+
+    check("a preflight rejection does not consume budget",
+          not B.consumes_budget(pre))
+    check("a crash that actually ran DOES consume budget",
+          B.consumes_budget(crash),
+          "the compute is gone; pretending otherwise would overrun the budget")
+    check("a completed experiment consumes budget", B.consumes_budget(ok))
+
+    c = B.count([pre, pre, crash, ok])
+    check("counts separate rejections from experiments",
+          c["iterations_consumed"] == 2 and c["preflight_rejections"] == 2
+          and c["experiments_completed"] == 1 and c["experiments_crashed"] == 1)
+
+    check("consecutive preflight failures are tracked",
+          B.consecutive_preflight_failures([ok, pre, pre]) == 2
+          and B.consecutive_preflight_failures([pre, ok]) == 0)
+    check("free retries are capped so a stuck agent cannot loop forever",
+          B.MAX_PREFLIGHT_RETRIES >= 1 and B.MAX_PREFLIGHT_RETRIES <= 5)
+
+
+def test_evidence_states():
+    """One seed can never become a confirmed discovery."""
+    print("\n[evidence calibration]")
+    from agent import evidence as E
+
+    # THE INVARIANT. Swept across effect sizes so it cannot pass by luck.
+    ceilings = {E.classify(delta=d, n_seeds=1)["state"]
+                for d in (0.0001, 0.0009, 0.005, 0.05)}
+    check("a single-seed result is PRELIMINARY at every effect size",
+          ceilings == {E.PRELIMINARY}, f"got {ceilings}")
+    check("...and PRELIMINARY is explicitly not actionable",
+          not E.classify(delta=0.05, n_seeds=1)["actionable"])
+
+    check("a preliminary result names the confirmation it needs",
+          "PAIRED" in E.classify(delta=0.0009, n_seeds=1)["next_step"])
+
+    # The real tau episode, before and after.
+    before = E.classify(delta=+0.0009, n_seeds=1)
+    after = E.classify(delta=-0.00001, n_seeds=5, paired=True)
+    check("the tau hypothesis was PRELIMINARY when adopted",
+          before["state"] == E.PRELIMINARY)
+    check("and REJECTED once properly measured",
+          after["state"] == E.REJECTED)
+
+    check("a properly paired real effect can reach CONFIRMED",
+          E.classify(delta=0.0012, n_seeds=8, paired=True)["state"] == E.CONFIRMED)
+    check("selection on the scoring split blocks confirmation",
+          E.classify(delta=0.0012, n_seeds=8, paired=True,
+                     n_candidates_compared=5,
+                     selected_on_eval_data=True)["state"] == E.UNCONFIRMED)
+    check("a best-of-n gain inside the selection floor is not confirmed",
+          E.classify(delta=0.0004, n_seeds=5, paired=True,
+                     n_candidates_compared=8)["state"] == E.UNCONFIRMED)
+    check("an effect under half the noise floor is REJECTED, not 'small'",
+          E.classify(delta=0.0002, n_seeds=6, paired=True)["state"] == E.REJECTED)
+    check("a cheap probe is PROBED, never CONFIRMED",
+          E.classify(delta=0.002, n_seeds=3, trained=False)["state"] == E.PROBED)
+    check("'works alone, adds nothing here' is expressible as REDUNDANT",
+          E.classify(delta=0.002, n_seeds=8, paired=True,
+                     redundant_with="the 16-seed ensemble")["state"] == E.REDUNDANT)
+
+    # Required seeds must fall out of the noise, not a constant.
+    check("smaller effects require more seeds",
+          E.seeds_needed(0.0004) > E.seeds_needed(0.004))
+    check("CONFIRMED is the only state that authorises a submission change",
+          E.ACTIONABLE == (E.CONFIRMED,))
+
+
+def test_research_memory():
+    """Scoped claims, weakened by counterevidence rather than deleted."""
+    print("\n[research memory]")
+    from agent import knowledge as K
+
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "mem.jsonl")
+        c = K.record(K.make_claim(
+            claim="X dilutes rather than helps",
+            evidence="rejected by its guard on one config",
+            scope="one training configuration whose curve declines early",
+            scope_tags={"epoch_curve": "monotonic_decline"},
+            confidence=K.HIGH,
+            what_would_change_this="a config with several comparable epochs"),
+            path=store)
+        check("a claim records scope, evidence and what would change it",
+              c["scope"] and c["evidence"] and c["what_would_change_this"])
+        check("a new claim starts OPEN", c["status"] == K.OPEN)
+
+        # Counterevidence must WEAKEN, not delete.
+        u = K.add_counterevidence(c["id"], "held-out measurement says otherwise",
+                                  scope="held-out split", path=store)
+        check("counterevidence downgrades confidence",
+              u["confidence"] == K.MEDIUM)
+        check("counterevidence marks the claim CONTESTED",
+              u["status"] == K.CONTESTED)
+        check("the original evidence survives alongside the objection",
+              u["evidence"] and len(u["counterevidence"]) == 1,
+              "a record that must be deleted to be corrected is not a record")
+        check("a contested claim is not offered as actionable",
+              not [x for x in K.applicable(path=store) if x["id"] == c["id"]])
+
+        # Scope must actually gate applicability.
+        check("a claim does not apply outside the scope it was measured in",
+              not K.in_scope(u, {"epoch_curve": "several_comparable_epochs"}))
+        check("...and does apply inside it",
+              K.in_scope(u, {"epoch_curve": "monotonic_decline"}))
+        check("an unrelated context does not silently exclude a claim",
+              K.in_scope(u, {"model": "fm_numpy"}))
+
+        txt = K.render_for_prompt(context={"epoch_curve": "several_comparable_epochs"},
+                                  path=store)
+        check("the prompt marks an out-of-scope claim as out of scope",
+              "OUT OF SCOPE" in txt)
+        check("the prompt shows scope for every claim it renders",
+              "scope:" in txt)
+
+        # Superseding keeps history.
+        c2 = K.record(K.make_claim(claim="X helps when curves are flat",
+                                   evidence="measured", scope="flat curves"),
+                      path=store)
+        K.supersede(c["id"], c2["id"], path=store)
+        rec = [x for x in K.load(store) if x["id"] == c["id"]][0]
+        check("a superseded claim is marked, not removed",
+              rec["status"] == K.SUPERSEDED and rec["superseded_by"] == c2["id"])
+
+
+def test_redundancy_reasoning():
+    """Two interventions can each work and still not add up."""
+    print("\n[redundancy reasoning]")
+    import numpy as np
+    from research_tools import redundancy
+
+    rng = np.random.default_rng(0)
+    shared = rng.normal(size=500)
+    check("interventions moving the same rows are REDUNDANT",
+          redundancy(shared, shared * 0.9 + rng.normal(scale=0.05, size=500)
+                     )["verdict"] == "REDUNDANT")
+    check("interventions moving different rows are COMPLEMENTARY",
+          redundancy(rng.normal(size=500),
+                     rng.normal(size=500))["verdict"] == "COMPLEMENTARY")
+    check("interventions that cancel are reported as OPPOSED",
+          redundancy(shared, -shared)["verdict"] == "OPPOSED")
+    check("an intervention that changed nothing is unusable, not 'independent'",
+          not redundancy(np.zeros(50), rng.normal(size=50))["usable"])
+    check("it warns against assuming solo gains add",
+          "do not assume" in redundancy(shared, shared)["reading"].lower())
+    # It must be a general question, not a rule about specific interventions.
+    src = open(os.path.join(_ROOT, "runtime", "research_tools.py")).read()
+    body = src[src.index("def redundancy"):src.index("__all__")]
+    check("the implementation names no specific intervention",
+          not any(w in body for w in ("checkpoint", "snapshot", "ensemble_k",
+                                      "tau", "hist_")),
+          "a hard-coded rule about one pair of interventions is not reasoning")
+
+
+def test_failure_repeat_detection():
+    """Do not retry the same broken action."""
+    print("\n[failure recovery]")
+    from agent.failure import classify, fingerprint, repair_brief, repeat_count
+
+    t1 = "Traceback\nAttributeError: module 'train_lib' has no attribute 'training_dynamics'"
+    t2 = "Traceback\nAttributeError: module 'train_lib' has no attribute 'training_dynamics'"
+    t3 = "Traceback\nIndexError: index 5432 is out of bounds for axis 0"
+    t4 = "Traceback\nIndexError: index 991 is out of bounds for axis 0"
+
+    f1, f3 = fingerprint(classify(t1), t1), fingerprint(classify(t3), t3)
+    check("the same fault twice produces the same fingerprint",
+          f1 == fingerprint(classify(t2), t2))
+    check("differing indices do not disguise the same fault",
+          f3 == fingerprint(classify(t4), t4))
+    check("different faults get different fingerprints", f1 != f3)
+
+    prev = [(classify(t1)["class"], t1), (classify(t2)["class"], t2)]
+    check("repeats are counted", repeat_count(f1, prev) == 2)
+    check("an unrelated failure is not counted as a repeat",
+          repeat_count(f3, prev) == 0)
+
+    brief = repair_brief(classify(t1), 1, 2, repeats=2)
+    check("a repeated failure tells the model the previous fix did not work",
+          "ALREADY HIT THIS EXACT FAILURE" in brief)
+    check("...and instructs it to change approach rather than retry",
+          "Do not re-apply" in brief)
+    check("a first-time failure gets no repeat warning",
+          "ALREADY HIT" not in repair_brief(classify(t1), 1, 2, repeats=0))
+
+
+def test_provenance():
+    """No result without provenance."""
+    print("\n[provenance]")
+    from agent import provenance as PR
+
+    p = PR.stamp(config={"model": "fm_numpy"}, seeds=[0, 1],
+                 evaluation="evaluate.py on valid")
+    check("a stamp records the commit", bool((p.get("git") or {}).get("sha")))
+    check("a stamp records the branch", bool((p.get("git") or {}).get("branch")))
+    check("a stamp records a dataset fingerprint",
+          bool((p.get("data") or {}).get("sha256")))
+    check("a stamp records dataset row counts",
+          bool((p.get("data") or {}).get("splits")))
+    check("a stamp records the config fingerprint and seeds",
+          p.get("config_sha") and p.get("seeds") == [0, 1])
+    check("a stamp records the evaluation protocol", bool(p.get("evaluation")))
+    check("a dirty tree is reported, not hidden",
+          (p.get("git") or {}).get("dirty") is not None,
+          "a SHA from a dirty tree does not identify the code that ran")
+    check("the dataset scope is recorded as KuaiRand-Pure only",
+          "KuaiRand-Pure" in p.get("dataset_scope", ""))
+
+    check("config fingerprints are order-independent",
+          PR.config_fingerprint({"a": 1, "b": 2})
+          == PR.config_fingerprint({"b": 2, "a": 1}))
+    check("different configs fingerprint differently",
+          PR.config_fingerprint({"a": 1}) != PR.config_fingerprint({"a": 2}))
+
+    # The submitted artifact must actually carry one.
+    res = os.path.join(_ROOT, "logs", "ensemble_results.json")
+    with open(res) as fh:
+        rec = json.load(fh)
+    check("the submitted ensemble carries a provenance block",
+          bool(rec.get("provenance")))
+    check("...including the aggregation rule that produced the number",
+          bool((rec.get("provenance") or {}).get("aggregation")),
+          "the file recorded members and metrics but not how they were combined")
+
+
+def test_incumbent_still_reproduces():
+    """The protected result must follow from the artifacts on disk."""
+    print("\n[incumbent protection]")
+    from agent import verify_incumbent as VI
+
+    v = VI.verify()
+    check("all 16 ensemble members are present", v.get("k") == 16,
+          f"found {v.get('k')}")
+    check("the reported metrics recompute exactly from stored predictions",
+          v["ok"], "; ".join(v.get("issues", [])))
+    for key in ("primary", "GAUC", "nDCG@5"):
+        check(f"  {key} matches",
+              v["recomputed"].get(key) == v["reported"].get(key),
+              f"{v['recomputed'].get(key)} vs {v['reported'].get(key)}")
+    check("the incumbent is still the expected 0.60541",
+          v["recomputed"].get("primary") == 0.60541)
+
+
 def test_autonomy_eval():
     """The independent-discovery scorer must not flatter the agent.
 
@@ -3164,6 +3556,10 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_capability_contract, test_preflight, test_budget_accounting,
+              test_evidence_states, test_research_memory,
+              test_redundancy_reasoning, test_failure_repeat_detection,
+              test_provenance, test_incumbent_still_reproduces,
               test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

@@ -43,6 +43,7 @@ import data_boundary  # noqa: E402
 
 sys.path.insert(0, ROOT)
 from agent import leakage_check  # noqa: E402
+from agent import preflight  # noqa: E402
 
 # ---- the real, labeled data the generated subprocess must never reach ----
 REAL_DATA_DIR = os.path.join(KIT_DIR, "KuaiRand-Pure", "data")
@@ -198,6 +199,21 @@ def run_solution(code: str, code_path: str, menu_choices: dict, run_dir: str,
     os.makedirs(run_dir, exist_ok=True)
     with open(code_path, "w") as fh:
         fh.write(code)
+
+    # --- preflight: is this script even runnable? ---
+    # Cheapest-first validation of syntax, imports, capability references and
+    # configuration. This is what stops the failure that dominated the clean
+    # evaluation -- calling a capability that does not exist in generated code --
+    # from costing a full training run to discover. Leakage is skipped here and
+    # left to the dedicated review below, which is the enforcement path.
+    pre = preflight.preflight(code_path, menu_choices=menu_choices, menu=None,
+                              skip=(preflight.LEAKAGE,))
+    if not pre["ok"]:
+        return ExecResult(False, error_trace=(
+            "PREFLIGHT REJECTED THIS SCRIPT — it was never executed, so no "
+            "training time was spent and the hypothesis remains untested.\n\n"
+            + pre["feedback"]),
+            wall_clock_seconds=0.0, run_dir=run_dir)
 
     # --- pre-execution leakage review (static, never executes the code) ---
     # The sandbox stops a script READING test labels; it cannot stop a script

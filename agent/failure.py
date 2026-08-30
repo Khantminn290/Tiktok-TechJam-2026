@@ -159,7 +159,34 @@ def _first_error_line(trace: str) -> str:
     return (trace or "").strip()[:200] or "no trace captured"
 
 
-def repair_brief(cls_info: dict, attempt: int, max_attempts: int) -> str:
+def fingerprint(cls_info: dict, trace: str | None = None) -> str:
+    """A stable identity for "this exact failure, again".
+
+    Class alone is too coarse -- two unrelated api_misuse faults would collide
+    and a genuine second problem would be dismissed as a repeat. The first error
+    line is what actually distinguishes them, so the fingerprint is the pair.
+    """
+    line = _first_error_line(trace or "")
+    # Numbers inside a message (indices, sizes, addresses) vary between runs of
+    # the SAME fault, so they are normalised away before hashing.
+    norm = re.sub(r"\d+", "#", line)
+    return f"{cls_info.get('class', UNKNOWN)}::{norm[:160]}"
+
+
+def repeat_count(fp: str, previous: list) -> int:
+    """How many times this exact failure already happened in `previous`.
+
+    `previous` is a list of (class, trace) pairs, oldest first.
+    """
+    n = 0
+    for cls, trace in previous:
+        if fingerprint({"class": cls}, trace) == fp:
+            n += 1
+    return n
+
+
+def repair_brief(cls_info: dict, attempt: int, max_attempts: int,
+                 repeats: int = 0) -> str:
     """The compact block handed to the model on a debug attempt.
 
     Deliberately much smaller than a planning prompt: repair needs the fault
@@ -174,6 +201,19 @@ def repair_brief(cls_info: dict, attempt: int, max_attempts: int) -> str:
                  "experiment must be made materially cheaper or abandoned.")
     if not cls_info.get("retry_worthwhile"):
         L.append("This should NOT be retried as-is.")
+    if repeats >= 1:
+        # The run-3 pattern: crash, diagnose, apply a fix that does not address
+        # the cause, crash identically. Saying so explicitly is the cheapest
+        # intervention available, and it is information the model does not
+        # otherwise have -- each repair prompt is built fresh.
+        L.append(
+            f"YOU HAVE ALREADY HIT THIS EXACT FAILURE {repeats} TIME(S) IN THIS "
+            f"RUN. The previous repair did not address the cause, so repeating "
+            f"that approach will fail again. Do not re-apply it. Either state a "
+            f"DIFFERENT root cause and fix that, or abandon this implementation "
+            f"path and achieve the same measurement a simpler way -- if the "
+            f"capability you are reaching for is orchestration-only, the "
+            f"capability contract names what to use instead.")
     L.append("Apply the SMALLEST change that addresses the fault. Do not "
              "redesign the experiment: the hypothesis has not been tested yet, "
              "and changing it now would waste the attempt already spent.")

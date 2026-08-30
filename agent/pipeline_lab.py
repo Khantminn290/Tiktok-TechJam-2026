@@ -146,87 +146,14 @@ def hardcoded_constants(path: str | None = None) -> list:
     return out
 
 
-def selection_rule_test(per_epoch_scores, users, labels, rules: dict,
-                        n_splits: int = 4, seed: int = 7) -> dict:
-    """Does a SELECTION RULE generalise, or is it fitting the data that scored it?
-
-    Choose on one half of the users, score on the other, both directions, over
-    several independent splits. `rules` maps name -> fn(per_epoch_primaries,
-    per_epoch_scores) -> chosen score vector.
-
-    This is the capability that overturned a rejected idea. Snapshot ensembling
-    had been refused by a guard comparing it against the best single checkpoint
-    on the SAME validation set that selected that checkpoint. Measured this way
-    instead, averaging the top-5 checkpoints beat argmax by +0.87 sigma with
-    t=5.54 over 22/24 wins.
-    """
-    from evaluate import evaluate
-    users = np.asarray(users)
-    labels = np.asarray(labels)
-    uniq = np.unique(users)
-    E = np.asarray(per_epoch_scores)          # (seeds, epochs, rows)
-
-    def sc(mask, s):
-        return evaluate(list(users[mask]), labels[mask], s[mask])["primary"]
-
-    deltas: dict = {n: [] for n in rules}
-    ref = list(rules)[0]
-    rng = np.random.default_rng(seed)
-    for _ in range(n_splits):
-        perm = rng.permutation(len(uniq))
-        A = set(uniq[perm[:len(uniq) // 2]])
-        mA = np.array([u in A for u in users])
-        for mc, me in ((mA, ~mA), (~mA, mA)):
-            for si in range(E.shape[0]):
-                pc = np.array([sc(mc, E[si, e]) for e in range(E.shape[1])])
-                chosen = {n: sc(me, fn(pc, E[si])) for n, fn in rules.items()}
-                for n in rules:
-                    deltas[n].append(chosen[n] - chosen[ref])
-    out = {"reference_rule": ref, "n_evaluations": len(deltas[ref]), "rules": {}}
-    for n, d in deltas.items():
-        if n == ref:
-            continue
-        m, sd = statistics.mean(d), statistics.pstdev(d)
-        t = m / (sd / len(d) ** 0.5) if sd > 0 else 0.0
-        out["rules"][n] = {
-            "mean_delta": round(m, 5), "sigma": round(m / NOISE, 2),
-            "t": round(t, 2), "wins": sum(1 for x in d if x > 0), "n": len(d),
-            "generalises": bool(m >= NOISE / 2 and t > 2.0)}
-    return out
-
-
-def free_recombination(member_scores, users, labels, rules: dict,
-                       n_subsets: int = 24, subset: int = 8,
-                       seed: int = 0) -> dict:
-    """Compare aggregation rules over stored predictions -- no training at all.
-
-    Resamples member subsets so a rule has to win repeatedly rather than once.
-    Refuted a +0.46 sigma median-aggregation 'improvement' in seconds: over 24
-    subsets it won 10/24 at -0.06 sigma, i.e. it was the best of five rules on
-    one validation set.
-    """
-    from evaluate import evaluate
-    M = np.asarray(member_scores)
-    ref = list(rules)[0]
-    rng = np.random.default_rng(seed)
-    d: dict = {n: [] for n in rules}
-    for _ in range(n_subsets):
-        idx = rng.choice(len(M), min(subset, len(M)), replace=False)
-        sub = M[idx]
-        base = evaluate(list(users), labels, rules[ref](sub))["primary"]
-        for n, fn in rules.items():
-            d[n].append(evaluate(list(users), labels, fn(sub))["primary"] - base)
-    out = {"reference_rule": ref, "n_subsets": n_subsets, "rules": {}}
-    for n, v in d.items():
-        if n == ref:
-            continue
-        m, sd = statistics.mean(v), statistics.pstdev(v)
-        t = m / (sd / len(v) ** 0.5) if sd > 0 else 0.0
-        out["rules"][n] = {"mean_delta": round(m, 5), "sigma": round(m / NOISE, 2),
-                           "t": round(t, 2),
-                           "wins": sum(1 for x in v if x > 0), "n": len(v),
-                           "beats_reference": bool(m >= NOISE / 2 and t > 2.0)}
-    return out
+# selection_rule_test and free_recombination are NOT defined here. They live in
+# runtime/research_tools.py, which is the module generated experiment code can
+# import, and are re-exported so orchestrator callers keep the same name. A
+# second copy here is exactly how the agent's tools and the agent's scripts
+# would drift apart.
+from research_tools import (  # noqa: E402
+    free_recombination, redundancy, selection_rule_test,
+)
 
 
 def render_for_prompt(reveal_findings: bool = False) -> str:

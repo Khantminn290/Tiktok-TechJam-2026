@@ -1,12 +1,18 @@
 """The outer loop: decide_action -> build_prompt -> LLM -> validate -> execute ->
 persist Node -> update best -> convergence check -> repeat.
 
-Convergence rule (as specified by the organizers, implemented verbatim): the run is
-converged when the running-best validation primary has not improved by more than
-epsilon = 0.002 over the last N = 3 consecutive *scored* iterations (an errored
-iteration has no validation score, so it cannot advance or trigger the window; it
-still counts against the iteration cap). Backstops: 50-iteration cap and a
-wall-clock ceiling.
+Convergence rule: the run is converged when the running-best validation primary
+has not improved by more than epsilon over the last N = 3 consecutive *scored*
+iterations (an errored iteration has no validation score, so it cannot advance
+or trigger the window). Epsilon is CALIBRATED to the benchmark's noise rather
+than hand-picked -- it is the upward drift a running maximum shows over N
+iterations by luck alone. See validity.convergence_epsilon and the note on
+EPSILON below.
+
+Budget: an iteration is charged when compute was actually spent. A script
+rejected by preflight never ran, so it costs a repair attempt rather than a
+research iteration. See agent.budget. Backstops: iteration cap, wall-clock
+ceiling, spend ceiling.
 """
 from __future__ import annotations
 
@@ -29,6 +35,7 @@ from . import failure as failure_mod
 from .research_policy import decide_category, render_decision
 from .research_state import ResearchState
 from .validity import convergence_epsilon
+from . import budget
 
 N_CONVERGE = 3
 BASELINE_VALID_PRIMARY = 0.6016
@@ -134,8 +141,20 @@ class AgentLoop:
         return False, ""
 
     def stop_reason(self) -> str | None:
-        if len(self.tree.nodes) >= self.max_iterations:
+        # Nodes are not the unit of budget; EXPERIMENTS are. A script rejected
+        # by preflight spent no compute and answered no question, so charging a
+        # research iteration for it would delete an iteration the agent never
+        # got to use. See agent.budget.
+        consumed = sum(1 for n in self.tree.nodes if budget.consumes_budget(n))
+        if consumed >= self.max_iterations:
             return f"iteration cap reached ({self.max_iterations})"
+        # ...but a free retry cannot be unlimited, or an agent that never
+        # satisfies the contract would loop forever.
+        stuck = budget.consecutive_preflight_failures(self.tree.nodes)
+        if stuck >= budget.MAX_PREFLIGHT_RETRIES:
+            return (f"aborted: {stuck} consecutive preflight rejections — the "
+                    f"agent is not acting on the structured feedback, which "
+                    f"retrying will not fix")
         if now() - self.run_started > self.wall_clock_limit_s:
             return (f"wall-clock ceiling reached "
                     f"({self.wall_clock_limit_s / 3600:.1f} h)")
@@ -224,7 +243,9 @@ class AgentLoop:
                 st = ResearchState(self.root)
             except Exception:
                 pass
-            left = max(0, self.max_iterations - len(self.tree.nodes))
+            left = max(0, self.max_iterations
+                        - sum(1 for n in self.tree.nodes
+                              if budget.consumes_budget(n)))
             try:
                 from .frontier import from_root as _frontier
                 fr = _frontier(self.root)
@@ -266,7 +287,9 @@ class AgentLoop:
         try:
             st = ResearchState(self.root)
             nodes = [__import__("dataclasses").asdict(n) for n in self.tree.nodes]
-            left = max(0, self.max_iterations - len(self.tree.nodes))
+            left = max(0, self.max_iterations
+                        - sum(1 for n in self.tree.nodes
+                              if budget.consumes_budget(n)))
             d = decide_category(st, nodes, iteration_budget_left=left)
             events.append({"type": "research_category", "category": d["category"],
                            "scores": d["scores"], "reason": d["reason"]})
@@ -290,6 +313,22 @@ class AgentLoop:
                 blocks.insert(2, _plab())
                 from .validity import render_for_prompt as _valid
                 blocks.insert(3, _valid())
+                # The authoritative action space. Rendered from the same
+                # registry that preflight enforces, so what the agent believes
+                # it can call and what it is actually allowed to call cannot
+                # drift apart -- which is precisely how 5 of 7 Path B nodes
+                # crashed in the clean evaluation.
+                from .capabilities import render_for_prompt as _caps
+                blocks.insert(4, _caps())
+                # What a result is allowed to count for. A single seed is
+                # PRELIMINARY, never CONFIRMED.
+                from .evidence import render_for_prompt as _ev
+                blocks.insert(5, _ev())
+                # Scoped beliefs, with their counterevidence attached.
+                from .knowledge import render_for_prompt as _mem
+                mem = _mem()
+                if mem:
+                    blocks.insert(6, mem)
             except Exception as e:
                 events.append({"type": "frontier_skipped",
                                "error": f"{type(e).__name__}: {str(e)[:160]}"})

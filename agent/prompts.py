@@ -344,9 +344,19 @@ def build_prompt(action: str, target: Node | None, reason: str,
             "and pick the one you expect to dominate. Return the complete script.")
     elif action == "debug":
         try:
-            from .failure import classify, repair_brief
+            from .failure import classify, fingerprint, repair_brief, repeat_count
             _fc = classify(target.error_trace)
-            parts.append(repair_brief(_fc, attempt=1, max_attempts=2))
+            # Has this EXACT fault already happened in this run? Each repair
+            # prompt is built fresh, so without this the model cannot tell a
+            # first attempt from a fourth identical one -- the loop that cost
+            # run 3 three of its six iterations.
+            _fp = fingerprint(_fc, target.error_trace)
+            _prev = [(n.status == "error" and classify(n.error_trace)["class"],
+                      n.error_trace)
+                     for n in tree.nodes
+                     if n.status == "error" and n.iteration_id != target.iteration_id]
+            parts.append(repair_brief(_fc, attempt=1, max_attempts=2,
+                                      repeats=repeat_count(_fp, _prev)))
         except Exception:
             pass
         parts.append(
