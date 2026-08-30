@@ -162,3 +162,116 @@ CHOICE: multi_seed_replication
 ```
 
 Path B is correctly penalised at its *observed* 20% completion rate in that run.
+
+
+---
+
+## 6. Phase 2 — the verification run, and what it exposed
+
+Run stopped by the operator at 6 nodes of 8 because it was re-demonstrating a
+defect already diagnosed. Everything below is from `logs/opus_research/phase3_run.jsonl`.
+
+| | |
+|---|---|
+| nodes / iterations consumed | 6 / 6 |
+| experiments completed | 2 |
+| experiments crashed | 4 |
+| Path B attempts / crashes | 4 / 4 (**100%**) |
+| orchestration-only misuse | **0** |
+| **paired confirmation runs** | **1** (6 training runs, seeds 0-1-2) |
+| single-seed exploratory runs | 5 |
+| results promoted | **0** |
+| automatic repair attempts / recovered | 2 / 0 |
+| allocations recorded | 5 |
+| manual interventions | **0** |
+| inquiry complete / capability named+valid / promotion criterion | 5/5, 5/5, 5/5 |
+
+### What is now verified BY A REAL RUN (not just unit tests)
+
+1. **Confirmation executes.** Iteration 2 ran a paired `multi_seed_replication`:
+   6 training runs across seeds [0,1,2], control vs treatment on identical
+   seeds. This had never happened before in this project.
+2. **Evidence-aware promotion holds.** The confirmation returned
+   `UNCONFIRMED — t=2.25 over 3 seeds is below the 2.5 needed`, `promote=False`.
+   A single lucky seed did not replace the incumbent.
+3. **The allocator runs and steers.** 5 allocations recorded; it switched to
+   `multi_seed_replication` as soon as a promising single-seed result existed,
+   with the stated reason "nothing is CONFIRMED yet".
+4. **The re-confirmation fix holds.** After node 0 came back UNCONFIRMED it was
+   not re-queued, despite still being the highest single-seed score.
+5. **`incumbent_cfg` is used correctly.** The agent wrote
+   `cfg, enc = incumbent_cfg(...)` and `cfg['capture_epoch_scores'] = []`
+   exactly as the contract instructs. Zero partial-config KeyErrors — the
+   previous run's dominant failure is gone.
+
+### The defect it exposed — mine, again
+
+All 4 Path B crashes were the same class, and it is a **documentation defect in
+my own capability contract**:
+
+```
+iter 1  ValueError: too many values to unpack (expected 2)
+iter 3  ValueError: too many values to unpack (expected 2)
+iter 4  RuntimeError: Unexpected prediction payload in capture_epoch_scores
+iter 5  RuntimeError: Could not locate both valid/test score vectors in capture entry 0
+```
+
+The agent wrote `valid_scores, test_scores = train_lib.train_numpy_fm(...)`.
+That function returns a **dict** (`scores_valid`, `scores_test`, `model`,
+`hist`). And each `capture_epoch_scores` entry is
+`(epoch, valid_primary, scores_valid)` — **valid only**, no test vector — while
+my contract said only "(epoch, valid_primary, scores)", so the agent kept
+looking for a test vector that is not there.
+
+**The pattern across three evaluations is consistent and worth naming:** the
+capability contract fixed *where a capability lives*; every failure since has
+been *what exactly it accepts and returns*. Fixing one layer of the agent's
+model of its own tools exposes the next.
+
+### Honest status of the fixes for this
+
+Precise output shapes and a preflight check for destructuring a dict-returning
+capability are **identified and specified but NOT yet applied** — the run was
+killed before I changed code, so that this run corresponds to exactly one code
+state. They are the first thing to do next.
+
+---
+
+## 7. Where this leaves the score
+
+**Unchanged: 0.60541.** Priority 1 of the brief did not move, and I am not going
+to dress that up.
+
+What changed is that the agent can now, for the first time, run the kind of
+experiment capable of *establishing* an improvement — and in two live
+confirmations it has correctly declined to promote anything (`+0.01 sigma` with
+t=2.88 and 3/3 wins; `UNCONFIRMED` at t=2.25). Both are the machinery working.
+Neither is a better score.
+
+My honest read is that the benchmark is genuinely plateaued rather than
+under-searched: the menu is exhausted, k=32 was already measured at +0.00011
+(below threshold), heterogeneous ensembling is closed, and the model is
+data-limited with no more data available. A reviewer should challenge that read
+rather than take it.
+
+---
+
+## 8. What I would do next, in order
+
+1. Apply the two contract fixes above (precise return shapes; preflight catches
+   destructuring a dict-returning capability). This is the current dominant
+   failure class.
+2. Re-run the verification to see whether Path B crash rate finally drops.
+3. Do the end-to-end incumbent rebuild (audit finding 7) — script is written at
+   `logs/opus_research/rebuild_incumbent.py`, needs ~16 training runs.
+4. Only then consider score work, and only via paired confirmation.
+
+## 9. Commits
+
+```
+b4b9e03  Report confirmation, seed and repair metrics; start the review report
+31714fc  Make confirmation executable, Path B cumulative, allocation transparent
+824944b  Post-architecture evaluation: primary criterion failed, and why
+```
+
+Tests: **727 passing, 0 failing**. Incumbent verified at 0.60541 throughout.

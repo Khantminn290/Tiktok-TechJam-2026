@@ -1,0 +1,25 @@
+  [confirm] multi_seed_replication: 6 training runs across seeds [0, 1, 2]
+    [control] seed 0  primary 0.60497  71s
+    [control] seed 1  primary 0.60393  58s
+    [control] seed 2  primary 0.60449  69s
+    [treatment] seed 0  primary 0.60499  72s
+    [treatment] seed 1  primary 0.60393  58s
+    [treatment] seed 2  primary 0.60450  68s
+EXPERIMENT SPEC — multi_seed_replication
+  hypothesis   hist_tau_days=7.0 vs default 3.0 — known-null control experiment used here to prove the paired multi-seed path executes
+  seeds        [0, 1, 2]  (6 training runs)
+  paired       True
+  expects      primary +0.00000 (GAUC +0.00000, nDCG@5 +0.00000)
+  accepts if   |delta| >= 0.00040 and state reaches confirmed_only
+  on failure   keep_incumbent
+
+  RESULT over 3 paired seeds [0, 1, 2]
+    control    0.60446
+    treatment  0.60447
+    delta      +0.00001 (+0.01 sigma)  t=2.88  wins 3/3
+    per seed   {0: 2e-05, 1: 0.0, 2: 1e-05}
+  EVIDENCE: REJECTED — +0.00001 is under half the noise floor; this is not a result whatever its sign
+  PROMOTE:  NO
+    keep_incumbent: the submitted system is unchanged.
+
+PROMOTE: False
