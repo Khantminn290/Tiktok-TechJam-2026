@@ -57,20 +57,23 @@ NOISE = 0.0008
 # Overrides the agent may set directly on the training config. Deliberately
 # small: each entry earned its place by being investigated in the research run,
 # and a large list would just be the menu again under a new name.
+# Descriptions are deliberately NEUTRAL: they say what a knob does, never
+# whether it helps. An earlier version stated the teacher's findings and effect
+# sizes here, which made a "discovery" by the agent unfalsifiable -- see
+# logs/opus_research/AUTONOMY_AUDIT.md.
 SAFE_OVERRIDES = {
-    "k": "embedding dimension (measured neutral at 8 and 32; capacity is not the "
-         "binding constraint here)",
+    "k": "embedding dimension per field",
     "lr": "learning rate",
-    "epochs": "epoch cap",
-    "patience": "early-stopping patience; set high to SEE the whole curve",
-    "l2": "L2 on embeddings (measured null at 1e-5 and 1e-4)",
+    "epochs": "maximum training epochs",
+    "patience": "early-stopping patience, in epochs",
+    "l2": "L2 penalty on embeddings and linear weights",
     "bs": "batch size",
-    "hist_tau_days": "recency decay of the pooled user history, in days "
-                     "(was hardcoded at 3.0; measured neutral at 1/7/14)",
-    "aux_weight": "weight on auxiliary heads",
-    "snapshot_ensemble": "average the top-N epoch checkpoints instead of taking "
-                         "the single best epoch",
-    "snapshot_force": "adopt the snapshot without the biased same-set guard",
+    "hist_tau_days": "recency decay of the pooled user history, in days",
+    "aux_weight": "weight applied to auxiliary-task gradients",
+    "n_checkpoints": "how many epoch checkpoints to combine for the final "
+                     "prediction (1 = use the single best epoch)",
+    "checkpoint_combine": "combine the chosen checkpoints unconditionally "
+                          "(otherwise the built-in guard decides)",
 }
 
 
@@ -226,43 +229,58 @@ def free_recombination(member_scores, users, labels, rules: dict,
     return out
 
 
-def render_for_prompt() -> str:
-    """What these capabilities are, and the evidence that each one earned."""
-    return "\n".join([
+def render_for_prompt(reveal_findings: bool = False) -> str:
+    """The capabilities available, described by WHAT THEY DO.
+
+    `reveal_findings` is False by default and must stay that way for any
+    autonomy claim. An earlier version stated the teacher's conclusions and
+    effect sizes here -- the finding, the exact parameters, and the caveat --
+    which turned an apparent discovery into replay. See
+    logs/opus_research/AUTONOMY_AUDIT.md.
+
+    What is still transferred, deliberately, is METHOD rather than ANSWER: the
+    capabilities themselves, and the principle that a score computed on the data
+    that selected it is not evidence. A method the agent must still decide when
+    to apply is capability transfer; a stated result is not.
+    """
+    L = [
         "## PIPELINE RESEARCH CAPABILITIES (beyond the menu)",
-        "The menu cannot express embedding size, decay constants, or the "
-        "stopping rule. These can, and each exists because it changed a "
-        "conclusion in this project:",
-        "- training_dynamics(): the epoch curve with early stopping OFF. Found "
-        "that the incumbent peaks at epoch 14 and decays -29.6 sigma by epoch "
-        "60, so the stopping rule -- not capacity -- is the binding constraint.",
-        "- hardcoded_constants(): modelling constants no menu axis can reach. "
-        "Found tau_days=3.0 inside History, untuned, inside the incumbent.",
-        "- override_experiment(): paired multi-seed experiments as direct cfg "
-        "overrides. Measured k=8/32 and tau=1/7/14 as null.",
-        "- selection_rule_test(): choose on one half of validation, score on the "
-        "other. OVERTURNED a rejected idea -- snapshot ensembling had been "
-        "refused by a guard comparing it on the same set that selected the "
-        "checkpoint; measured honestly it wins +0.87 sigma, t=5.54, 22/24.",
-        "- free_recombination(): aggregation questions answered from stored "
-        "predictions with no training. Refuted a +0.46 sigma median result "
-        "(10/24 wins, -0.06 sigma).",
+        "The menu names options. These reach parts of the pipeline no option "
+        "can express -- the numbers inside the training library. Use them when "
+        "the evidence suggests the bottleneck is not which option is selected.",
         "",
-        "HOW TO USE THIS: put any of these keys directly in menu_choices "
-        "alongside the normal axes -- they are validated and range-checked, and "
+        "- training_dynamics(): trains with early stopping disabled and returns "
+        "the whole epoch curve, its peak, and how far it moves afterwards. "
+        "Answers 'is this model over- or under-fitting, and where does it "
+        "peak?' -- which no single score can tell you.",
+        "- hardcoded_constants(): lists modelling constants written into the "
+        "training library that no menu axis can reach, and whether you can "
+        "currently set each one.",
+        "- selection_rule_test(): given per-epoch predictions, compares "
+        "CHOOSING rules by selecting on one half of the validation users and "
+        "scoring on the other, both directions, several splits. Use it whenever "
+        "a choice is being made using the same data it will be judged on.",
+        "- free_recombination(): compares ways of combining stored predictions "
+        "by resampling member subsets. No training, so a rule must win "
+        "repeatedly rather than once.",
+        "",
+        "HOW TO USE THEM: put any of these keys directly in menu_choices "
+        "alongside the normal axes. They are validated and range-checked, and "
         "they change the actual training pipeline:",
-        "  " + ", ".join(f"{k}" for k in sorted(SAFE_OVERRIDES)),
-        "e.g. menu_choices with \"k\": 8 trains a half-width model; "
-        "\"patience\": 60 shows you the whole epoch curve instead of stopping "
-        "early; \"snapshot_ensemble\": 5 with \"snapshot_force\": true averages "
-        "the top-5 checkpoints instead of taking the single best epoch.",
+    ]
+    for k in sorted(SAFE_OVERRIDES):
+        L.append(f"  {k}: {SAFE_OVERRIDES[k]}")
+    L += [
         "",
-        "MEASURED ALREADY -- do not re-run these: k=8 (-0.03 sigma) and k=32 "
-        "(-0.18 sigma); hist_tau_days 1/7/14 (-0.03/+0.01/-0.04 sigma); l2 1e-5 "
-        "and 1e-4 (null). Checkpoint averaging is +0.87 sigma for a SINGLE model "
-        "but redundant once 16 seeds are ensembled (-0.01 sigma), because seed "
-        "averaging removes the same variance.",
-        "RULE OF THUMB, learned three separate times here: a score computed on "
-        "the same data that selected it is not evidence. Prefer a held-out or "
-        "resampled comparison before believing any improvement.",
-    ])
+        "METHODOLOGICAL PRINCIPLE: a score computed on the same data that "
+        "selected it is not evidence of generalisation. If a number was picked "
+        "as the best of several on the validation set -- a best epoch, a best "
+        "rule, a best subset -- prefer a held-out or resampled comparison "
+        "before believing it.",
+    ]
+    if reveal_findings:
+        L += ["", "PRIOR RESULTS (teacher findings -- NOT for autonomy tests):",
+              "  k=8 -0.03 sigma, k=32 -0.18 sigma; hist_tau_days 1/7/14 all "
+              "null; l2 1e-5/1e-4 null; checkpoint averaging +0.87 sigma for a "
+              "single model, -0.01 sigma once 16 seeds are ensembled."]
+    return "\n".join(L)

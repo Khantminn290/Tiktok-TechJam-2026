@@ -57,6 +57,9 @@ class Menu:
         "l2": (float, 0.0, 1e-2), "bs": (int, 256, 65536),
         "hist_tau_days": (float, 0.25, 60.0),
         "aux_weight": (float, 0.0, 2.0),
+        "n_checkpoints": (int, 0, 20),
+        "checkpoint_combine": (bool, 0, 1),
+        # legacy names, still accepted so older journals replay unchanged
         "snapshot_ensemble": (int, 0, 20),
         "snapshot_force": (bool, 0, 1),
     }

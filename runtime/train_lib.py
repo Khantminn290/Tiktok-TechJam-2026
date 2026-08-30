@@ -1411,10 +1411,17 @@ def run(menu_choices: dict, output_dir: str, seed: int = 0, verbose: bool = True
     # stopping rule -- and the Opus research run showed they are where the
     # untested assumptions live. Validated at the menu boundary
     # (agent/menu.py PIPELINE_OVERRIDES), applied here.
+    # The neutral names are what the agent sees; the internal cfg keys are
+    # unchanged. Identifiers that state a conclusion ("snapshot_force: adopt the
+    # snapshot without the biased guard") leak the teacher's finding into the
+    # student environment -- see logs/opus_research/AUTONOMY_AUDIT.md.
+    _ALIAS = {"n_checkpoints": "snapshot_ensemble",
+              "checkpoint_combine": "snapshot_force"}
     for _k in ("k", "lr", "epochs", "patience", "l2", "bs", "hist_tau_days",
-               "aux_weight", "snapshot_ensemble", "snapshot_force"):
+               "aux_weight", "n_checkpoints", "checkpoint_combine",
+               "snapshot_ensemble", "snapshot_force"):
         if _k in menu_choices:
-            cfg[_k] = menu_choices[_k]
+            cfg[_ALIAS.get(_k, _k)] = menu_choices[_k]
             log(f"  pipeline override: {_k}={menu_choices[_k]}")
 
     t_train = time.time()

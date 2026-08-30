@@ -2189,9 +2189,24 @@ def test_pipeline_lab():
 
     # the lesson must reach the agent
     pr = PL.render_for_prompt()
-    check("the capabilities and their provenance reach the prompt",
-          "selection_rule_test" in pr and "22/24" in pr)
-    check("the prompt carries the rule of thumb the research kept re-learning",
+    check("the capabilities reach the prompt",
+          all(c in pr for c in ("training_dynamics", "hardcoded_constants",
+                                "selection_rule_test", "free_recombination")))
+    # The default prompt must not hand the agent the teacher's answers -- that
+    # is what turned the first self-test into replay rather than discovery.
+    import re
+    leaks = re.findall(r"0\.87|22/24|epoch 14|-29\.6|snapshot|redundant", pr, re.I)
+    check("the DEFAULT prompt leaks no teacher findings", not leaks, f"{leaks}")
+    check("override descriptions say what a knob DOES, not whether it helps",
+          not re.search(r"sigma|measured|null|neutral at", " ".join(
+              PL.SAFE_OVERRIDES.values()), re.I),
+          f"{[v for v in PL.SAFE_OVERRIDES.values() if re.search(r'sigma|measured', v, re.I)]}")
+    check("identifiers do not encode a conclusion",
+          "snapshot_force" not in PL.SAFE_OVERRIDES
+          and "n_checkpoints" in PL.SAFE_OVERRIDES)
+    check("findings are available only behind an explicit flag",
+          "0.87" in PL.render_for_prompt(reveal_findings=True))
+    check("the prompt carries the METHOD (a principle, not an answer)",
           "same data that selected it is not evidence" in pr)
     lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
     check("the lab is wired into the planning prompt",
