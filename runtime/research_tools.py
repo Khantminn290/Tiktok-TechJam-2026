@@ -272,6 +272,51 @@ def redundancy(delta_a, delta_b, users=None) -> dict:
                        f"Do not assume solo gains add: {expect}."}
 
 
+# ---------------------------------------------------------------- contract ---
+CONTRACT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "capability_contract.json")
+
+
+def contract(name: str | None = None) -> dict:
+    """The capability contract, readable from inside a generated experiment.
+
+    This is the EXECUTABLE half of the contract. A generated script can ask what
+    a capability returns instead of guessing:
+
+        from research_tools import contract
+        contract("train_numpy_fm")["returns"]
+        # {'kind': 'dict', 'keys': ['scores_valid', 'scores_test', ...]}
+
+    Every Path B crash in the last recorded run was a call site disagreeing with
+    one of these shapes -- unpacking a dict as a 2-tuple, or hunting for a test
+    vector inside a per-epoch capture entry that only holds valid scores.
+
+    Contains no data, no labels and no scores: it describes an API surface, so
+    reading it cannot reach the hidden test.
+    """
+    if not os.path.exists(CONTRACT_PATH):
+        return {}
+    with open(CONTRACT_PATH) as fh:
+        doc = json.load(fh)
+    if name is None:
+        return doc
+    return (doc.get("capabilities") or {}).get(name, {})
+
+
+def describe(name: str) -> str:
+    """Human-readable usage for one capability, including a correct example."""
+    c = contract(name)
+    if not c:
+        return f"no contract entry for {name!r}"
+    L = [f"{name}: {c.get('purpose')}",
+         f"  inputs:  {c.get('inputs')}",
+         f"  returns: {c.get('outputs')}"]
+    if c.get("example"):
+        L.append("  example:")
+        L += [f"    {ln}" for ln in str(c["example"]).splitlines()]
+    return "\n".join(L)
+
+
 # ------------------------------------------------------------ config builder ---
 def incumbent_cfg(splits, meta, choices=None, **overrides):
     """A COMPLETE, valid training config for the incumbent, plus its encoding.

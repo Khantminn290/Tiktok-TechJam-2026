@@ -66,7 +66,8 @@ class AgentLoop:
                  enable_data_tools: bool = False,
                  enable_research_state: bool = False,
                  enable_feature_discovery: bool = False,
-                 n_candidates: int = 0):
+                 n_candidates: int = 0,
+                 max_training_runs: int | None = None):
         self.root = root
         self.log_dir = os.path.join(root, "logs")
         self.solutions_dir = os.path.join(self.log_dir, "solutions")
@@ -130,6 +131,11 @@ class AgentLoop:
         # whose confirmation came back UNCONFIRMED is answered, not
         # unanswered -- asking again buys nothing and costs six runs.
         self._confirmed_nodes = set()
+        # Training executions are a SEPARATE budget from outer-loop decisions.
+        # A paired 3-seed confirmation is 1 node and 6 training runs; conflating
+        # them under-counts compute six-fold. See agent.budget.COUNTING_NOTE.
+        self.ledger = budget.Ledger(max_iterations=max_iterations,
+                                    max_training_runs=max_training_runs)
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -160,6 +166,14 @@ class AgentLoop:
             return f"iteration cap reached ({self.max_iterations})"
         # ...but a free retry cannot be unlimited, or an agent that never
         # satisfies the contract would loop forever.
+        # getattr: tests and tools construct partial loops via __new__, and a
+        # missing ledger means "no training cap", not a crash.
+        led = getattr(self, "ledger", None)
+        left = led.training_runs_left() if led else None
+        if left is not None and left <= 0:
+            return (f"training-run budget exhausted "
+                    f"({led.training_runs} of "
+                    f"{led.max_training_runs} used)")
         stuck = budget.consecutive_preflight_failures(self.tree.nodes)
         if stuck >= budget.MAX_PREFLIGHT_RETRIES:
             return (f"aborted: {stuck} consecutive preflight rejections — the "
@@ -601,6 +615,14 @@ class AgentLoop:
                    - sum(1 for n in self.tree.nodes if budget.consumes_budget(n)))
         if left < 1:
             return None
+        # The real constraint is TRAINING RUNS, not one outer-loop slot. Starting
+        # a 6-run paired confirmation with 2 runs left produces two arms that
+        # cannot be paired and answers nothing.
+        led = getattr(self, "ledger", None)
+        if led and not led.can_afford(spec.n_runs):
+            print(f"  [confirm] deferring {spec.experiment_type}: "
+                  f"{led.why_not(spec.n_runs)}", flush=True)
+            return None
         return q.pop(0)
 
     def _run_confirmation_node(self, it: int, spec) -> Node:
@@ -620,6 +642,10 @@ class AgentLoop:
         work = os.path.join(self.log_dir, "confirm", f"node_{it:03d}")
         try:
             out = CF.run_spec(spec, work_dir=work, timeout_s=self.exec_timeout_s)
+            done = len(out.get("control") or {}) + len(out.get("treatment") or {})
+            if getattr(self, "ledger", None):
+                self.ledger.record_training(done,
+                                            crashed=max(0, spec.n_runs - done))
         except Exception as e:                      # noqa: BLE001
             events.append({"type": "execution_error", "failure_class": "unknown",
                            "error_head": f"{type(e).__name__}: {str(e)[:300]}"})
@@ -822,6 +848,12 @@ class AgentLoop:
 
         res = run_solution(code, code_path, obj["menu_choices"], run_dir,
                            timeout_s=self.exec_timeout_s, seed=self.seed)
+        # A preflight rejection never reached training, so it is not charged as
+        # a training execution -- but a crash mid-training is, because that
+        # compute is spent and unrecoverable.
+        if not (res.error_trace and budget.PREFLIGHT_MARKER in res.error_trace):
+            if getattr(self, "ledger", None):
+                self.ledger.record_training(1, crashed=0 if res.ok else 1)
         if not res.ok:
             fc = failure_mod.classify(res.error_trace)
             events.append({"type": "execution_error",
@@ -1276,6 +1308,9 @@ class AgentLoop:
             "spend": self.spend.summary(),
             "draft_count": self.draft_count,
             "manual_interventions": interventions,
+            "budget_ledger": (self.ledger.as_dict()
+                              if getattr(self, "ledger", None) else {}),
+            "budget_counting_note": budget.COUNTING_NOTE,
             "convergence_rule": {"epsilon": EPSILON, "N": N_CONVERGE,
                                  "counted_iterations": "scored (successful) only"},
         }

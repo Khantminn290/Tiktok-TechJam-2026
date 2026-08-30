@@ -71,6 +71,74 @@ def consecutive_preflight_failures(nodes) -> int:
     return n
 
 
+class Ledger:
+    """Separate counters for things that are not interchangeable.
+
+    The ambiguity this removes is real and was flagged in review: a paired
+    3-seed confirmation is ONE outer-loop node and SIX training executions.
+    Reporting it as "one iteration" understates compute by 6x; reporting it as
+    six iterations overstates the number of decisions the agent made. Both are
+    wrong, so both are counted, separately, and the report says which is which.
+
+    Counting rule, stated once and applied everywhere:
+
+        outer-loop node      one decision the agent made
+        training execution   one model actually trained
+        preflight rejection  neither -- no decision consumed, no compute spent
+
+    A paired 3-seed confirmation therefore counts as:
+        +1 outer-loop node, +6 training executions, +1 completed experiment.
+    """
+
+    def __init__(self, max_iterations: int | None = None,
+                 max_training_runs: int | None = None):
+        self.max_iterations = max_iterations
+        self.max_training_runs = max_training_runs
+        self.training_runs = 0
+        self.training_crashes = 0
+
+    def record_training(self, n: int = 1, crashed: int = 0) -> None:
+        self.training_runs += int(n)
+        self.training_crashes += int(crashed)
+
+    def training_runs_left(self) -> int | None:
+        if self.max_training_runs is None:
+            return None
+        return max(0, self.max_training_runs - self.training_runs)
+
+    def can_afford(self, n_runs: int) -> bool:
+        """Is there budget to COMPLETE an experiment costing n_runs?
+
+        Starting a 6-run confirmation with 2 runs left produces two arms that
+        cannot be paired and answers nothing, which is strictly worse than not
+        starting it.
+        """
+        left = self.training_runs_left()
+        return True if left is None else left >= int(n_runs)
+
+    def why_not(self, n_runs: int) -> str:
+        left = self.training_runs_left()
+        if left is None or left >= n_runs:
+            return ""
+        return (f"needs {n_runs} training runs, only {left} remain of "
+                f"{self.max_training_runs}")
+
+    def as_dict(self) -> dict:
+        return {"max_iterations": self.max_iterations,
+                "max_training_runs": self.max_training_runs,
+                "training_runs_used": self.training_runs,
+                "training_runs_left": self.training_runs_left(),
+                "training_crashes": self.training_crashes}
+
+
+COUNTING_NOTE = (
+    "An outer-loop node is one decision; a training execution is one model "
+    "actually trained. A paired 3-seed confirmation is 1 node and 6 training "
+    "executions. A preflight rejection is neither: no compute was spent and no "
+    "decision was consumed, though repeated rejections are capped."
+)
+
+
 def render(c: dict) -> str:
     return "\n".join([
         "BUDGET",

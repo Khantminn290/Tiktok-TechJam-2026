@@ -37,6 +37,7 @@ the training the script is already doing, so the entry says exactly that.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------- taxonomy ---
@@ -75,6 +76,28 @@ class Capability:
     failure_modes: str
     instead: str = ""               # if unavailable here, what to use instead
     aliases: tuple = field(default_factory=tuple)
+    # MACHINE-READABLE return shape. Prose in `outputs` is for a human reader;
+    # this is what preflight checks a call site against.
+    #   {"kind": "dict",  "keys": [...]}                 -> NOT unpackable
+    #   {"kind": "tuple", "arity": 2, "names": [...]}     -> unpackable, arity 2
+    #   {"kind": "list_of_tuple", "arity": 3, ...}        -> each element unpacks
+    # Every Path B crash in the last run was a call site disagreeing with one of
+    # these, so they are data rather than documentation.
+    returns: dict = field(default_factory=dict)
+    example: str = ""               # correct usage, copy-pasteable
+
+    @property
+    def return_kind(self) -> str:
+        return (self.returns or {}).get("kind", "unknown")
+
+    @property
+    def unpackable(self) -> bool:
+        """May a call site write `a, b = f(...)`?"""
+        return self.return_kind == "tuple"
+
+    @property
+    def return_arity(self) -> int | None:
+        return (self.returns or {}).get("arity")
 
     @property
     def orchestrator_tool(self) -> bool:
@@ -128,7 +151,9 @@ register(Capability(
                "user's rows contributes nothing regardless of its global AUC.",
     failure_modes="Unknown feature name raises KeyError. A feature with near-zero "
                   "within-user variation returns an AUC near 0.5 that means "
-                  "'no variation', not 'no signal'."))
+                  "'no variation', not 'no signal'.",
+    returns={"kind": "dict", "keys": ["auc", "n_users", "coverage"]},
+    example='d = get_within_user_auc("play_time_ms")'))
 
 register(Capability(
     name="get_user_history_stats", kind=MEASURE,
@@ -142,7 +167,9 @@ register(Capability(
     mutates_pipeline=False,
     validation="Descriptive only. A difference between splits is a fact about the "
                "data, not evidence that any particular mechanism will help.",
-    failure_modes="Unknown split name raises KeyError."))
+    failure_modes="Unknown split name raises KeyError.",
+    returns={"kind": "dict", "keys": ["mean", "p50", "p90", "n_users"]},
+    example='d = get_user_history_stats("train")'))
 
 register(Capability(
     name="get_label_rate_by_segment", kind=MEASURE,
@@ -155,7 +182,9 @@ register(Capability(
     mutates_pipeline=False,
     validation="A rate difference across segments does not imply a within-user "
                "ranking gain; the metric ranks inside users, not across them.",
-    failure_modes="Unknown feature raises KeyError; sparse bins give noisy rates."))
+    failure_modes="Unknown feature raises KeyError; sparse bins give noisy rates.",
+    returns={"kind": "dict", "keys": ["bins", "rates", "counts"]},
+    example='d = get_label_rate_by_segment("duration_ms")'))
 
 register(Capability(
     name="get_feature_stats", kind=MEASURE,
@@ -168,7 +197,9 @@ register(Capability(
     mutates_pipeline=False,
     validation="Near-zero std can be a float artefact; compare on a scale-relative "
                "tolerance rather than testing equality.",
-    failure_modes="Unknown feature raises KeyError."))
+    failure_modes="Unknown feature raises KeyError.",
+    returns={"kind": "dict", "keys": ["mean", "std", "min", "max", "missing"]},
+    example='d = get_feature_stats("duration_ms")'))
 
 register(Capability(
     name="hardcoded_constants", kind=INSPECT,
@@ -233,7 +264,9 @@ register(Capability(
     validation="Needs per-epoch predictions to already exist. The first rule in "
                "`rules` is the reference every other is measured against.",
     failure_modes="Passing scores for a single epoch makes the comparison "
-                  "meaningless; shapes must line up with users/labels."))
+                  "meaningless; shapes must line up with users/labels.",
+    returns={"kind": "dict", "keys": ["reference_rule", "n_evaluations", "rules"]},
+    example='out = selection_rule_test(per_epoch, users, labels, rules)'))
 
 register(Capability(
     name="free_recombination", kind=ENSEMBLE,
@@ -249,7 +282,9 @@ register(Capability(
     mutates_pipeline=False,
     validation="Requires >= 2 stored members. A rule winning on one subset is not "
                "a result; the resampled win-rate is the evidence.",
-    failure_modes="Fewer members than `subset` silently shrinks the subset."))
+    failure_modes="Fewer members than `subset` silently shrinks the subset.",
+    returns={"kind": "dict", "keys": ["reference_rule", "n_subsets", "rules"]},
+    example='out = free_recombination(members, users, labels, rules)'))
 
 register(Capability(
     name="audit_comparison", kind=CONFIRM,
@@ -266,7 +301,9 @@ register(Capability(
     validation="Advisory. It grades the DESIGN of a comparison and cannot know "
                "intent, so it never blocks an experiment.",
     failure_modes="Garbage in: if n_candidates_compared understates how many "
-                  "things were really tried, the audit understates the risk."))
+                  "things were really tried, the audit understates the risk.",
+    returns={"kind": "dict", "keys": ["delta", "sigma", "severity", "verdict", "findings", "trustworthy"]},
+    example='a = audit_comparison(delta, n_seeds=5, paired=True)'))
 
 register(Capability(
     name="selection_pressure", kind=CONFIRM,
@@ -280,7 +317,9 @@ register(Capability(
     contexts=(ORCHESTRATOR, GENERATED), module="research_tools", cost=FREE,
     mutates_pipeline=False,
     validation="Assumes independent comparisons at the benchmark noise floor.",
-    failure_modes="None; pure arithmetic."))
+    failure_modes="None; pure arithmetic.",
+    returns={"kind": "dict", "keys": ["n", "expected_max_delta", "expected_max_sigma", "reading"]},
+    example='sp = selection_pressure(5)'))
 
 register(Capability(
     name="pipeline_override", kind=MODIFY,
@@ -314,7 +353,9 @@ register(Capability(
     validation="Change ONE key per experiment. Overriding several at once makes "
                "the result uninterpretable.",
     failure_modes="Needs the loaded splits and meta. Overriding 'multitask' "
-                  "also rebuilds 'aux_tasks' for you."))
+                  "also rebuilds 'aux_tasks' for you.",
+    returns={"kind": "tuple", "arity": 2, "names": ["cfg", "enc"]},
+    example="cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)"))
 
 register(Capability(
     name="train_numpy_fm", kind=TRAIN,
@@ -329,13 +370,62 @@ register(Capability(
            "`cfg, enc = incumbent_cfg(splits, meta, <overrides>)` to get one. "
            "Optionally set cfg['capture_epoch_scores'] = [] first; after "
            "training that list holds (epoch, valid_primary, scores) per epoch.",
-    outputs="{'scores_valid': array, 'scores_test': array, ...}",
+    outputs="A DICT with keys: scores_valid, scores_test, model, hist. "
+            "NOT a tuple -- `a, b = train_numpy_fm(...)` raises "
+            "'too many values to unpack'.",
     contexts=(GENERATED,), module="train_lib", cost=ONE_RUN,
     mutates_pipeline=True,
     validation="One seed is one draw. A single-seed difference is not evidence.",
     failure_modes="An INCOMPLETE cfg raises KeyError listing every missing key "
                   "at once. An unrecognised extra key is silently ignored, so "
-                  "check spelling against the override list."))
+                  "check spelling against the override list. Destructuring the "
+                  "return as a tuple raises ValueError.",
+    returns={"kind": "dict",
+             "keys": ["scores_valid", "scores_test", "model", "hist"]},
+    example=(
+        "from research_tools import incumbent_cfg\n"
+        "cfg, enc = incumbent_cfg(splits, meta)\n"
+        "cfg['seed'] = args.seed\n"
+        "cfg['capture_epoch_scores'] = []          # optional, see below\n"
+        "res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\n"
+        "valid_scores = res['scores_valid']        # NOT tuple unpacking\n"
+        "test_scores  = res['scores_test']\n"
+        "# cfg['capture_epoch_scores'] now holds one tuple PER EPOCH:\n"
+        "#     (epoch:int, valid_primary:float, scores_valid:np.ndarray)\n"
+        "# THREE elements, and the array is the VALID split only. There is no\n"
+        "# per-epoch test vector -- test scores exist only in res['scores_test'].\n"
+        "for epoch, valid_primary, valid_scores_at_epoch in "
+        "cfg['capture_epoch_scores']:\n"
+        "    ...")))
+
+register(Capability(
+    name="capture_epoch_scores", kind=MEASURE,
+    purpose="Per-epoch validation scores from the training run your script is "
+            "already doing, at no extra cost.",
+    when="Whenever you want the epoch curve, or per-epoch predictions to feed "
+         "selection_rule_test.",
+    resolves="How validation moves across epochs, and whether a stopping or "
+             "checkpoint rule generalises.",
+    inputs="Set cfg['capture_epoch_scores'] = [] BEFORE calling train_numpy_fm. "
+           "The list is filled in place during training.",
+    outputs="A LIST with one 3-tuple per epoch: "
+            "(epoch:int, valid_primary:float, scores_valid:np.ndarray). "
+            "VALID SPLIT ONLY -- there is no per-epoch test vector.",
+    contexts=(GENERATED,), module=None, cost=FREE, mutates_pipeline=False,
+    validation="The per-epoch arrays are VALID-split predictions. Do not look "
+               "for a test vector in them; take test predictions from "
+               "train_numpy_fm's returned dict instead.",
+    failure_modes="Expecting 2 or 4 elements per entry, or expecting a "
+                  "(valid, test) pair inside an entry, raises at unpack time "
+                  "AFTER a full training run has been paid for.",
+    returns={"kind": "list_of_tuple", "arity": 3,
+             "names": ["epoch", "valid_primary", "scores_valid"],
+             "split": "valid"},
+    example=("cfg['capture_epoch_scores'] = []\n"
+             "train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\n"
+             "for epoch, valid_primary, scores_valid in "
+             "cfg['capture_epoch_scores']:\n"
+             "    ...   # exactly three names, valid split only")))
 
 register(Capability(
     name="evaluate", kind=EVALUATE,
@@ -349,7 +439,9 @@ register(Capability(
     validation="Never call this on the test split. Scoring ground truth; do not "
                "modify.",
     failure_modes="Misaligned array lengths raise; scores must be in the cache's "
-                  "row order."))
+                  "row order.",
+    returns={"kind": "dict", "keys": ["GAUC", "nDCG@5", "primary"]},
+    example='m = evaluate(list(users), labels, scores); print(m["primary"])'))
 
 
 # ------------------------------------------------------------------ lookups ---
@@ -412,6 +504,31 @@ def render_for_prompt(context: str = GENERATED) -> str:
             c = _REGISTRY[n]
             L.append(f"  {n}: {c.instead or 'request it in the inspect phase instead.'}")
 
+    # Return SHAPES, and worked examples for the two that every recorded Path B
+    # crash came from. Prose about a return type is evidently not enough: the
+    # agent read "{'scores_valid': ...}" and still destructured it as a tuple.
+    L += ["", "RETURN SHAPES — check these before you write the call site."]
+    for name in sorted(_REGISTRY):
+        c = _REGISTRY[name]
+        if not c.returns or not c.importable:
+            continue
+        r = c.returns
+        if r.get("kind") == "dict":
+            L.append(f"  {name} -> dict, NOT unpackable. keys: "
+                     f"{', '.join(r.get('keys') or [])}")
+        elif r.get("kind") == "tuple":
+            L.append(f"  {name} -> tuple of {r.get('arity')}: "
+                     f"{', '.join(r.get('names') or [])}")
+        elif r.get("kind") == "list_of_tuple":
+            L.append(f"  {name} -> list of {r.get('arity')}-tuples: "
+                     f"({', '.join(r.get('names') or [])}); "
+                     f"{r.get('split', '')} split only")
+    for name in ("train_numpy_fm", "capture_epoch_scores"):
+        c = _REGISTRY.get(name)
+        if c and c.example:
+            L += ["", f"WORKED EXAMPLE — {name}:"]
+            L += [f"    {ln}" for ln in c.example.splitlines()]
+
     L += ["", "RULES.",
           "  1. In generated code you may import ONLY: "
           + ", ".join(sorted(modules_for_generated_code())) + ".",
@@ -419,9 +536,14 @@ def render_for_prompt(context: str = GENERATED) -> str:
           "not on this list, implement it yourself in plain Python -- do not "
           "guess at an API.",
           "  3. Your script is checked against this contract BEFORE it runs. A "
-          "call to something that does not exist in your context is caught in "
-          "preflight and costs you no training time, but it does cost an "
-          "attempt, so read the list."]
+          "call to something that does not exist in your context, or a call "
+          "site that disagrees with a return shape above, is caught in "
+          "preflight and costs you no training time -- but it does cost an "
+          "attempt, so read the list.",
+          "  4. You can also read this contract AT RUNTIME from inside your "
+          "script: `from research_tools import contract, describe` then "
+          "`contract('train_numpy_fm')['returns']` or `print(describe(...))`. "
+          "Ask rather than guess."]
     return "\n".join(L)
 
 
@@ -438,6 +560,52 @@ def as_json() -> str:
              "validation": c.validation, "failure_modes": c.failure_modes,
              "instead": c.instead}
          for n, c in sorted(_REGISTRY.items())}, indent=2)
+
+
+CONTRACT_JSON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "runtime", "capability_contract.json")
+
+
+def export_contract(path: str = CONTRACT_JSON) -> str:
+    """Write the contract where GENERATED CODE can actually read it.
+
+    The experiment subprocess has only `runtime/` and the starter kit on its
+    PYTHONPATH, so it cannot import this module. Exporting the registry as data
+    into runtime/ makes the contract executable from inside a generated script
+    (`from research_tools import contract`) without duplicating the registry --
+    there is still exactly one source of truth, and a test asserts the exported
+    file matches it.
+
+    Contains no data, no labels and no scores: it is a description of the API
+    surface, so handing it to generated code cannot leak the hidden test.
+    """
+    payload = {
+        "schema": "capability_contract/1",
+        "capabilities": {
+            n: {"kind": c.kind, "purpose": c.purpose, "when": c.when,
+                "inputs": c.inputs, "outputs": c.outputs,
+                "returns": c.returns, "example": c.example,
+                "module": c.module, "cost": c.cost,
+                "importable_from_generated_python": c.invoked_by_import,
+                "orchestrator_only": c.orchestrator_tool and not c.importable,
+                "validation": c.validation, "failure_modes": c.failure_modes}
+            for n, c in sorted(_REGISTRY.items())},
+        "importable_modules": sorted(modules_for_generated_code()),
+        "orchestration_only": sorted(orchestration_only()),
+    }
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+    os.replace(tmp, path)
+    return path
+
+
+def contract_payload() -> dict:
+    """The exported structure, regenerated. One code path, so no drift."""
+    with open(export_contract()) as fh:
+        return json.load(fh)
 
 
 def render_full(name: str) -> str:
@@ -462,6 +630,14 @@ def render_full(name: str) -> str:
         f"VALIDATION          {c.validation}",
         f"FAILURE MODES       {c.failure_modes}",
     ] + ([f"INSTEAD             {c.instead}"] if c.instead else []))
+
+
+# Keep the machine-readable copy in runtime/ in step with this registry. It is
+# cheap, and a stale contract handed to generated code is worse than none.
+try:
+    export_contract()
+except OSError:            # read-only checkout; the in-process registry still works
+    pass
 
 
 if __name__ == "__main__":

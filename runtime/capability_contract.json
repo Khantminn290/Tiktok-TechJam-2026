@@ -1,0 +1,334 @@
+{
+  "capabilities": {
+    "audit_comparison": {
+      "cost": "free",
+      "example": "a = audit_comparison(delta, n_seeds=5, paired=True)",
+      "failure_modes": "Garbage in: if n_candidates_compared understates how many things were really tried, the audit understates the risk.",
+      "importable_from_generated_python": true,
+      "inputs": "delta, n_seeds, paired, n_candidates_compared, selected_on_eval_data, confirmed_out_of_sample",
+      "kind": "CONFIRM",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "{'severity','verdict','findings',...}",
+      "purpose": "Grade a claimed improvement by HOW IT WAS MEASURED -- seeds, pairing, how many variants were compared, whether the winner was chosen on the data now scoring it.",
+      "returns": {
+        "keys": [
+          "delta",
+          "sigma",
+          "severity",
+          "verdict",
+          "findings",
+          "trustworthy"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Advisory. It grades the DESIGN of a comparison and cannot know intent, so it never blocks an experiment.",
+      "when": "Before believing any improvement, including your own."
+    },
+    "capture_epoch_scores": {
+      "cost": "free",
+      "example": "cfg['capture_epoch_scores'] = []\ntrain_lib.train_numpy_fm(cfg, enc, splits, meta, print)\nfor epoch, valid_primary, scores_valid in cfg['capture_epoch_scores']:\n    ...   # exactly three names, valid split only",
+      "failure_modes": "Expecting 2 or 4 elements per entry, or expecting a (valid, test) pair inside an entry, raises at unpack time AFTER a full training run has been paid for.",
+      "importable_from_generated_python": false,
+      "inputs": "Set cfg['capture_epoch_scores'] = [] BEFORE calling train_numpy_fm. The list is filled in place during training.",
+      "kind": "MEASURE",
+      "module": null,
+      "orchestrator_only": false,
+      "outputs": "A LIST with one 3-tuple per epoch: (epoch:int, valid_primary:float, scores_valid:np.ndarray). VALID SPLIT ONLY -- there is no per-epoch test vector.",
+      "purpose": "Per-epoch validation scores from the training run your script is already doing, at no extra cost.",
+      "returns": {
+        "arity": 3,
+        "kind": "list_of_tuple",
+        "names": [
+          "epoch",
+          "valid_primary",
+          "scores_valid"
+        ],
+        "split": "valid"
+      },
+      "validation": "The per-epoch arrays are VALID-split predictions. Do not look for a test vector in them; take test predictions from train_numpy_fm's returned dict instead.",
+      "when": "Whenever you want the epoch curve, or per-epoch predictions to feed selection_rule_test."
+    },
+    "evaluate": {
+      "cost": "free",
+      "example": "m = evaluate(list(users), labels, scores); print(m[\"primary\"])",
+      "failure_modes": "Misaligned array lengths raise; scores must be in the cache's row order.",
+      "importable_from_generated_python": true,
+      "inputs": "users: list, labels: array, scores: array",
+      "kind": "EVALUATE",
+      "module": "evaluate",
+      "orchestrator_only": false,
+      "outputs": "{'GAUC': float, 'nDCG@5': float, 'primary': float}",
+      "purpose": "The official metric: GAUC, nDCG@5 and their mean.",
+      "returns": {
+        "keys": [
+          "GAUC",
+          "nDCG@5",
+          "primary"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Never call this on the test split. Scoring ground truth; do not modify.",
+      "when": "To score predictions on the valid split."
+    },
+    "free_recombination": {
+      "cost": "cheap",
+      "example": "out = free_recombination(members, users, labels, rules)",
+      "failure_modes": "Fewer members than `subset` silently shrinks the subset.",
+      "importable_from_generated_python": true,
+      "inputs": "member_scores (members, rows), users, labels, rules: {name: fn(subset_scores) -> scores}, n_subsets, subset",
+      "kind": "ENSEMBLE",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "{'reference_rule', 'n_subsets', 'rules': {name: {...}}}",
+      "purpose": "Compare aggregation rules over stored member predictions by resampling member subsets, with no training at all.",
+      "returns": {
+        "keys": [
+          "reference_rule",
+          "n_subsets",
+          "rules"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Requires >= 2 stored members. A rule winning on one subset is not a result; the resampled win-rate is the evidence.",
+      "when": "When choosing how to combine models, or checking whether a combination rule that won once wins repeatedly."
+    },
+    "get_feature_stats": {
+      "cost": "free",
+      "example": "d = get_feature_stats(\"duration_ms\")",
+      "failure_modes": "Unknown feature raises KeyError.",
+      "importable_from_generated_python": true,
+      "inputs": "feature: str, split: str = 'train'",
+      "kind": "MEASURE",
+      "module": "data_tools",
+      "orchestrator_only": false,
+      "outputs": "{'mean','std','min','max','missing',...}",
+      "purpose": "Summary statistics for one cached feature column.",
+      "returns": {
+        "keys": [
+          "mean",
+          "std",
+          "min",
+          "max",
+          "missing"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Near-zero std can be a float artefact; compare on a scale-relative tolerance rather than testing equality.",
+      "when": "To check coverage, range and missingness before using a feature."
+    },
+    "get_label_rate_by_segment": {
+      "cost": "free",
+      "example": "d = get_label_rate_by_segment(\"duration_ms\")",
+      "failure_modes": "Unknown feature raises KeyError; sparse bins give noisy rates.",
+      "importable_from_generated_python": true,
+      "inputs": "feature: str, n_bins: int = 10",
+      "kind": "MEASURE",
+      "module": "data_tools",
+      "orchestrator_only": false,
+      "outputs": "{'bins': [...], 'rates': [...], 'counts': [...]}",
+      "purpose": "Positive-label rate across bins of a feature.",
+      "returns": {
+        "keys": [
+          "bins",
+          "rates",
+          "counts"
+        ],
+        "kind": "dict"
+      },
+      "validation": "A rate difference across segments does not imply a within-user ranking gain; the metric ranks inside users, not across them.",
+      "when": "When asking whether a segment of the data behaves differently."
+    },
+    "get_user_history_stats": {
+      "cost": "free",
+      "example": "d = get_user_history_stats(\"train\")",
+      "failure_modes": "Unknown split name raises KeyError.",
+      "importable_from_generated_python": true,
+      "inputs": "split: str = 'train'",
+      "kind": "MEASURE",
+      "module": "data_tools",
+      "orchestrator_only": false,
+      "outputs": "{'mean': float, 'p50': float, 'p90': float, 'n_users': int}",
+      "purpose": "Distribution of per-user impression counts on a split.",
+      "returns": {
+        "keys": [
+          "mean",
+          "p50",
+          "p90",
+          "n_users"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Descriptive only. A difference between splits is a fact about the data, not evidence that any particular mechanism will help.",
+      "when": "When reasoning about anything that pools or weights a user's history."
+    },
+    "get_within_user_auc": {
+      "cost": "free",
+      "example": "d = get_within_user_auc(\"play_time_ms\")",
+      "failure_modes": "Unknown feature name raises KeyError. A feature with near-zero within-user variation returns an AUC near 0.5 that means 'no variation', not 'no signal'.",
+      "importable_from_generated_python": true,
+      "inputs": "feature: str, split: str = 'valid'",
+      "kind": "MEASURE",
+      "module": "data_tools",
+      "orchestrator_only": false,
+      "outputs": "{'auc': float, 'n_users': int, 'coverage': float}",
+      "purpose": "AUC of a single feature computed WITHIN each user, on a chosen split.",
+      "returns": {
+        "keys": [
+          "auc",
+          "n_users",
+          "coverage"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Both metrics rank WITHIN a user, so a feature constant across a user's rows contributes nothing regardless of its global AUC.",
+      "when": "Before proposing a feature, to see whether it separates positives from negatives inside a user's own impression list."
+    },
+    "hardcoded_constants": {
+      "cost": "free",
+      "example": "",
+      "failure_modes": "Static source scan; a constant computed at runtime is invisible to it.",
+      "importable_from_generated_python": false,
+      "inputs": "(none)",
+      "kind": "INSPECT",
+      "module": null,
+      "orchestrator_only": true,
+      "outputs": "list of {'name','default','line','kind','override_key','reachable_by_agent'}",
+      "purpose": "Modelling constants written into the training library, and whether each one is reachable through a pipeline override.",
+      "returns": {},
+      "validation": "Reports that a constant EXISTS. It says nothing about whether changing it helps -- that requires a paired measurement.",
+      "when": "When the search keeps landing within noise and the thing that matters may be a constant no menu axis can express."
+    },
+    "incumbent_cfg": {
+      "cost": "free",
+      "example": "cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)",
+      "failure_modes": "Needs the loaded splits and meta. Overriding 'multitask' also rebuilds 'aux_tasks' for you.",
+      "importable_from_generated_python": true,
+      "inputs": "splits, meta, choices=None, **overrides (e.g. hist_tau_days=7.0, k=32)",
+      "kind": "MODIFY",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "(cfg: dict, enc) ready to pass straight to train_numpy_fm",
+      "purpose": "Build a COMPLETE, valid training config for the incumbent, plus its feature encoding, with any key overridden by keyword.",
+      "returns": {
+        "arity": 2,
+        "kind": "tuple",
+        "names": [
+          "cfg",
+          "enc"
+        ]
+      },
+      "validation": "Change ONE key per experiment. Overriding several at once makes the result uninterpretable.",
+      "when": "Before every direct call to train_numpy_fm. This is how you obtain a config; do not assemble one by hand."
+    },
+    "pipeline_override": {
+      "cost": "free",
+      "example": "",
+      "failure_modes": "Out-of-range values are rejected with a MenuError naming the bound.",
+      "importable_from_generated_python": false,
+      "inputs": "one or more of: k, lr, epochs, patience, l2, bs, hist_tau_days, aux_weight, n_checkpoints, checkpoint_combine",
+      "kind": "MODIFY",
+      "module": null,
+      "orchestrator_only": false,
+      "outputs": "(applied to the training run; no return value)",
+      "purpose": "Set a training-pipeline constant the menu cannot express, by putting it directly in menu_choices.",
+      "returns": {},
+      "validation": "Range-checked at the menu boundary. Changing several at once makes the result uninterpretable -- vary one.",
+      "when": "When the axis you want to change is a constant rather than a component."
+    },
+    "selection_pressure": {
+      "cost": "free",
+      "example": "sp = selection_pressure(5)",
+      "failure_modes": "None; pure arithmetic.",
+      "importable_from_generated_python": true,
+      "inputs": "n_candidates_compared: int",
+      "kind": "CONFIRM",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "{'expected_max_delta','expected_max_sigma','reading'}",
+      "purpose": "How large an apparent gain arises purely from picking the best of n noisy comparisons.",
+      "returns": {
+        "keys": [
+          "n",
+          "expected_max_delta",
+          "expected_max_sigma",
+          "reading"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Assumes independent comparisons at the benchmark noise floor.",
+      "when": "Before quoting any 'we tried n things and this was best' number."
+    },
+    "selection_rule_test": {
+      "cost": "cheap",
+      "example": "out = selection_rule_test(per_epoch, users, labels, rules)",
+      "failure_modes": "Passing scores for a single epoch makes the comparison meaningless; shapes must line up with users/labels.",
+      "importable_from_generated_python": true,
+      "inputs": "per_epoch_scores (seeds, epochs, rows), users, labels, rules: {name: fn(per_epoch_primaries, per_epoch_scores) -> scores}",
+      "kind": "CONFIRM",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "{'reference_rule', 'n_evaluations', 'rules': {name: {'mean_delta', 'sigma', 't', 'wins', 'n', 'generalises'}}}",
+      "purpose": "Whether a rule for CHOOSING among candidates generalises, by selecting on one half of the users and scoring on the other, in both directions, over several independent splits.",
+      "returns": {
+        "keys": [
+          "reference_rule",
+          "n_evaluations",
+          "rules"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Needs per-epoch predictions to already exist. The first rule in `rules` is the reference every other is measured against.",
+      "when": "Whenever a number was produced by picking the best of several options on the same data it is now being scored on."
+    },
+    "train_numpy_fm": {
+      "cost": "one_training_run",
+      "example": "from research_tools import incumbent_cfg\ncfg, enc = incumbent_cfg(splits, meta)\ncfg['seed'] = args.seed\ncfg['capture_epoch_scores'] = []          # optional, see below\nres = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\nvalid_scores = res['scores_valid']        # NOT tuple unpacking\ntest_scores  = res['scores_test']\n# cfg['capture_epoch_scores'] now holds one tuple PER EPOCH:\n#     (epoch:int, valid_primary:float, scores_valid:np.ndarray)\n# THREE elements, and the array is the VALID split only. There is no\n# per-epoch test vector -- test scores exist only in res['scores_test'].\nfor epoch, valid_primary, valid_scores_at_epoch in cfg['capture_epoch_scores']:\n    ...",
+      "failure_modes": "An INCOMPLETE cfg raises KeyError listing every missing key at once. An unrecognised extra key is silently ignored, so check spelling against the override list. Destructuring the return as a tuple raises ValueError.",
+      "importable_from_generated_python": true,
+      "inputs": "cfg: dict, enc, splits, meta, log: callable. The cfg must contain ALL of: dim, k, lr, bs, epochs, patience, seed, loss, history, multitask, model, training, aux_tasks. Use `cfg, enc = incumbent_cfg(splits, meta, <overrides>)` to get one. Optionally set cfg['capture_epoch_scores'] = [] first; after training that list holds (epoch, valid_primary, scores) per epoch.",
+      "kind": "TRAIN",
+      "module": "train_lib",
+      "orchestrator_only": false,
+      "outputs": "A DICT with keys: scores_valid, scores_test, model, hist. NOT a tuple -- `a, b = train_numpy_fm(...)` raises 'too many values to unpack'.",
+      "purpose": "Train one model under an explicit cfg dict and return its validation and test score vectors.",
+      "returns": {
+        "keys": [
+          "scores_valid",
+          "scores_test",
+          "model",
+          "hist"
+        ],
+        "kind": "dict"
+      },
+      "validation": "One seed is one draw. A single-seed difference is not evidence.",
+      "when": "The normal way a generated experiment produces predictions. Get the cfg from incumbent_cfg -- never hand-build it."
+    },
+    "training_dynamics": {
+      "cost": "one_training_run",
+      "example": "",
+      "failure_modes": "Costs a full training run; allowed at most once per agent run.",
+      "importable_from_generated_python": false,
+      "inputs": "seeds: tuple = (0,), max_epochs: int = 40",
+      "kind": "TRAIN",
+      "module": null,
+      "orchestrator_only": true,
+      "outputs": "{'seeds': {seed: {'curve', 'peak_epoch', 'peak_primary', 'decline_sigma'}}, 'verdict': str}",
+      "purpose": "The validation-score curve across epochs with early stopping disabled, plus where it peaks and how far it moves afterwards.",
+      "returns": {},
+      "validation": "The peak epoch is an argmax over many validation evaluations, so it is fitted to validation. Treat the SHAPE of the curve as the finding, not the exact peak.",
+      "when": "When you do not know whether the model is over- or under-fitting, and the answer would change what you try next."
+    }
+  },
+  "importable_modules": [
+    "data_tools",
+    "evaluate",
+    "research_tools",
+    "train_lib"
+  ],
+  "orchestration_only": [
+    "hardcoded_constants",
+    "training_dynamics"
+  ],
+  "schema": "capability_contract/1"
+}

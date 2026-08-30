@@ -154,6 +154,17 @@ def main():
                          "times (and an improve, plus a debug if any node "
                          "errored). Budget caps still apply. Targets the "
                          "measured gap that only `draft` ever fired.")
+    ap.add_argument("--competition", action="store_true",
+                    help="one explicit profile that turns on the capabilities a "
+                         "competition run should demonstrate (research state, "
+                         "data tools, feature discovery, multi-candidate "
+                         "planning, branching) with conservative resource caps. "
+                         "Explicit CLI flags always win; the fully resolved "
+                         "configuration is printed before any spend.")
+    ap.add_argument("--max-training-runs", type=int, default=None,
+                    help="cap on TOTAL training executions. An outer iteration "
+                         "is not one training run: a paired 3-seed confirmation "
+                         "is six. Defaults to unlimited outside --competition.")
     ap.add_argument("--parallel-k", type=int, default=None,
                     help="opt-in parallel exploration: each iteration dispatches K "
                          "worker proposals simultaneously in isolated git worktrees "
@@ -161,6 +172,16 @@ def main():
                          "2+ beat the running best in the same round. Sequential "
                          "(K=1, today's behavior) remains the default when omitted.")
     a = ap.parse_args()
+
+    # Profile resolution happens BEFORE anything expensive: an unsafe or
+    # contradictory combination should cost nothing to discover.
+    from agent import profiles
+    resolved = profiles.resolve(a)
+    problems = profiles.validate(a, resolved)
+    if problems:
+        sys.exit("refusing to start:\n" + "\n".join(f"  - {p}" for p in problems))
+    if a.competition:
+        print(profiles.render(a, resolved))
 
     if a.smoke:
         a.max_iterations = min(a.max_iterations, 3)
@@ -229,6 +250,7 @@ def main():
         enable_research_state=a.research_state,
         enable_feature_discovery=a.feature_discovery,
         n_candidates=a.n_candidates,
+        max_training_runs=a.max_training_runs,
     )
     summary = loop.run()
 

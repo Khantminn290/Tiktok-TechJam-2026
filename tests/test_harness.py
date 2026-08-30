@@ -3039,6 +3039,297 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def _profile_args(**kw):
+    import argparse
+    ns = argparse.Namespace(
+        competition=False, data_tools=False, research_state=False,
+        feature_discovery=False, n_candidates=0, min_branching_iterations=0,
+        max_iterations=50, wall_clock_limit_h=6.0, max_spend_usd=2.0,
+        exec_timeout=1200, seed=0, draft_count=7, max_training_runs=None,
+        allow_locked_options=False, smoke=False, inject_error_at=None,
+        fresh=False)
+    for k, v in kw.items():
+        setattr(ns, k, v)
+    return ns
+
+
+def test_competition_profile():
+    """One explicit profile, and it must not overrule what the user asked for."""
+    print("\n[competition profile]")
+    from agent import profiles
+
+    # Default mode must stay exactly as it was.
+    a = _profile_args()
+    r = profiles.resolve(a, argv=[])
+    check("default mode enables nothing extra",
+          not a.data_tools and not a.research_state
+          and not a.feature_discovery and a.n_candidates == 0,
+          "the profile must be opt-in; default behaviour is unchanged")
+    check("...and reports its values as defaults",
+          all(src == "default" for _v, src in r.values()))
+
+    # Competition mode turns on the capabilities the autonomy criterion needs.
+    a = _profile_args(competition=True)
+    r = profiles.resolve(a, argv=["--competition"])
+    check("competition enables research state, data tools and feature discovery",
+          a.data_tools and a.research_state and a.feature_discovery)
+    check("...and multi-candidate planning with branching",
+          a.n_candidates >= 2 and a.min_branching_iterations >= 1)
+    check("...and sets a training-run cap, not just an iteration cap",
+          a.max_training_runs and a.max_training_runs > a.max_iterations,
+          "a paired confirmation is six training runs for one iteration")
+    check("...with conservative wall-clock and spend caps",
+          0 < a.wall_clock_limit_h <= 6 and 0 < a.max_spend_usd <= 10)
+
+    # Explicit CLI must win over the profile.
+    a = _profile_args(competition=True, max_iterations=4, n_candidates=2)
+    r = profiles.resolve(a, argv=["--competition", "--max-iterations", "4",
+                                  "--n-candidates", "2"])
+    check("an explicit CLI value overrides the profile",
+          a.max_iterations == 4 and r["max_iterations"][1] == "cli")
+    check("...while unspecified values still come from the profile",
+          r["max_spend_usd"][1] == "profile")
+
+    # Unsafe or contradictory combinations are refused BEFORE any spend.
+    check("competition + allow-locked-options is refused",
+          any("locked" in p for p in profiles.validate(
+              _profile_args(competition=True, allow_locked_options=True), r)),
+          "the profile must not silently enable leakage-sensitive options")
+    check("competition + smoke is refused",
+          bool(profiles.validate(_profile_args(competition=True, smoke=True), r)))
+    check("competition + inject-error-at is refused",
+          bool(profiles.validate(
+              _profile_args(competition=True, inject_error_at=2), r)))
+    check("a training-run cap below the iteration cap is refused",
+          bool(profiles.validate(
+              _profile_args(max_iterations=10, max_training_runs=3), r)))
+    check("a clean competition config raises no objection",
+          profiles.validate(_profile_args(competition=True,
+                                          max_training_runs=90), r) == [])
+
+    txt = profiles.render(_profile_args(competition=True), r)
+    check("the resolved configuration is printed in full, with sources",
+          "RESOLVED CONFIGURATION" in txt and "[profile]" in txt
+          and "max_training_runs" in txt)
+
+
+def test_training_run_budget():
+    """Training executions are counted separately from outer-loop decisions."""
+    print("\n[training-run budget]")
+    from agent import budget as B
+    from agent import experiment_spec as XS
+
+    led = B.Ledger(max_iterations=12, max_training_runs=10)
+    check("an unset training cap means unlimited",
+          B.Ledger().training_runs_left() is None
+          and B.Ledger().can_afford(999))
+
+    check("a 6-run confirmation is affordable with 10 left", led.can_afford(6))
+    led.record_training(6)
+    check("...and consumes six, not one",
+          led.training_runs == 6 and led.training_runs_left() == 4,
+          "conflating a paired confirmation with one iteration undercounts 6x")
+    check("a second 6-run confirmation is refused with 4 left",
+          not led.can_afford(6))
+    check("...and says why, in runs",
+          "only 4 remain" in led.why_not(6))
+    check("a cheaper experiment is still affordable", led.can_afford(4))
+
+    led.record_training(2, crashed=1)
+    check("crashed training executions are counted, not forgiven",
+          led.training_crashes == 1 and led.training_runs == 8,
+          "that compute is spent and unrecoverable")
+
+    d = led.as_dict()
+    check("the ledger reports both caps and both counters",
+          all(k in d for k in ("max_iterations", "max_training_runs",
+                               "training_runs_used", "training_runs_left",
+                               "training_crashes")))
+    check("the counting rule is stated for the report",
+          "6 training executions" in B.COUNTING_NOTE
+          and "preflight rejection is neither" in B.COUNTING_NOTE)
+
+    # A spec's declared cost is what the check uses.
+    spec = XS.ExperimentSpec(hypothesis="h",
+                             experiment_type=XS.MULTI_SEED_REPLICATION,
+                             control={"a": 1}, treatment={"a": 2},
+                             seeds=(0, 1, 2))
+    check("a paired 3-seed spec declares six runs", spec.n_runs == 6)
+    check("affordability is checked against the spec's own cost",
+          B.Ledger(max_training_runs=5).can_afford(spec.n_runs) is False
+          and B.Ledger(max_training_runs=6).can_afford(spec.n_runs) is True)
+
+
+def test_confirmation_defers_when_runs_exhausted():
+    """No confirmation may begin that cannot be finished."""
+    print("\n[confirmation vs training budget]")
+    from agent import budget as B
+    from agent import experiment_spec as XS
+
+    with tempfile.TemporaryDirectory() as td:
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tree = ExperimentTree(td)
+        loop.max_iterations = 12
+        spec = XS.ExperimentSpec(hypothesis="h",
+                                 experiment_type=XS.MULTI_SEED_REPLICATION,
+                                 control={"a": 1}, treatment={"a": 2},
+                                 seeds=(0, 1, 2))
+        loop._confirmation_queue = [spec]
+
+        loop.ledger = B.Ledger(max_iterations=12, max_training_runs=4)
+        check("a 6-run confirmation is deferred when only 4 runs remain",
+              loop._dequeue_confirmation() is None,
+              "two unpaired arms answer nothing and spend the rest of the budget")
+        check("...and it stays queued rather than being dropped",
+              len(loop._confirmation_queue) == 1)
+
+        loop.ledger = B.Ledger(max_iterations=12, max_training_runs=6)
+        check("...and runs once the budget can cover it",
+              loop._dequeue_confirmation() is spec)
+
+        # Exhausted training budget stops the run outright.
+        loop2 = AgentLoop.__new__(AgentLoop)
+        loop2.tree = ExperimentTree(td)
+        loop2.max_iterations = 50
+        loop2.wall_clock_limit_s = 6 * 3600
+        loop2.run_started = time.time()
+        loop2._confirmation_queue = []
+        loop2.ledger = B.Ledger(max_iterations=50, max_training_runs=4)
+        loop2.ledger.record_training(4)
+        check("an exhausted training-run budget stops the run",
+              "training-run budget exhausted" in (loop2.stop_reason() or ""))
+
+
+def test_return_shape_contract():
+    """The exact Path B failures from the last real run, prevented statically.
+
+    All four crashes in that run were a call site disagreeing with a return
+    shape the contract already knew, and each cost a full training run to
+    discover: 42s, 42s, 71s and 983s of compute to learn a written-down fact.
+    """
+    print("\n[return-shape contract]")
+    from agent import capabilities as C
+    from agent import preflight as P
+
+    # Every capability generated code can CALL must declare its return shape,
+    # or preflight has nothing to check the call site against.
+    unshaped = [n for n, c in C.all_capabilities().items()
+                if c.invoked_by_import and not c.returns]
+    check("every import-invoked capability declares a return shape",
+          not unshaped, f"unshaped: {unshaped}")
+
+    tn = C.get("train_numpy_fm")
+    check("train_numpy_fm is declared a dict, not a tuple",
+          tn.return_kind == "dict" and not tn.unpackable)
+    check("...and names its keys", "scores_valid" in tn.returns["keys"]
+          and "scores_test" in tn.returns["keys"])
+    ce = C.get("capture_epoch_scores")
+    check("capture entries are declared as 3-tuples",
+          ce.return_kind == "list_of_tuple" and ce.return_arity == 3)
+    check("...and declared VALID-split only",
+          ce.returns.get("split") == "valid",
+          "the agent hunted twice for a per-epoch test vector that does not exist")
+
+    with tempfile.TemporaryDirectory() as td:
+        def write(name, body):
+            p = os.path.join(td, name)
+            with open(p, "w") as fh:
+                fh.write("import train_lib\n"
+                         "from research_tools import incumbent_cfg\n" + body)
+            return p
+
+        # FAILURE 1: dict destructured as a tuple.
+        r = P.preflight(write("a.py",
+                              "cfg, enc = incumbent_cfg(s, m)\n"
+                              "valid, test = train_lib.train_numpy_fm("
+                              "cfg, enc, s, m, print)\n"))
+        check("unpacking a dict-returning capability is caught before training",
+              not r["ok"] and r["failed_stage"] == P.RETURN_SHAPE)
+        check("...the message says it returns a dict",
+              "returns a DICT" in json.dumps(r["issues"]))
+        check("...and the fix shows correct indexing",
+              "scores_valid" in r["feedback"])
+        check("...and no training time was spent",
+              r["spent_training_time"] is False)
+
+        # FAILURE 2: capture entries unpacked with the wrong arity.
+        r = P.preflight(write("b.py",
+                              "cfg, enc = incumbent_cfg(s, m)\n"
+                              "for ep, v, t, extra in cfg['capture_epoch_scores']:\n"
+                              "    pass\n"))
+        check("a wrong-arity capture loop is caught before training",
+              not r["ok"] and r["failed_stage"] == P.RETURN_SHAPE)
+        check("...the message states the real arity",
+              "3 elements" in json.dumps(r["issues"]))
+        check("...and says where test predictions actually live",
+              "scores_test" in json.dumps(r["issues"]),
+              "rejecting without redirecting just wastes the next attempt too")
+
+        # A correctly-shaped tuple return must NOT be flagged.
+        r = P.preflight(write("c.py", "cfg, enc = incumbent_cfg(s, m)\n"))
+        check("a correct 2-tuple unpack of incumbent_cfg is allowed",
+              r["failed_stage"] != P.RETURN_SHAPE, json.dumps(r["issues"])[:120])
+
+        # ...and the wrong arity on that tuple IS flagged.
+        r = P.preflight(write("d.py", "cfg, enc, extra = incumbent_cfg(s, m)\n"))
+        check("the wrong arity on a tuple return is caught",
+              not r["ok"] and r["failed_stage"] == P.RETURN_SHAPE)
+
+        # Plain assignment is always fine.
+        r = P.preflight(write("e.py",
+                              "res = train_lib.train_numpy_fm(c, e, s, m, print)\n"
+                              "v = res['scores_valid']\n"))
+        check("indexing the returned dict passes the shape stage",
+              r["failed_stage"] != P.RETURN_SHAPE)
+
+
+def test_contract_is_executable_from_generated_code():
+    """Generated code must be able to ASK, not guess -- without reaching labels."""
+    print("\n[executable contract]")
+    from agent import capabilities as C
+
+    path = C.export_contract()
+    check("the contract exports to runtime/, where generated code can read it",
+          os.path.exists(path) and "runtime" in path)
+
+    with open(path) as fh:
+        doc = json.load(fh)
+    check("the exported contract matches the live registry",
+          set(doc["capabilities"]) == set(C.all_capabilities()),
+          "a stale contract handed to generated code is worse than none")
+    check("the export carries machine-readable return shapes",
+          doc["capabilities"]["train_numpy_fm"]["returns"]["kind"] == "dict")
+
+    # It must be reachable with ONLY runtime/ on the path -- the real subprocess
+    # environment -- and must not carry data, labels or scores.
+    import subprocess
+    probe = ("import sys; sys.path.insert(0, 'runtime')\n"
+             "from research_tools import contract, describe\n"
+             "r = contract('train_numpy_fm')['returns']\n"
+             "assert r['kind'] == 'dict', r\n"
+             "assert 'scores_valid' in r['keys']\n"
+             "e = contract('capture_epoch_scores')['returns']\n"
+             "assert e['arity'] == 3 and e['split'] == 'valid', e\n"
+             "print('OK')\n")
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True,
+                         text=True, cwd=_ROOT, timeout=60)
+    check("generated code can read the contract at runtime",
+          out.stdout.strip().endswith("OK"),
+          (out.stderr or "")[-160:])
+
+    blob = json.dumps(doc).lower()
+    check("the contract leaks no labels or test data",
+          "long_view" not in blob and "scores_test.npy" not in blob
+          and "0.605" not in blob,
+          "it describes an API surface, so it must carry no measurements")
+
+    txt = C.render_for_prompt()
+    check("the prompt states return shapes explicitly",
+          "RETURN SHAPES" in txt and "NOT unpackable" in txt)
+    check("the prompt carries a worked example for the two that failed",
+          "WORKED EXAMPLE" in txt and "res['scores_valid']" in txt)
+
+
 def test_experiment_spec():
     """An experiment the system executes, not a paragraph it writes."""
     print("\n[experiment spec]")
@@ -3407,10 +3698,17 @@ def test_capability_contract():
           all(c.contexts for c in caps.values()))
     check("every import-invoked capability names its module",
           all(c.module for c in caps.values() if c.invoked_by_import))
+    # Some capabilities are reached by setting configuration rather than by
+    # importing a function -- `pipeline_override` via menu_choices,
+    # `capture_epoch_scores` via a cfg key. Each must say WHICH, or the contract
+    # implies a module that does not exist.
+    config_set = [c for c in caps.values()
+                  if c.importable and not c.invoked_by_import]
+    vague = [c.name for c in config_set
+             if not any(t in (c.inputs + c.purpose)
+                        for t in ("menu_choices", "cfg[", "cfg "))]
     check("a capability available without an import says how it IS invoked",
-          all("menu_choices" in c.inputs or "menu_choices" in c.purpose
-              for c in caps.values() if c.importable and not c.invoked_by_import),
-          "config-set capabilities must not imply a module that does not exist")
+          not vague, f"vague: {vague}")
     check("every capability states its failure modes and validation needs",
           all(c.failure_modes and c.validation for c in caps.values()))
 
@@ -3999,6 +4297,10 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_competition_profile, test_training_run_budget,
+              test_confirmation_defers_when_runs_exhausted,
+              test_return_shape_contract,
+              test_contract_is_executable_from_generated_code,
               test_experiment_spec, test_confirmation_is_not_re_queued,
               test_feature_store, test_allocator,
               test_complete_cfg_is_obtainable,

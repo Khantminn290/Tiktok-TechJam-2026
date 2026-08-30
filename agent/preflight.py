@@ -47,8 +47,9 @@ from . import capabilities as caps  # noqa: E402
 from . import leakage_check  # noqa: E402
 
 SYNTAX, IMPORTS, CAPABILITY = "syntax", "imports", "capability"
+RETURN_SHAPE = "return_shape"
 CONFIG, LEAKAGE, SMOKE = "config", "leakage", "smoke"
-STAGES = (SYNTAX, IMPORTS, CAPABILITY, CONFIG, LEAKAGE, SMOKE)
+STAGES = (SYNTAX, IMPORTS, CAPABILITY, RETURN_SHAPE, CONFIG, LEAKAGE, SMOKE)
 
 # Modules generated code may import: the contract's own list, plus the ordinary
 # scientific-Python surface any experiment needs.
@@ -170,6 +171,106 @@ def _resolve_in_subprocess(wanted: list, timeout_s: int = 90) -> dict:
         return json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else {}
     except (subprocess.SubprocessError, ValueError, json.JSONDecodeError, IndexError):
         return {}
+
+
+def _target_arity(target) -> int | None:
+    """How many names an assignment target destructures into, if it is a tuple."""
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return len(target.elts)
+    return None
+
+
+def _called_capability(node: ast.AST) -> str | None:
+    """Name of the contract capability this Call invokes, if any."""
+    if not isinstance(node, ast.Call):
+        return None
+    f = node.func
+    if isinstance(f, ast.Attribute):
+        return f.attr
+    if isinstance(f, ast.Name):
+        return f.id
+    return None
+
+
+def check_return_shapes(tree: ast.AST) -> list:
+    """Does each call site agree with the capability's DECLARED return shape?
+
+    This is the stage that would have prevented every Path B crash in the last
+    recorded run. All four were a call site disagreeing with a shape the
+    contract already knew:
+
+        valid, test = train_lib.train_numpy_fm(...)   # returns a DICT
+        for a, b in cfg['capture_epoch_scores']       # entries are 3-tuples
+        ... looking for a test vector inside a per-epoch entry that has none
+
+    Each cost a full training run to discover -- 42s, 42s, 71s and 983s of
+    compute to learn a fact that was already written down.
+    """
+    issues = []
+    known = caps.all_capabilities()
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or node.value is None:
+            continue
+        name = _called_capability(node.value)
+        cap = known.get(name) if name else None
+        if cap is None or not cap.returns:
+            continue
+        for tgt in node.targets:
+            arity = _target_arity(tgt)
+            if arity is None:
+                continue                       # plain `x = f(...)` is always fine
+            kind = cap.return_kind
+            if kind == "dict":
+                keys = ", ".join((cap.returns.get("keys") or [])[:4])
+                issues.append(Issue(
+                    CAPABILITY,
+                    f"`{name}` returns a DICT, but this line unpacks it into "
+                    f"{arity} names — that raises ValueError at runtime",
+                    node.lineno,
+                    f"Index the dict instead of destructuring it. Keys: {keys}."
+                    + (f"\n{cap.example}" if cap.example else "")))
+            elif kind == "tuple" and cap.return_arity not in (None, arity):
+                issues.append(Issue(
+                    CAPABILITY,
+                    f"`{name}` returns {cap.return_arity} values, but this line "
+                    f"unpacks {arity}", node.lineno,
+                    (cap.example or
+                     f"Expected names: {', '.join(cap.returns.get('names') or [])}")))
+
+    # Iterating a list-of-tuple payload with the wrong arity. The capture list
+    # is reached through a config KEY, not a call, so it needs its own check.
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.For):
+            continue
+        if not _iterates_capture(node.iter):
+            continue
+        arity = _target_arity(node.target)
+        cap = known.get("capture_epoch_scores")
+        want = cap.return_arity if cap else 3
+        if arity is not None and arity != want:
+            names = ", ".join((cap.returns.get("names") or []) if cap else [])
+            issues.append(Issue(
+                CAPABILITY,
+                f"each capture_epoch_scores entry has {want} elements, but this "
+                f"loop unpacks {arity}", node.lineno,
+                f"Entries are ({names}). The array is the VALID split only — "
+                f"there is no per-epoch test vector. Take test predictions from "
+                f"train_numpy_fm's returned dict: res['scores_test']."))
+    return issues
+
+
+def _iterates_capture(node: ast.AST) -> bool:
+    """Is this iterating cfg['capture_epoch_scores'] (or a plain alias)?"""
+    if isinstance(node, ast.Subscript):
+        sl = node.slice
+        if isinstance(sl, ast.Constant) and sl.value == "capture_epoch_scores":
+            return True
+    if isinstance(node, ast.Name) and "capture" in node.id.lower():
+        return True
+    if isinstance(node, ast.Attribute) and "capture" in node.attr.lower():
+        return True
+    return False
 
 
 def check_capabilities(tree: ast.AST) -> list:
@@ -304,6 +405,8 @@ def preflight(code_path: str, menu_choices: dict | None = None, menu=None,
             issues = check_imports(tree)
         elif stage == CAPABILITY:
             issues = check_capabilities(tree)
+        elif stage == RETURN_SHAPE:
+            issues = check_return_shapes(tree)
         elif stage == CONFIG:
             issues = check_config(menu_choices, menu)
         elif stage == LEAKAGE:
