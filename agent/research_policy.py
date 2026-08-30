@@ -40,6 +40,33 @@ def _recent_categories(nodes: list, k: int = 8) -> list:
     return [(n.get("research_category") or "") for n in nodes[-k:]]
 
 
+def _mandatory_confirmation(scored: list) -> str:
+    """Is there a single-seed result big enough that believing it is a risk?
+
+    Returns the reason to confirm, or "" if nothing is pending. The threshold
+    comes from the benchmark's own noise rather than a preference: an effect
+    below half the noise floor is not worth a confirmation run either, so the
+    gate fires only in the band where a result is both plausible and unproven.
+    """
+    if not scored:
+        return ""
+    from . import evidence as ev
+    from .research_run import NOISE  # the benchmark's measured seed noise
+    best = max(scored, key=lambda n: n["metrics"]["primary"])
+    delta = best["metrics"]["primary"] - 0.6016      # vs the official baseline
+    if delta < NOISE / 2:
+        return ""
+    state = ev.classify(delta=delta, n_seeds=1)
+    if state["state"] != ev.PRELIMINARY:
+        return ""
+    plan = ev.confirmation_plan(delta, n_seeds=1)
+    return (f"node {best.get('iteration_id')} is the best result at "
+            f"{best['metrics']['primary']:.5f} ({delta / NOISE:+.2f} sigma over "
+            f"baseline) but rests on ONE seed, so it is PRELIMINARY and cannot "
+            f"be acted on. Confirm it at ~{plan['seeds_required']} paired seeds "
+            f"before building anything on top of it")
+
+
 def decide_category(state, nodes: list, iteration_budget_left: int = 50) -> dict:
     """Score every category against the research state and pick the highest.
 
@@ -92,6 +119,19 @@ def decide_category(state, nodes: list, iteration_budget_left: int = 50) -> dict
         conf += 0.6 * len(unconfirmed)
         ev_conf.append(f"{len(unconfirmed)} promising candidate(s) still "
                        f"observed_once")
+    # A PRELIMINARY result that is large enough to be interesting is exactly the
+    # situation in which the agent previously went wrong: clean run 2 adopted a
+    # value on one seed and carried it forward, and the effect turned out to be
+    # -0.01 sigma when the sweep it had itself specified was actually run.
+    #
+    # So this is not a preference weight. When a single-seed result is plausibly
+    # above noise, confirming it DOMINATES: no amount of exploration appetite
+    # should outrank finding out whether the thing you already believe is true.
+    mandatory = _mandatory_confirmation(scored)
+    if mandatory:
+        conf = max(conf, 10.0)
+        ev_conf.append(mandatory)
+
     if conf == 0.0:
         why[CONFIRMATION] = ("nothing is awaiting confirmation: the incumbent and "
                              "the live candidates are already multi-seed backed")

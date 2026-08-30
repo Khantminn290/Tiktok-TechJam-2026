@@ -1,0 +1,61 @@
+{
+  "title": "Post-architecture clean evaluation",
+  "registered_before_any_run": true,
+  "purpose": "Measure whether the capability contract, preflight, evidence states, budget accounting and failure-repeat detection changed the RELIABILITY and SCIENTIFIC DISCIPLINE of the agent. This is deliberately NOT an independent-discovery evaluation.",
+
+  "why_not_an_autonomy_level_test": [
+    "The agent's research memory and the menu's dead-end notes both contain measured teacher outcomes, verified by audit before this run: 5 answer-shaped hits in research memory and 21 in dead_ends.",
+    "That content is legitimate accumulated knowledge and is what makes the agent effective in normal operation, so it is NOT removed for this evaluation.",
+    "But it steers attention, so no result here can support a Level A claim. The autonomy classification remains Level B (capability transfer) and this protocol does not attempt to move it."
+  ],
+
+  "runs": 3,
+  "runs_are_fixed_in_advance": true,
+  "no_runs_added_after_seeing_results": true,
+  "all_runs_reported_regardless_of_outcome": true,
+
+  "command": "python3 run_agent.py --fresh --feature-discovery --research-state --data-tools --n-candidates 4 --max-iterations 6 --max-spend-usd 3.0",
+  "budget_identical_to_previous_evaluation": true,
+  "why_identical": "The before/after reliability comparison is only meaningful at the same budget and settings as the pre-architecture evaluation.",
+
+  "baseline_to_compare_against": {
+    "source": "logs/opus_research/clean_run_{1,2,3}.jsonl (pre-architecture)",
+    "nodes_total": 16,
+    "scored": 11,
+    "path_b_attempts": 7,
+    "path_b_crashes": 5,
+    "path_b_crash_rate": 0.71,
+    "orchestration_only_misuse_crashes": 3,
+    "expensive_diagnostics_invoked": 0,
+    "best_primary": 0.60434
+  },
+
+  "primary_metrics": {
+    "path_b_crash_rate": "crashes / Path B attempts. Pre-architecture: 0.71",
+    "preflight_catches": "scripts rejected before execution, by stage",
+    "orchestration_only_misuse": "attempts to call an orchestration-only capability from generated code. Pre-architecture these cost 3 full iterations; now they must cost zero training time.",
+    "experiment_completion_rate": "scored experiments / iterations that consumed budget",
+    "repeated_identical_failures": "same failure fingerprint twice in a run",
+    "manual_interventions": "must remain 0"
+  },
+
+  "scientific_discipline_metrics": {
+    "single_seed_claims_promoted": "results treated as established on one seed. Target: 0.",
+    "confirmation_triggered": "did a promising single-seed result cause a confirmation experiment",
+    "inquiry_completeness": "share of nodes stating observation, >=2 hypotheses, discriminating measurement, capability_required and promotion_criterion",
+    "capability_named_correctly": "share of stated capability_required values that exist in the contract and are valid in the chosen context",
+    "memory_usage": "claims cited or contradicted"
+  },
+
+  "success_criteria_fixed_in_advance": {
+    "primary": "Path B crash rate strictly below the pre-architecture 0.71, with zero training time spent on orchestration-only misuse.",
+    "secondary": "No single-seed result promoted to a confirmed claim or carried forward as settled.",
+    "tertiary": "Preflight rejections cost no training time and are accounted separately from experiments.",
+    "explicitly_not_a_criterion": "Beating 0.60541. The benchmark has plateaued; a score change is not what this protocol is testing, and the incumbent is protected."
+  },
+
+  "environment_frozen_at": "commit recorded in each run's provenance stamp",
+  "incumbent_protection": "verify_incumbent must recompute 0.60541 exactly, before and after.",
+  "dataset_scope": "KuaiRand-Pure only.",
+  "hidden_test": "not touched."
+}

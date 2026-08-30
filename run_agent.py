@@ -35,6 +35,12 @@ from agent.pricing import RateTable  # noqa: E402
 SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json",
                         "ab_test",              # A/B evidence, not a search product
                         "feature_registry.jsonl",  # accumulated feature research
+                        # Research memory is KNOWLEDGE, not a search product. A
+                        # --fresh run restarts the SEARCH; it must not give the
+                        # agent amnesia, or every run re-derives what is already
+                        # known and the memory subsystem is inert in exactly the
+                        # runs that evaluate it.
+                        "research_memory.jsonl",
                         "opus_research")           # the research journal itself
 
 

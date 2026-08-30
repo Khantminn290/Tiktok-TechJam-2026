@@ -80,7 +80,10 @@ def seeds_needed(delta: float, sd: float | None = None,
     if not delta:
         return cap
     n = math.ceil((t_target * sd / abs(delta)) ** 2)
-    return max(2, min(int(n), cap))
+    # Floor of 3, not 2: with two points the spread estimate rests on a single
+    # difference, so a "confirmation" at n=2 confirms almost nothing however
+    # large the effect looks.
+    return max(3, min(int(n), cap))
 
 
 def classify(delta: float | None, n_seeds: int = 0, paired: bool = False,

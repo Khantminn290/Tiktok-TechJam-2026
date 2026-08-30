@@ -25,6 +25,7 @@ import difflib
 import hashlib
 import json
 import os
+import signal
 import stat
 import subprocess
 import sys
@@ -112,6 +113,13 @@ def restricted_access(unreadable_paths=(), read_only_paths=()):
     permission needed to resolve ANY path through it, so a hardcoded absolute
     path fails identically to one built from an env var. Permissions are always
     restored, including when the wrapped code raises or times out.
+
+    ...and including when the process is TERMINATED. `finally` does not run on
+    SIGTERM, so a plain `kill` of an agent run used to leave the dataset and the
+    cache at mode 0o000 -- the data was intact but unreadable, and the next run
+    failed with "dataset not found". Found by killing a run mid-experiment.
+    A SIGTERM/SIGINT handler restores the saved modes before re-raising, so an
+    interrupted run leaves the working tree usable.
     """
     assert_not_root()
     saved = {}
@@ -120,6 +128,30 @@ def restricted_access(unreadable_paths=(), read_only_paths=()):
         if p not in saved and os.path.exists(p):
             saved[p] = stat.S_IMODE(os.stat(p).st_mode)
             os.chmod(p, mode)
+
+    def _restore():
+        for p, mode in saved.items():
+            try:
+                os.chmod(p, mode)
+            except OSError:
+                pass
+
+    def _on_signal(signum, _frame):
+        _restore()
+        # Restore the default disposition and re-raise, so the process still
+        # dies the way the sender intended -- this handler exists to clean up,
+        # not to make the run unkillable.
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    prev_handlers = {}
+    # Only the main thread may install handlers; parallel workers run in threads
+    # and simply rely on the coordinator's handler plus `finally`.
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            prev_handlers[sig] = signal.signal(sig, _on_signal)
+    except ValueError:
+        prev_handlers = {}
 
     try:
         for p in unreadable_paths:
@@ -140,10 +172,11 @@ def restricted_access(unreadable_paths=(), read_only_paths=()):
                 _lock_file(p, 0o444)
         yield
     finally:
-        for p, mode in saved.items():
+        _restore()
+        for sig, prev in prev_handlers.items():
             try:
-                os.chmod(p, mode)
-            except OSError:
+                signal.signal(sig, prev)
+            except (ValueError, TypeError):
                 pass
 
 

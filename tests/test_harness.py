@@ -518,6 +518,42 @@ def test_data_boundary():
                            "hourmin", "date", "time_ms", "user_raw"}))
 
 
+def test_restricted_access_survives_termination():
+    """A killed run must not leave the dataset unreadable.
+
+    `finally` does not run on SIGTERM. Killing an agent mid-experiment used to
+    leave the real data and cache directories at mode 0o000 -- intact but
+    unreadable -- and the next run failed with "dataset not found", which looks
+    exactly like data loss. Found by doing it.
+    """
+    print("\n[restricted access: termination safety]")
+    import stat as _stat
+    import subprocess as _sp
+    with tempfile.TemporaryDirectory() as td:
+        target = os.path.join(td, "locked")
+        os.makedirs(target)
+        before = _stat.S_IMODE(os.stat(target).st_mode)
+        script = (f"import sys,time\n"
+                  f"sys.path.insert(0, {_ROOT!r})\n"
+                  f"from agent.executor import restricted_access\n"
+                  f"with restricted_access(unreadable_paths=[{target!r}]):\n"
+                  f"    print('locked', flush=True); time.sleep(30)\n")
+        p = _sp.Popen([sys.executable, "-c", script], stdout=_sp.PIPE, text=True)
+        try:
+            p.stdout.readline()
+            during = _stat.S_IMODE(os.stat(target).st_mode)
+            check("the path really is locked while the block runs", during == 0)
+            p.terminate()
+            p.wait(timeout=15)
+        finally:
+            if p.poll() is None:
+                p.kill()
+        after = _stat.S_IMODE(os.stat(target).st_mode)
+        check("SIGTERM restores the original permissions", after == before,
+              f"{oct(before)} -> {oct(during)} -> {oct(after)}")
+        check("...and the process still dies", p.poll() is not None)
+
+
 def test_restricted_access():
     """Item 4, half B + item 5: a technical (not instruction-following) boundary.
 
@@ -1714,14 +1750,16 @@ def test_research_state_no_side_effects():
     before_menu = open(MENU_PATH).read()
     before_exp = (open(os.path.join(_ROOT, "agent", "experience.md")).read()
                   if os.path.exists(os.path.join(_ROOT, "agent", "experience.md")) else "")
-    before_journal = open(os.path.join(_ROOT, "logs", "journal.jsonl")).read()
+    journal_path = os.path.join(_ROOT, "logs", "journal.jsonl")
+    before_journal = open(journal_path).read() if os.path.exists(journal_path) else None
     rs = ResearchState(_ROOT); rs.render(); rs.as_dict()
     check("ResearchState does not mutate the menu", open(MENU_PATH).read() == before_menu)
     check("ResearchState does not mutate experience memory",
           (open(os.path.join(_ROOT, "agent", "experience.md")).read()
            if before_exp else "") == before_exp)
     check("ResearchState does not mutate the journal",
-          open(os.path.join(_ROOT, "logs", "journal.jsonl")).read() == before_journal)
+          ((open(journal_path).read() if os.path.exists(journal_path) else None)
+           == before_journal))
     check("data boundary redaction still intact (never shrinks)",
           {"long_view", "is_click", "is_like", "is_forward",
            "play_time_ms"} <= set(db.TEST_LABEL_COLUMNS))
@@ -2127,11 +2165,8 @@ def test_budget_phase_awareness():
     from agent.research_policy import decide_category, render_decision
     from agent.research_state import ResearchState
 
-    nodes = []
-    for ln in open(os.path.join(_ROOT, "logs", "journal.jsonl")):
-        if ln.strip():
-            nodes.append(json.loads(ln))
     st = ResearchState(_ROOT)
+    nodes = list(st.nodes)
     early = decide_category(st, nodes, iteration_budget_left=40)
     late = decide_category(st, nodes, iteration_budget_left=2)
 
@@ -3004,10 +3039,60 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_run_metrics_and_demo():
+    """The reported metrics must be computable, and the demo must not invent."""
+    print("\n[run metrics + demo trace]")
+    from agent import demo_cycle as D
+    from agent import run_metrics as RM
+
+    # Definitions must apply unchanged to the pre-architecture journals, or a
+    # before/after comparison is meaningless.
+    pre = os.path.join(_ROOT, "logs", "opus_research", "clean_run_3.jsonl")
+    if os.path.exists(pre):
+        m = RM.compute(RM._load(pre), "pre3")
+        check("metrics reproduce the recorded pre-architecture run",
+              m["nodes"] == 6 and m["path_b_attempts"] == 3
+              and m["path_b_crashes"] == 3,
+              f"nodes={m['nodes']} pathB={m['path_b_attempts']}/{m['path_b_crashes']}")
+        check("orchestration-only misuse is detected from the trace",
+              m["orchestration_only_misuse"] >= 1)
+        check("a crash rate is reported as a rate, not a count",
+              m["path_b_crash_rate"] == 1.0)
+
+    # A preflight rejection must show up as free, not as a spent experiment.
+    synthetic = [{"iteration_id": 0, "status": "error", "wall_clock_seconds": 0.0,
+                  "error_trace": "PREFLIGHT REJECTED THIS SCRIPT\n"
+                                 "PREFLIGHT FAILED at the CAPABILITY stage.",
+                  "implementation_path": "B", "events": []},
+                 {"iteration_id": 1, "status": "success",
+                  "wall_clock_seconds": 30.0, "metrics": {"primary": 0.604},
+                  "implementation_path": "A", "events": []}]
+    m = RM.compute(synthetic, "synth")
+    check("a preflight rejection is counted as free, not as an experiment",
+          m["preflight_rejections"] == 1 and m["iterations_consumed"] == 1
+          and m["experiments_completed"] == 1)
+    check("the preflight stage that fired is recorded",
+          m["preflight_stages"].get("capability") == 1)
+
+    # The demo must mark absent steps as absent rather than fabricating them.
+    c = D.build_cycle(synthetic, node_id=0)
+    txt = D.render(c)
+    check("the demo trace reports missing steps as NOT PRESENT",
+          "NOT PRESENT" in txt,
+          "a trace that never says 'missing' is a story, not evidence")
+    check("the demo reports a preflight rejection honestly",
+          "REJECTED before execution" in txt)
+    c2 = D.build_cycle(synthetic, node_id=1)
+    check("the demo grades a scored node's evidence state",
+          (c2["steps"]["verdict"] or {}).get("state") == "PRELIMINARY",
+          "one seed, so PRELIMINARY is the only defensible state")
+
+
 def test_capability_contract():
     """One registry, and it must not be able to lie about itself."""
     print("\n[capability contract]")
     from agent import capabilities as C
+    from agent import prompts as prompts_mod
 
     caps = C.all_capabilities()
     check("every capability declares a known kind",
@@ -3065,6 +3150,20 @@ def test_capability_contract():
     txt = C.render_for_prompt()
     check("the prompt rendering names the orchestration-only boundary",
           "ORCHESTRATION-ONLY" in txt and "training_dynamics" in txt)
+
+    # Tool self-awareness: the contract has to answer the questions the agent
+    # needs answered before it can choose a capability at all.
+    for cap_name in ("selection_rule_test", "training_dynamics"):
+        full = C.render_full(cap_name)
+        check(f"the contract answers what/where/cost/resolves for {cap_name}",
+              all(f in full for f in ("PURPOSE", "WHEN TO USE", "RESOLVES",
+                                      "INVOCATION CONTEXT", "EXPENSIVE",
+                                      "OUTPUTS", "FAILURE MODES")))
+    check("the schema requires the agent to name the capability it needs",
+          "capability_required" in prompts_mod.CANDIDATE_SECTION
+          and "promotion_criterion" in prompts_mod.CANDIDATE_SECTION,
+          "choosing a measurement without naming its capability is how the "
+          "orchestration-only crash happened")
     check("the contract is serialisable as data",
           isinstance(json.loads(C.as_json()), dict))
 
@@ -3220,6 +3319,22 @@ def test_evidence_states():
           E.seeds_needed(0.0004) > E.seeds_needed(0.004))
     check("CONFIRMED is the only state that authorises a submission change",
           E.ACTIONABLE == (E.CONFIRMED,))
+    check("confirmation never asks for fewer than 3 seeds",
+          min(E.seeds_needed(d) for d in (0.001, 0.01, 0.1, 1.0)) >= 3,
+          "two points give a spread estimate from a single difference")
+
+    # Confirmation must TRIGGER, not merely be available. This is the gate the
+    # tau episode needed: a promising one-seed result outranks everything else.
+    from agent.research_policy import _mandatory_confirmation
+    fired = _mandatory_confirmation([{"iteration_id": 3,
+                                      "metrics": {"primary": 0.6045}}])
+    check("a promising single-seed result forces confirmation", bool(fired))
+    check("...and the reason names the seed count required",
+          "paired seeds" in fired)
+    check("a result at the baseline does not trigger a confirmation run",
+          not _mandatory_confirmation([{"iteration_id": 1,
+                                        "metrics": {"primary": 0.6017}}]),
+          "confirming noise is as wasteful as believing it")
 
 
 def test_research_memory():
@@ -3261,6 +3376,14 @@ def test_research_memory():
               K.in_scope(u, {"epoch_curve": "monotonic_decline"}))
         check("an unrelated context does not silently exclude a claim",
               K.in_scope(u, {"model": "fm_numpy"}))
+
+        # A --fresh run restarts the SEARCH. It must not wipe KNOWLEDGE.
+        # Found the hard way: research_memory.jsonl was archived by --fresh, so
+        # the memory subsystem was inert in the very runs meant to evaluate it.
+        import run_agent
+        check("research memory survives a --fresh run",
+              "research_memory.jsonl" in run_agent.SUBMISSION_ARTIFACTS,
+              "an agent that forgets everything each run has no memory to test")
 
         txt = K.render_for_prompt(context={"epoch_curve": "several_comparable_epochs"},
                                   path=store)
@@ -3516,15 +3639,25 @@ def test_submission_artifacts_survive_fresh():
     # reported 0.60541 under the exact command the docs tell a judge to run.
     from agent import final_ensemble as FE
     live_res = json.load(open(os.path.join(_ROOT, "logs", "ensemble_results.json")))
-    live_best = json.load(open(os.path.join(_ROOT, "logs", "best_metrics.json")))
+    live_best_path = os.path.join(_ROOT, "logs", "best_metrics.json")
+    live_best = (json.load(open(live_best_path))
+                 if os.path.exists(live_best_path) else None)
     pinned = FE.load_best()
     check("the rebuild pins to the RECORDED ensemble config",
           pinned["menu_choices"] == live_res["config"])
-    check("...even when best_metrics.json has since moved on",
-          live_best["menu_choices"] != live_res["config"]
-          or pinned["menu_choices"] == live_best["menu_choices"])
-    check("re-targeting requires an explicit flag",
-          FE.load_best(retarget=True)["menu_choices"] == live_best["menu_choices"])
+    if live_best is not None:
+        check("...even when best_metrics.json has since moved on",
+              live_best["menu_choices"] != live_res["config"]
+              or pinned["menu_choices"] == live_best["menu_choices"])
+        check("re-targeting requires an explicit flag",
+              FE.load_best(retarget=True)["menu_choices"] == live_best["menu_choices"])
+    else:
+        try:
+            FE.load_best(retarget=True)
+            ok, detail = False, "unexpectedly succeeded without best_metrics.json"
+        except SystemExit as e:
+            ok, detail = "best_metrics.json missing" in str(e), str(e)
+        check("retargeting fails loudly when no live search best exists", ok, detail)
     check("the pinned script is a frozen member, not a mutable solutions/ path",
           "final_ensemble" in pinned["code_path"]
           and os.path.exists(pinned["code_path"]))
@@ -3556,10 +3689,12 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_run_metrics_and_demo,
               test_capability_contract, test_preflight, test_budget_accounting,
               test_evidence_states, test_research_memory,
               test_redundancy_reasoning, test_failure_repeat_detection,
               test_provenance, test_incumbent_still_reproduces,
+              test_restricted_access_survives_termination,
               test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

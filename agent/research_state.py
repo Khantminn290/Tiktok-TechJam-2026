@@ -155,9 +155,22 @@ class ResearchState:
                 f["reseed_delta_vs_baseline"] = round(d, 5)
                 f["reseed_delta_in_sigma"] = round(d / BASELINE_SEED_STD, 2)
         if self.ensemble:
-            f["expected_ensemble_mean"] = self.ensemble.get("mean")
-            f["expected_ensemble_std"] = self.ensemble.get("std")
-            f["ensemble_n_checkpoints"] = self.ensemble.get("k")
+            # Support both the older "mean/std" ensemble summary and the
+            # current recorded result emitted by agent.final_ensemble.py.
+            if self.ensemble.get("primary") is not None:
+                f["recorded_ensemble_primary"] = round(
+                    float(self.ensemble["primary"]), 5)
+                f["recorded_ensemble_gauc"] = round(
+                    float(self.ensemble.get("GAUC") or 0.0), 5)
+                f["recorded_ensemble_ndcg"] = round(
+                    float(self.ensemble.get("nDCG@5") or 0.0), 5)
+                f["ensemble_n_checkpoints"] = self.ensemble.get("k")
+                f["ensemble_single_seed_mean"] = self.ensemble.get("single_seed_mean")
+                f["ensemble_single_seed_std"] = self.ensemble.get("single_seed_std")
+            else:
+                f["expected_ensemble_mean"] = self.ensemble.get("mean")
+                f["expected_ensemble_std"] = self.ensemble.get("std")
+                f["ensemble_n_checkpoints"] = self.ensemble.get("k")
         return f
 
     def _best_config(self) -> dict:
@@ -410,9 +423,24 @@ class ResearchState:
             L.append(f"- reseed-VERIFIED mean: {f['reseed_verified_mean']} +/- "
                      f"{f['reseed_verified_std']} over {f['reseed_n_seeds']} seeds "
                      f"= {f['reseed_delta_in_sigma']} sigma vs baseline")
+        if "recorded_ensemble_primary" in f:
+            extra = ""
+            if f.get("ensemble_single_seed_mean") is not None:
+                extra = (f" | member mean {f['ensemble_single_seed_mean']}"
+                         + (f" +/- {f['ensemble_single_seed_std']}"
+                            if f.get("ensemble_single_seed_std") is not None else ""))
+            L.append(f"- recorded ensemble result: {f['recorded_ensemble_primary']} "
+                     f"(GAUC {f['recorded_ensemble_gauc']}, nDCG@5 "
+                     f"{f['recorded_ensemble_ndcg']}, k={f.get('ensemble_n_checkpoints')})"
+                     f"{extra}")
         if "expected_ensemble_mean" in f:
             L.append(f"- expected ENSEMBLE: {f['expected_ensemble_mean']} +/- "
                      f"{f['expected_ensemble_std']} ({f['ensemble_n_checkpoints']} ckpts)")
+        if "best_observed_single_run" not in f:
+            L.append("- no observed single run is currently loaded from the journal, "
+                     "so there is nothing to treat as an observed maximum. A "
+                     "recorded ensemble headline is also NOT an expected value "
+                     "for any one seed.")
         L.append(f"- experiments: {f['scored_experiments']} scored, "
                  f"{f['failed_experiments']} failed")
 
@@ -448,10 +476,14 @@ class ResearchState:
             L.append("### Integration candidates")
             for c in self.integration_candidates:
                 L.append(f"- {c['candidate']} -- {c['status']} ({c['reason']})")
+        L.append("### Open questions (highest-value uncertainty)")
         if self.open_questions:
-            L.append("### Open questions (highest-value uncertainty)")
             for q in self.open_questions:
                 L.append(f"- {q}")
+        else:
+            L.append("- none derived from the current on-disk journal; load or "
+                     "rebuild experiment records before trusting the absence of "
+                     "questions")
         L.append(f"### Negative findings: {len(self.dead_ends)} recorded dead ends "
                  f"are supplied separately in full -- do not re-derive them.")
         out = "\n".join(L)
