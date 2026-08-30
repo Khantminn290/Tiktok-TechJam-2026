@@ -1,5 +1,5 @@
 {
-  "iteration_id": 2,
+  "iteration_id": 0,
   "menu_choices": {
     "loss": "pointwise_logloss",
     "neg_sampling": "uniform_1",
@@ -7,17 +7,20 @@
     "multitask": "none",
     "model": "deepfm_mlp",
     "temporal": "none",
-    "training": "lower_lr_longer",
+    "training": "k32",
     "data_extras": "none",
     "sample_weighting": "per_row",
-    "regularization": "l2_default"
+    "regularization": "l2_default",
+    "lr": 0.0005,
+    "epochs": 12,
+    "patience": 4
   },
-  "hypothesis": "Confirmation-oriented rerun of the strongest promising branch from the broader frontier: pointwise_logloss + deepfm_mlp + din_attention under the conservative lower_lr_longer schedule. This tests whether the 0.60434-class result is reproducible on a branch already observed as best-in-frontier, rather than continuing to spend budget on weaker or already-discredited directions.",
+  "hypothesis": "DIN attention remains one of the few still-open mechanisms with a frontier best near the top (0.60434) but only at low confidence; giving it the higher embedding width and gentler optimization that attention-style history models typically need may let it exploit the long train histories better than the default-tuned runs and lift both GAUC and nDCG@5.",
   "valid_metrics": {
-    "GAUC": 0.6705804140081052,
-    "nDCG@5": 0.5377460180058772,
-    "primary": 0.6041632160069912
+    "GAUC": 0.6710609099290654,
+    "nDCG@5": 0.5376273232487265,
+    "primary": 0.604344116588896
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_002.py",
-  "timestamp": 1788069947.148007
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
+  "timestamp": 1788071822.3454962
 }

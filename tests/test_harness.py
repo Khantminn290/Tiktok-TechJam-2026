@@ -138,8 +138,21 @@ def test_convergence():
         loop.max_iterations = 50
         loop.wall_clock_limit_s = 6 * 3600
         loop.run_started = time.time()
-        check(f"rule constants are the official ones (ε={EPSILON}, N={N_CONVERGE})",
-              EPSILON == 0.002 and N_CONVERGE == 3)
+        # NOT `EPSILON == <literal>`. Pinning the number would have made the
+        # miscalibration a requirement: the old hand-picked 0.002 is 2.5 sigma,
+        # so the loop quit on gaps far larger than anything still findable here.
+        # What must hold is that eps is CALIBRATED -- it equals the upward drift
+        # of a running maximum over N iterations, which is the only threshold
+        # that separates "no progress" from "noise climbing on its own".
+        from agent.validity import NOISE, convergence_epsilon
+        check(f"eps is calibrated to selection drift, not hand-picked "
+              f"(ε={EPSILON:.5f} = {EPSILON / NOISE:.2f}σ, N={N_CONVERGE})",
+              abs(EPSILON - convergence_epsilon(N_CONVERGE)) < 1e-9
+              and N_CONVERGE == 3)
+        check("eps sits below one noise sigma, so ~1σ effects stay findable",
+              EPSILON < NOISE, f"{EPSILON:.5f} < {NOISE}")
+        check("eps still exceeds zero, so a truly flat run can converge",
+              EPSILON > 0)
         for i, p in enumerate([0.60, 0.62, 0.64, 0.66]):
             loop.tree.add(_node(i, "success", p))
         check("still improving -> not converged", not loop.converged()[0])
@@ -147,6 +160,23 @@ def test_convergence():
             loop.tree.add(_node(i, "success", p))
         conv, msg = loop.converged()
         check("flat for N scored iterations -> converged", conv, msg[:60])
+
+    # The regression this recalibration exists to prevent: a run making real
+    # ~1 sigma progress must NOT be declared converged. Under the old 2.5 sigma
+    # eps it was, which is how clean run 2 stopped at 4 of 6 iterations.
+    with tempfile.TemporaryDirectory() as td:
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tree = ExperimentTree(td)
+        loop.max_iterations = 50
+        loop.wall_clock_limit_s = 6 * 3600
+        loop.run_started = time.time()
+        from agent.validity import NOISE as _N
+        base = 0.6016
+        for i, p in enumerate([base, base + _N, base + 2 * _N, base + 3 * _N]):
+            loop.tree.add(_node(i, "success", p))
+        check("steady ~1σ-per-iteration progress is not called convergence",
+              not loop.converged()[0],
+              f"gain {3 * _N:.5f} over N={N_CONVERGE} vs ε={EPSILON:.5f}")
 
     with tempfile.TemporaryDirectory() as td:
         loop = AgentLoop.__new__(AgentLoop)
@@ -2974,6 +3004,89 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_autonomy_eval():
+    """The independent-discovery scorer must not flatter the agent.
+
+    Its whole purpose is to resist the temptation these runs create, so the
+    properties worth pinning are the ones that would let a weak trajectory pass:
+    reading a truncated log as "no hypotheses", rounding an unobservable belief
+    change up to a pass, and letting five criteria be satisfied by five
+    different nodes.
+    """
+    print("\n[autonomy eval]")
+    from agent import autonomy_eval as AE
+
+    # -- hypothesis counting survives the journal's stringify+truncate
+    check("counts a structured list",
+          AE._hypothesis_count(["a", "b", "c"]) == 3)
+    check("counts a stringified list",
+          AE._hypothesis_count("['first idea', 'second idea']") == 2)
+    truncated = "['the first hypothesis is long', 'the second hypothesis is cut o"
+    check("a truncated repr is not scored as zero hypotheses",
+          AE._hypothesis_count(truncated) == 2,
+          f"got {AE._hypothesis_count(truncated)}")
+    check("prose with H1/H2 labels counts as two",
+          AE._hypothesis_count("H1: noise. H2: a real effect.") == 2)
+    check("empty means none", AE._hypothesis_count("") == 0)
+
+    def node(i, status="success", primary=0.604, hyps=("x", "y"),
+             obs="unclear why 0.60343 sits so close", ques="is this noise",
+             meas="m" * 60, res="r" * 60, overrides=None):
+        mc = dict(overrides or {})
+        return {"iteration_id": i, "status": status,
+                "metrics": {"primary": primary} if primary else None,
+                "menu_choices": mc, "research_category": "confirmation",
+                "events": [{"type": "inquiry", "observation": obs,
+                            "question": ques, "hypotheses": list(hyps),
+                            "discriminating_measurement": meas,
+                            "resolves_uncertainty": res}]}
+
+    # -- (e) is UNOBSERVED on the final node, and never a pass
+    r = AE.grade_run([node(0)])
+    only = r["detail"][0]["criteria"]
+    check("(e) on the last node is UNOBSERVED, not PASS",
+          only["e_belief_changed"] == AE.UNOBS)
+    check("an UNOBSERVED (e) keeps the node out of 'all five'",
+          r["nodes_meeting_all_five"] == []
+          and r["nodes_blocked_only_on_e"] == [0])
+
+    # -- (e) passes only when a LATER node reasons from a measured number
+    r2 = AE.grade_run([node(0), node(1, obs="following 0.60377 we now think")])
+    check("(e) passes when a later node cites a measured score",
+          r2["detail"][0]["criteria"]["e_belief_changed"] == AE.PASS)
+    r3 = AE.grade_run([node(0), node(1, obs="we continue", ques="what next")])
+    check("(e) fails when the later node cites no number",
+          r3["detail"][0]["criteria"]["e_belief_changed"] == AE.FAIL)
+
+    # -- (b) and (d) actually bite
+    rb = AE.grade_run([node(0, hyps=("only one",)), node(1)])
+    check("one hypothesis fails (b)",
+          rb["detail"][0]["criteria"]["b_competing_hypotheses"] == AE.FAIL)
+    rd = AE.grade_run([node(0, status="error", primary=None), node(1)])
+    check("a crashed node fails (d)",
+          rd["detail"][0]["criteria"]["d_executed"] == AE.FAIL)
+
+    # -- the five criteria may NOT be assembled from different nodes
+    mixed = AE.grade_run([node(0, hyps=("one",)),          # fails (b)
+                          node(1, status="error", primary=None),  # fails (d)
+                          node(2)])
+    check("criteria are not aggregated across nodes",
+          0 not in mixed["nodes_meeting_all_five"]
+          and 1 not in mixed["nodes_meeting_all_five"])
+
+    # -- (a) demands an admission of ignorance AND a quoted number
+    ra = AE.grade_run([node(0, obs="the model is good", ques="how to improve"),
+                       node(1)])
+    check("(a) fails on a confident observation with no number",
+          ra["detail"][0]["criteria"]["a_unexplained_observation"] == AE.FAIL)
+
+    # -- the renderer must disclose what it cannot decide
+    txt = AE.render([AE.grade_run([node(0)], "t")])
+    check("output states that (c)'s leakage clause is not machine-checkable",
+          "NOT" in txt and "DICTATED BY THE TEACHER" in txt
+          and "not a verdict" in txt)
+
+
 def test_submission_artifacts_survive_fresh():
     """Regression: a previous headline became unreproducible because --fresh
     archived the ensemble member arrays while the JSON quoting them stayed
@@ -3050,6 +3163,7 @@ if __name__ == "__main__":
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
+              test_autonomy_eval,
               test_submission_artifacts_survive_fresh):
         t()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

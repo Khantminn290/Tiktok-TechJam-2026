@@ -1,0 +1,136 @@
+--- logs/solutions/node_004.py
++++ logs/solutions/node_005.py
+@@ -38,23 +38,30 @@
+     return primary_from_scores(user_ids[mask], labels[mask], scores[mask])
+ 
+ 
+-def make_history_vectors(choice, history_obj, rows=None):
++def make_history_vectors(choice, history_obj, row_idx, users, split_is_train):
+     if choice == 'none':
+         return None
+-    if rows is None:
+-        return history_obj.pooled
+-    return history_obj.batch_vectors(rows)
+-
+-
+-def train_epoch_bpr(model, X, y, users, hist_train, batch_size, rng):
++    return history_obj.batch_vectors(row_idx, users, split_is_train)
++
++
++def build_user_negatives(users, y):
++    user_to_negs = {}
++    neg_idx = np.flatnonzero(y <= 0.5)
++    if len(neg_idx) == 0:
++        return user_to_negs
++    for u in np.unique(users[neg_idx]):
++        idx = neg_idx[users[neg_idx] == u]
++        if len(idx) > 0:
++            user_to_negs[int(u)] = idx
++    return user_to_negs
++
++
++def train_epoch_bpr(model, X, y, users, hist_choice, history_obj, batch_size, rng):
+     pos_idx = np.flatnonzero(y > 0.5)
+     if len(pos_idx) == 0:
+         return
+-    user_to_negs = {}
+-    for u in np.unique(users[pos_idx]):
+-        negs = np.flatnonzero((users == u) & (y <= 0.5))
+-        if len(negs) > 0:
+-            user_to_negs[int(u)] = negs
++
++    user_to_negs = build_user_negatives(users, y)
+     pos_kept = [i for i in pos_idx if int(users[i]) in user_to_negs]
+     if not pos_kept:
+         return
+@@ -70,13 +77,13 @@
+ 
+         Xp = X[pidx]
+         Xn = X[nidx]
+-        Hp = None if hist_train is None else hist_train[pidx]
+-        Hn = None if hist_train is None else hist_train[nidx]
++        Hp = make_history_vectors(hist_choice, history_obj, pidx, users[pidx], True)
++        Hn = make_history_vectors(hist_choice, history_obj, nidx, users[nidx], True)
+ 
+         sp, cp = model.forward(Xp, Hp)
+         sn, cn = model.forward(Xn, Hn)
+         diff = sp - sn
+-        g = -(1.0 - sigmoid(diff)) / len(pidx)
++        g = -(1.0 - sigmoid(diff)) / max(1, len(pidx))
+         model.apply_grads([(cp, g), (cn, -g)], aux_contribs=None)
+ 
+ 
+@@ -95,9 +102,9 @@
+     for i in range(n):
+         candidates.append((f'epoch_{i+1}', epoch_valid_scores[i]))
+     if n >= 2:
+-        candidates.append(('avg_last2', np.mean(epoch_valid_scores[-2:], axis=0)))
++        candidates.append(('avg_last2', np.mean(epoch_valid_scores[-2:], axis=0).astype(np.float32)))
+     if n >= 3:
+-        candidates.append(('avg_last3', np.mean(epoch_valid_scores[-3:], axis=0)))
++        candidates.append(('avg_last3', np.mean(epoch_valid_scores[-3:], axis=0).astype(np.float32)))
+ 
+     best_name = None
+     best_cv = -1e18
+@@ -158,12 +165,13 @@
+ 
+         history_mode = cfg['user_history']
+         history_obj = None
+-        H_train = H_valid = H_test = None
++        H_valid = H_test = None
+         if history_mode != 'none':
+             history_obj = train_lib.History(splits, meta['field_dims']['user'], history_mode)
+-            H_train = make_history_vectors(history_mode, history_obj, rows=np.arange(len(splits['train']['user'])))
+-            H_valid = make_history_vectors(history_mode, history_obj, rows=None)
+-            H_test = make_history_vectors(history_mode, history_obj, rows=None)
++            valid_rows = np.arange(len(splits['valid']['user']), dtype=np.int64)
++            test_rows = np.arange(len(splits['test']['user']), dtype=np.int64)
++            H_valid = make_history_vectors(history_mode, history_obj, valid_rows, splits['valid']['user'], False)
++            H_test = make_history_vectors(history_mode, history_obj, test_rows, splits['test']['user'], False)
+ 
+         model = train_lib.RankFM(dim=dim, k=cfg['k'], lr=cfg['lr'], seed=seed, aux_tasks=[])
+         if hasattr(model, 'l2'):
+@@ -178,33 +186,24 @@
+         valid_labels = splits['valid']['long_view']
+ 
+         best_primary = -1e18
+-        best_epoch = -1
+-        best_state = None
+         bad = 0
+         epoch_valid_scores = []
+         epoch_test_scores = []
+-        state_snapshots = []
+ 
+         for epoch in range(cfg['epochs']):
+-            train_epoch_bpr(model, Xtr, ytr, utr, H_train, cfg['bs'], rng)
++            train_epoch_bpr(model, Xtr, ytr, utr, history_mode, history_obj, cfg['bs'], rng)
+             s_valid = predict_in_batches(model, Xva, H_valid)
+             s_test = predict_in_batches(model, Xte, H_test)
+             epoch_valid_scores.append(s_valid)
+             epoch_test_scores.append(s_test)
+-            state_snapshots.append(model.state())
+             m = primary_from_scores(valid_user_ids, valid_labels, s_valid)
+             if m['primary'] > best_primary:
+                 best_primary = m['primary']
+-                best_epoch = epoch
+-                best_state = model.state()
+                 bad = 0
+             else:
+                 bad += 1
+                 if bad >= cfg['patience']:
+                     break
+-
+-        epoch_valid_scores = epoch_valid_scores[:best_epoch + 1 + bad if bad < cfg['patience'] else len(epoch_valid_scores)]
+-        epoch_test_scores = epoch_test_scores[:len(epoch_valid_scores)]
+ 
+         mask_a, mask_b = build_user_masks(valid_user_ids)
+         chosen_name, chosen_valid_scores, rule_details = choose_rule(
+@@ -236,7 +235,7 @@
+         with open(os.path.join(args.output_dir, 'selection_details.json'), 'w') as f:
+             json.dump({'chosen_rule': chosen_name, 'rule_details': rule_details}, f)
+ 
+-    except Exception as e:
++    except Exception:
+         traceback.print_exc(file=sys.stderr)
+         sys.exit(1)
+ 

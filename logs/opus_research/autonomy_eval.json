@@ -1,0 +1,400 @@
+[
+  {
+    "run": "journal1.jsonl",
+    "nodes": 6,
+    "with_inquiry": 6,
+    "scored": 4,
+    "failed": 2,
+    "best_primary": 0.60377,
+    "criteria_pass_counts": {
+      "a_unexplained_observation": 6,
+      "b_competing_hypotheses": 6,
+      "c_discriminating_measurement": 6,
+      "d_executed": 4,
+      "e_belief_changed": 5
+    },
+    "nodes_meeting_all_five": [
+      0,
+      1,
+      4
+    ],
+    "nodes_blocked_only_on_e": [
+      5
+    ],
+    "detail": [
+      {
+        "node": 0,
+        "has_inquiry": true,
+        "category": "exploration",
+        "primary": 0.602583447994506,
+        "overrides": {
+          "epochs": 12,
+          "patience": 4,
+          "n_checkpoints": 3,
+          "checkpoint_combine": true
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 1 reasons from a measured score",
+        "question": "Is the remaining gap to the oracle mostly blocked by optimization/selection dynamics inside the existing models, by an unmodeled sequential signal that the current training formulation fails to exploit, or by irreducible",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 1,
+        "has_inquiry": true,
+        "category": "ablation",
+        "primary": 0.6034309686702866,
+        "overrides": {
+          "epochs": 12,
+          "patience": 4,
+          "n_checkpoints": 3,
+          "checkpoint_combine": true
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 2 reasons from a measured score",
+        "question": "Is the remaining uncertainty mainly about which component matters, or about whether the current training/selection rule is overfitting validation enough that single-run deltas are unreliable?",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 2,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": null,
+        "overrides": {},
+        "status": "error",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "FAIL",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 3 reasons from a measured score",
+        "question": "Is the remaining spread among top configurations mostly seed/selection noise, or is there still a small but real generalisation gain available from training-dynamics/selection-rule changes that the current single-score c",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 3,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": null,
+        "overrides": {},
+        "status": "error",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "FAIL",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 4 reasons from a measured score",
+        "question": "Are the remaining differences between fm_numpy and deepfm_mlp on this benchmark mostly seed/selection noise, or is there a small but real advantage for one architecture that only appears under better checkpoint/selection",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 4,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": 0.6009194017294512,
+        "overrides": {},
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 5 reasons from a measured score",
+        "question": "Why is the present run-to-run best still only weakly separated: is the remaining uncertainty mostly seed noise around a flat optimum, mild undertraining/selection noise within the incumbent branch, or a real architecture",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 5,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": 0.60376820817856,
+        "overrides": {
+          "epochs": 12,
+          "patience": 4,
+          "n_checkpoints": 1,
+          "checkpoint_combine": false
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "UNOBSERVED"
+        },
+        "e_reason": "this was the final iteration; no later node exists to record a belief revision",
+        "question": "Is the remaining uncertainty mostly coming from validation-selection noise inside one run (best-epoch / checkpoint-combine choices), from seed variance around a real but tiny optimum, or from one still-unisolated menu co",
+        "n_hypotheses": 3
+      }
+    ]
+  },
+  {
+    "run": "journal2.jsonl",
+    "nodes": 4,
+    "with_inquiry": 4,
+    "scored": 4,
+    "failed": 0,
+    "best_primary": 0.60391,
+    "criteria_pass_counts": {
+      "a_unexplained_observation": 4,
+      "b_competing_hypotheses": 4,
+      "c_discriminating_measurement": 4,
+      "d_executed": 4,
+      "e_belief_changed": 3
+    },
+    "nodes_meeting_all_five": [
+      0,
+      1,
+      2
+    ],
+    "nodes_blocked_only_on_e": [
+      3
+    ],
+    "detail": [
+      {
+        "node": 0,
+        "has_inquiry": true,
+        "category": "exploration",
+        "primary": 0.6036614153195817,
+        "overrides": {
+          "hist_tau_days": 7.0,
+          "n_checkpoints": 1
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 1 reasons from a measured score",
+        "question": "Is the remaining gap mostly due to the user-history signal being represented with the wrong recency timescale / checkpoint-selection rule, or is the plateau already dominated by irreducible model variance and validation-",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 1,
+        "has_inquiry": true,
+        "category": "ablation",
+        "primary": 0.6014372462254385,
+        "overrides": {},
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 2 reasons from a measured score",
+        "question": "Is the remaining gap to the better observed frontier mostly due to training-dynamics/selection noise inside the incumbent recipe, or is there still a small but real contribution from the user-history mechanism that has n",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 2,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": 0.603912039888439,
+        "overrides": {
+          "hist_tau_days": 7.0,
+          "n_checkpoints": 1
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 3 reasons from a measured score",
+        "question": "Is the remaining gap to ~0.605 mostly just selection/seed noise around one broad optimum, or is there still a small but real untapped gain in training dynamics / model selection that the current single-score experiments ",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 3,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": 0.603912039888439,
+        "overrides": {
+          "hist_tau_days": 7.0,
+          "n_checkpoints": 1,
+          "epochs": 16,
+          "patience": 5
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "UNOBSERVED"
+        },
+        "e_reason": "this was the final iteration; no later node exists to record a belief revision",
+        "question": "Is the apparent edge of node 2 coming from a genuinely better training trajectory/selection point for the torch model, or is it mostly validation-selection noise among nearly tied menu options?",
+        "n_hypotheses": 3
+      }
+    ]
+  },
+  {
+    "run": "journal3.jsonl",
+    "nodes": 6,
+    "with_inquiry": 6,
+    "scored": 3,
+    "failed": 3,
+    "best_primary": 0.60434,
+    "criteria_pass_counts": {
+      "a_unexplained_observation": 3,
+      "b_competing_hypotheses": 6,
+      "c_discriminating_measurement": 6,
+      "d_executed": 3,
+      "e_belief_changed": 5
+    },
+    "nodes_meeting_all_five": [
+      1,
+      3
+    ],
+    "nodes_blocked_only_on_e": [],
+    "detail": [
+      {
+        "node": 0,
+        "has_inquiry": true,
+        "category": "exploration",
+        "primary": 0.604344116588896,
+        "overrides": {
+          "lr": 0.0005,
+          "epochs": 12,
+          "patience": 4
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "FAIL",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 1 reasons from a measured score",
+        "question": "Is the remaining gap mainly blocked by optimization/selection dynamics of the current models, by train-eval mismatch in list structure/history usage, or by missing cross-feature expressivity that existing menu architectu",
+        "n_hypotheses": 2
+      },
+      {
+        "node": 1,
+        "has_inquiry": true,
+        "category": "ablation",
+        "primary": 0.6017564845852772,
+        "overrides": {
+          "lr": 0.0005,
+          "epochs": 12,
+          "patience": 4
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 2 reasons from a measured score",
+        "question": "Is the remaining uncertainty mostly about selection/training dynamics of essentially equivalent models, or is there still a small but real gain hiding in one incumbent component such as training schedule or history encod",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 2,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": null,
+        "overrides": {},
+        "status": "error",
+        "criteria": {
+          "a_unexplained_observation": "FAIL",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "FAIL",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 3 reasons from a measured score",
+        "question": "Is the incumbent's apparent advantage real and specifically due to user-history/architecture capacity, or is the benchmark already on a flat plateau where validation argmax noise dominates single-run differences?",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 3,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": 0.60376820817856,
+        "overrides": {
+          "lr": 0.0005,
+          "epochs": 12,
+          "patience": 4
+        },
+        "status": "success",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "PASS",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 4 reasons from a measured score",
+        "question": "Is the remaining variance around 0.604-0.605 mostly coming from seed/validation-selection noise, or is there still a small but real gain available from training-dynamics/selection-rule choices that the current menu setti",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 4,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": null,
+        "overrides": {},
+        "status": "error",
+        "criteria": {
+          "a_unexplained_observation": "FAIL",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "FAIL",
+          "e_belief_changed": "PASS"
+        },
+        "e_reason": "node 5 reasons from a measured score",
+        "question": "Is the remaining uncertainty mainly about which training objective/architecture truly generalizes best, or about training dynamics/selection noise making several near-tied options look different on single draws?",
+        "n_hypotheses": 3
+      },
+      {
+        "node": 5,
+        "has_inquiry": true,
+        "category": "confirmation",
+        "primary": null,
+        "overrides": {},
+        "status": "error",
+        "criteria": {
+          "a_unexplained_observation": "PASS",
+          "b_competing_hypotheses": "PASS",
+          "c_discriminating_measurement": "PASS",
+          "d_executed": "FAIL",
+          "e_belief_changed": "UNOBSERVED"
+        },
+        "e_reason": "this was the final iteration; no later node exists to record a belief revision",
+        "question": "Is the apparent incumbent gain a real, reproducible configuration advantage, or mostly selection noise from choosing one lucky validation winner among many nearly-tied menu variants?",
+        "n_hypotheses": 3
+      }
+    ]
+  }
+]

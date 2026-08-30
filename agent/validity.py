@@ -112,6 +112,28 @@ def audit_comparison(delta: float, n_seeds: int = 1, paired: bool = False,
             "trustworthy": worst not in (FATAL,)}
 
 
+def convergence_epsilon(n_iterations: int, seed_sd: float | None = None) -> float:
+    """How much the running BEST drifts upward over n iterations by luck alone.
+
+    A search loop that stops when "the best has not improved by more than eps"
+    is making a claim about noise, so eps has to be calibrated to noise. Set it
+    too high and the loop quits while real effects are still findable; set it
+    below the drift of a running maximum and the loop can never converge at all,
+    because the best-so-far climbs on its own.
+
+    The right threshold is exactly the selection drift: stop once the best has
+    gained no more than picking the max of n noisy draws would have given you
+    anyway. That is the same order statistic `selection_pressure` reports.
+
+    This matters concretely here. The original hand-picked eps=0.002 is 2.5
+    sigma, while the drift over 3 iterations is 0.60 sigma -- so the loop
+    demanded four times more progress than the calibrated bar, and quit on
+    differences larger than any effect this benchmark still has to offer.
+    """
+    return _expected_max_of_n(max(n_iterations, 2),
+                              seed_sd if seed_sd is not None else NOISE)
+
+
 def selection_pressure(n_candidates_compared: int,
                        seed_sd: float | None = None) -> dict:
     """How large an apparent gain does picking the best of n produce by itself?

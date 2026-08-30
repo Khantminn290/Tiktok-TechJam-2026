@@ -28,11 +28,23 @@ from . import propose_axis
 from . import failure as failure_mod
 from .research_policy import decide_category, render_decision
 from .research_state import ResearchState
+from .validity import convergence_epsilon
 
-EPSILON = 0.002
 N_CONVERGE = 3
 BASELINE_VALID_PRIMARY = 0.6016
 BASELINE_SEED_STD = 0.0008     # the official FM baseline's own 5-seed std
+
+# Stop when the running best has gained no more than selection drift alone
+# would produce over N_CONVERGE iterations -- 0.60 sigma, not a round number
+# somebody liked. See validity.convergence_epsilon.
+#
+# The previous hand-picked 0.002 was 2.5 sigma. Nothing left on this benchmark
+# is that large, so the loop reliably declared convergence on differences it
+# should have been investigating: clean run 2 stopped at 4 of 6 permitted
+# iterations having gained 0.0003, which is well within noise either way. The
+# calibrated bar makes the ITERATION and SPEND caps the binding budget, which
+# is the honest place for a budget to bind.
+EPSILON = convergence_epsilon(N_CONVERGE)     # 0.00048 = 0.60 sigma
 
 
 class AgentLoop:
@@ -115,7 +127,9 @@ class AgentLoop:
         gain = bests[-1] - bests[-1 - N_CONVERGE]
         if gain <= EPSILON:
             return True, (f"converged: running-best valid primary improved only "
-                          f"{gain:.4f} (≤ ε={EPSILON}) over the last "
+                          f"{gain:.5f} (≤ ε={EPSILON:.5f}, the "
+                          f"{EPSILON / BASELINE_SEED_STD:.2f}σ upward drift a "
+                          f"running max shows by luck alone) over the last "
                           f"{N_CONVERGE} scored iterations")
         return False, ""
 
@@ -941,7 +955,7 @@ class AgentLoop:
               f"draft_count={self.draft_count}, "
               f"spend_ceiling=${self.spend.ceiling_usd:.2f} "
               f"({self.spend.rates.describe(self.llm.provider, self.llm.model)}), "
-              f"ε={EPSILON}, N={N_CONVERGE}"
+              f"ε={EPSILON:.5f} ({EPSILON / BASELINE_SEED_STD:.2f}σ), N={N_CONVERGE}"
               + (f", PARALLEL MODE k={self.parallel_k}" if self.parallel_k else ""))
         nodes_at_start = len(self.tree.nodes)
         stop = self.stop_reason()

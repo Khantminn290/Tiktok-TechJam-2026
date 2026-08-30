@@ -164,9 +164,19 @@ The menu is **prior knowledge, not the boundary**. The agent can also:
   we found the model peaks at epoch 14 and decays **−29.6σ** by epoch 60, which
   redirected a whole research phase.
 
-**It demonstrably uses them.** In the self-test it independently proposed
-checkpoint averaging, predicted +0.0005–0.0008, and measured **+0.00078**
-(`logs/opus_research/selftest_run.log`).
+**It demonstrably uses them** — it sets pipeline overrides unprompted in most
+iterations, and in clean run 2 it derived a decay-constant hypothesis from user
+history statistics it measured itself.
+
+> **Retracted claim, kept visible on purpose.** An earlier version of this
+> section said the agent "independently proposed checkpoint averaging" and
+> measured +0.00078. **That was wrong.** The prompt it ran under contained the
+> finding, its effect size and its exact parameters, so the agent was asked to
+> find something it had already been told. Anyone re-running an autonomy claim
+> here should read `logs/opus_research/AUTONOMY_AUDIT.md` and
+> `AUTONOMY_EVALUATION.md` first: an agent handed the answer and an agent that
+> derives one produce identical-looking journals, and telling them apart takes
+> a protocol fixed in advance, not a good-looking transcript.
 
 ---
 
@@ -261,6 +271,9 @@ python3 -m agent.learning_curve                    # data-limited or not?
 | `config/modification_menu.json` | the search space + **28 dead ends with mechanisms** |
 | `logs/opus_research/journal.md` | expert research trajectory (E1–E7) with reasoning |
 | `logs/opus_research/DISTILLATION.md` | how each research behaviour became an agent capability |
+| `logs/opus_research/AUTONOMY_AUDIT.md` | the teacher→student leak that invalidated the first autonomy claim |
+| `logs/opus_research/AUTONOMY_EVALUATION.md` | the 3 pre-registered clean runs and the honest Level A/B/C verdict |
+| `agent/autonomy_eval.py` | grades a journal against the 5 independent-discovery criteria |
 | `logs/feature_registry.jsonl` | every feature proposed, probed, accepted or rejected |
 | `logs/ensemble_results.json` | the authoritative result + provenance (git sha, data fingerprint) |
 | `logs/journal.jsonl` | per-iteration hypothesis, diff, metrics, errors (competition deliverable) |

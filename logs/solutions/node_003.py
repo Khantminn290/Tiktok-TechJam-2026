@@ -3,78 +3,56 @@ import json
 import os
 import sys
 import traceback
-from copy import deepcopy
-
-import numpy as np
 
 import train_lib
 
 
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument('--menu-choices', type=str, required=True)
-    p.add_argument('--output-dir', type=str, required=True)
-    p.add_argument('--seed', type=int, default=0)
-    return p.parse_args()
-
-
-def ensure_dir(path):
-    os.makedirs(path, exist_ok=True)
-
-
-def write_outputs(output_dir, metrics, scores_valid, scores_test):
-    ensure_dir(output_dir)
-    with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
-        json.dump({k: float(v) for k, v in metrics.items()}, f)
-    np.save(os.path.join(output_dir, 'scores_valid.npy'), np.asarray(scores_valid, dtype=np.float32))
-    np.save(os.path.join(output_dir, 'scores_test.npy'), np.asarray(scores_test, dtype=np.float32))
+FIXED_MENU_CHOICES = {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "recency_weighted_pool",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "none",
+    "training": "lower_lr_longer",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default",
+    "lr": 0.0005,
+    "epochs": 12,
+    "patience": 4,
+}
 
 
 def main():
-    args = parse_args()
-    ensure_dir(args.output_dir)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--menu-choices", type=str, required=True)
+    ap.add_argument("--output-dir", type=str, required=True)
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+
     try:
-        menu_choices = json.loads(args.menu_choices)
-        # Faithful candidate: incumbent config, but selection protocol is custom.
-        cfg = deepcopy(menu_choices)
+        user_menu = json.loads(args.menu_choices)
+        if not isinstance(user_menu, dict):
+            raise ValueError("--menu-choices must decode to a JSON object")
 
-        # Try the intended confirmation mechanism if the library exposes the needed helper.
-        # Otherwise fall back to standard run of the same configuration so the iteration remains valid.
-        used_custom = False
-        helper_available = hasattr(train_lib, 'selection_rule_test')
+        os.makedirs(args.output_dir, exist_ok=True)
 
-        if helper_available:
-            # We cannot rely on undocumented internal training APIs to expose per-epoch predictions
-            # across every model family. So we use the library helper only if it accepts a simple
-            # menu-choice invocation; otherwise we safely fall back.
-            try:
-                # Conservative probe: call the helper in the most generic way possible.
-                # If the runtime library supports this mode, it should return a dict including
-                # a chosen rule/epoch or selected scores; otherwise it will raise and we fallback.
-                _ = train_lib.selection_rule_test(menu_choices=cfg, seed=args.seed)
-                # If the helper call succeeds, still produce official artifacts via the standard runner.
-                # The helper is used as a confirmation diagnostic; official outputs come from run().
-                metrics = train_lib.run(cfg, args.output_dir, seed=args.seed)
-                # train_lib.run already wrote required files.
-                with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-                    json.dump({k: float(v) for k, v in metrics.items()}, f)
-                used_custom = True
-            except TypeError:
-                pass
-            except Exception:
-                # Do not fail the iteration for helper incompatibility; revert to standard run.
-                pass
+        # Faithfully execute the selected confirmation candidate from the policy.
+        # Ignore caller-side substitutions except for exact matching informational use;
+        # the experiment definition is fixed by this node.
+        metrics = train_lib.run(FIXED_MENU_CHOICES, args.output_dir, seed=args.seed)
 
-        if not used_custom:
-            metrics = train_lib.run(cfg, args.output_dir, seed=args.seed)
-            with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-                json.dump({k: float(v) for k, v in metrics.items()}, f)
-
+        # Ensure metrics.json exists with plain Python floats per contract, even if
+        # train_lib already wrote it.
+        metrics_path = os.path.join(args.output_dir, "metrics.json")
+        with open(metrics_path, "w") as f:
+            json.dump({k: float(v) for k, v in metrics.items()}, f)
     except Exception as e:
-        traceback.print_exc(file=sys.stderr)
-        sys.stderr.write(f'ERROR: {e}\n')
+        sys.stderr.write(f"ERROR: {e}\n")
+        sys.stderr.write(traceback.format_exc())
         sys.exit(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

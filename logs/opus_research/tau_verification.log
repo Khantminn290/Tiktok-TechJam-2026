@@ -1,0 +1,61 @@
+control: incumbent, hist_tau_days at library default 3.0
+    [tau3] seed 0  primary 0.60497  70s
+    [tau3] seed 1  primary 0.60393  56s
+    [tau3] seed 2  primary 0.60449  67s
+    [tau3] seed 3  primary 0.60424  49s
+    [tau3] seed 4  primary 0.60479  63s
+
+arm: hist_tau_days = 7.0
+    [tau7] seed 0  primary 0.60499  75s
+    [tau7] seed 1  primary 0.60393  59s
+    [tau7] seed 2  primary 0.60450  68s
+    [tau7] seed 3  primary 0.60428  47s
+    [tau7] seed 4  primary 0.60467  63s
+
+arm: hist_tau_days = 14.0
+    [tau14] seed 0  primary 0.60497  76s
+    [tau14] seed 1  primary 0.60392  62s
+    [tau14] seed 2  primary 0.60439  69s
+    [tau14] seed 3  primary 0.60416  49s
+    [tau14] seed 4  primary 0.60467  67s
+
+arm: hist_tau_days = 1.0
+    [tau1] seed 0  primary 0.60489  75s
+    [tau1] seed 1  primary 0.60400  53s
+    [tau1] seed 2  primary 0.60441  69s
+    [tau1] seed 3  primary 0.60431  52s
+    [tau1] seed 4  primary 0.60479  64s
+
+==========================================================================
+PAIRED RESULT — the agent's proposed sweep, 5 paired seeds
+==========================================================================
+  hist_tau_days 7.0 vs 3.0 (default)
+    primary  0.60448 -> 0.60447  -0.00001 (-0.01 sigma)  wins 4/5  t=-0.31
+    GAUC     0.67127 -> 0.67127  -0.00001 (-0.01 sigma)  wins 3/5  t=-0.26
+    nDCG@5   0.53769 -> 0.53768  -0.00001 (-0.01 sigma)  wins 4/5  t=-0.34
+  hist_tau_days 14.0 vs 3.0 (default)
+    primary  0.60448 -> 0.60442  -0.00006 (-0.07 sigma)  wins 1/5  t=-2.77
+    GAUC     0.67127 -> 0.67120  -0.00008 (-0.10 sigma)  wins 1/5  t=-2.73
+    nDCG@5   0.53769 -> 0.53765  -0.00004 (-0.05 sigma)  wins 1/5  t=-1.82
+  hist_tau_days 1.0 vs 3.0 (default)
+    primary  0.60448 -> 0.60448  -0.00000 (-0.00 sigma)  wins 3/5  t=-0.04
+    GAUC     0.67127 -> 0.67125  -0.00002 (-0.03 sigma)  wins 2/5  t=-0.4
+    nDCG@5   0.53769 -> 0.53771  +0.00002 (+0.03 sigma)  wins 2/5  t=0.43
+
+==========================================================================
+VALIDITY OF THE PRE-STATED ARM (tau=7)
+==========================================================================
+## VALIDITY AUDIT — -0.00001 (-0.01 sigma): WARN
+weak evidence -- treat as a lead, not a result
+  [WARN] -0.00001 is under half the noise floor (0.0004); this is not a result whatever its sign
+
+If instead the best of the three taus is quoted as the result:
+  choosing the best of 3 noisy comparisons yields about +0.60 sigma even when nothing works; a real effect must clear this before it means anything
+  best arm is tau=1.0 at -0.00000 (-0.00 sigma)
+## VALIDITY AUDIT — -0.00000 (-0.00 sigma): FATAL
+NOT EVIDENCE as measured -- fix the design before believing it
+  [WARN] -0.00000 is under half the noise floor (0.0004); this is not a result whatever its sign
+  [FATAL] best of 3 comparisons: with NO real effect the max would sit about +0.00048 (+0.60 sigma) above zero by selection alone, against a claimed -0.00000
+  [FATAL] the winner was chosen using the same data it is scored on. That number measures fit to this split, not generalisation -- confirm on a held-out partition or by resampling
+
+wrote /private/tmp/claude-501/-Users-khantminn-Desktop-Tiktok-TechJam-2026/f68ce099-a4fb-4cef-9181-f46e0ce58ede/scratchpad/tau_verification.json
