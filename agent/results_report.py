@@ -127,9 +127,15 @@ def harness(run: bool = False) -> dict:
     except subprocess.SubprocessError as e:
         return {"tier": OPEN, "error": str(e)[:200]}
     m = re.search(r"(\d+) passed, (\d+) failed", r.stdout or "")
-    return {"tier": VERIFIED, "passed": int(m.group(1)) if m else None,
-            "failed": int(m.group(2)) if m else None,
-            "exit_code": r.returncode, "seconds": round(time.time() - t0, 1)}
+    if r.returncode != 0 or not m:
+        tail = ((r.stderr or r.stdout or "").strip().splitlines()[-8:])
+        return {"tier": OPEN, "exit_code": r.returncode,
+                "seconds": round(time.time() - t0, 1),
+                "error": "test harness did not complete successfully: "
+                         + " ".join(tail)[:500]}
+    return {"tier": VERIFIED, "passed": int(m.group(1)),
+            "failed": int(m.group(2)), "exit_code": r.returncode,
+            "seconds": round(time.time() - t0, 1)}
 
 
 def convergence() -> dict:
@@ -155,11 +161,21 @@ def latest_run() -> dict:
     m["llm_spend_usd"] = (summary.get("spend") or {}).get("total_usd")
     m["agent_wall_clock_s"] = summary.get("total_agent_wall_clock_s")
     m["devices"] = summary.get("devices_used")
-    tok = {}
-    for n in nodes:
-        for k, v in (n.get("token_breakdown") or {}).items():
-            tok[k] = tok.get(k, 0) + v
-    m["llm_tokens_total"] = sum(tok.values())
+    # The provider total includes planning/inspection calls that are not owned
+    # by one journal node. Prefer that authoritative final summary so the
+    # feasibility report cannot understate LLM use; fall back for older runs.
+    provider_tokens = summary.get("total_llm_tokens") or {}
+    total = provider_tokens.get("input_plus_output")
+    if isinstance(total, (int, float)):
+        m["llm_tokens_total"] = int(total)
+        m["llm_token_source"] = "provider_final_summary"
+    else:
+        tok = {}
+        for n in nodes:
+            for k, v in (n.get("token_breakdown") or {}).items():
+                tok[k] = tok.get(k, 0) + v
+        m["llm_tokens_total"] = sum(tok.values())
+        m["llm_token_source"] = "journal_node_sum"
     return m
 
 

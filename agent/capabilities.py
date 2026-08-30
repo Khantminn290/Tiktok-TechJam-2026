@@ -279,6 +279,31 @@ register(Capability(
     params={"required": ["per_epoch_scores", "users", "labels", "rules"], "optional": ["n_splits", "seed"]}))
 
 register(Capability(
+    name="capture_selection_rule_test", kind=CONFIRM,
+    purpose="Test fixed best-epoch versus top-epoch averaging rules on held-out "
+            "users using one training run's captured validation curve.",
+    when="After train_numpy_fm captured epoch scores and you need to check whether "
+         "a checkpoint-selection rule generalises without manually rebuilding the "
+         "selection_rule_test tensor and callable mapping.",
+    resolves="Whether a simple epoch-selection rule survives held-out-user splits, "
+             "rather than merely fitting the validation rows that selected it.",
+    inputs="capture_epoch_scores from cfg, users, labels",
+    outputs="the selection_rule_test result for best_epoch, mean_top2 and mean_top3 "
+            "when enough captured epochs exist",
+    contexts=(ORCHESTRATOR, GENERATED), module="research_tools", cost=CHEAP,
+    mutates_pipeline=False,
+    validation="Diagnostic only. It does not create per-epoch test predictions and "
+               "cannot itself authorise a submission change.",
+    failure_modes="Requires non-empty (epoch, valid_primary, scores_valid) tuples "
+                  "whose score arrays match users and labels.",
+    returns={"kind": "dict", "keys": ["reference_rule", "n_evaluations", "rules"]},
+    example=("res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\n"
+             "diag = capture_selection_rule_test(cfg['capture_epoch_scores'], "
+             "valid_users, valid_labels)"),
+    params={"required": ["capture_epoch_scores", "users", "labels"],
+            "optional": ["n_splits", "seed"]}))
+
+register(Capability(
     name="free_recombination", kind=ENSEMBLE,
     purpose="Compare aggregation rules over stored member predictions by "
             "resampling member subsets, with no training at all.",

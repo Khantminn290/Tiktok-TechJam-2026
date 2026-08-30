@@ -3113,6 +3113,12 @@ def test_results_report_is_generated_not_retyped():
     check("it reports the manual-intervention count",
           "manual interventions" in txt.lower() or
           d["latest_run"].get("tier") == RR.OPEN)
+    with open(os.path.join(_ROOT, "logs", "final_summary.json")) as fh:
+        provider_tokens = (json.load(fh).get("total_llm_tokens") or {}).get("input_plus_output")
+    if provider_tokens is not None and d["latest_run"].get("tier") == RR.OBSERVED:
+        check("the report prefers provider token totals over partial node sums",
+              d["latest_run"]["llm_tokens_total"] == provider_tokens
+              and d["latest_run"]["llm_token_source"] == "provider_final_summary")
 
     # Writing must be idempotent and self-contained.
     with tempfile.TemporaryDirectory() as td:
@@ -3278,6 +3284,7 @@ def test_return_shape_contract():
     discover: 42s, 42s, 71s and 983s of compute to learn a written-down fact.
     """
     print("\n[return-shape contract]")
+    import numpy as np
     from agent import capabilities as C
     from agent import preflight as P
 
@@ -3376,6 +3383,31 @@ def test_return_shape_contract():
         check("a call using *args/**kwargs is not falsely rejected",
               P.preflight(q)["failed_stage"] != P.CALL_ARITY,
               "a false rejection costs the agent an attempt for nothing")
+        with open(q, "w") as fh:
+            fh.write("from research_tools import selection_rule_test\n"
+                     "a = selection_rule_test(pe, u, l, r, user_ids=u)\n")
+        r = P.preflight(q)
+        check("an unsupported keyword is caught before training",
+              not r["ok"] and r["failed_stage"] == P.CALL_ARITY
+              and "user_ids" in json.dumps(r["issues"]))
+        with open(q, "w") as fh:
+            fh.write("from research_tools import selection_rule_test\n"
+                     "a = selection_rule_test(pe, u, l, ['top1', 'top3'])\n")
+        r = P.preflight(q)
+        check("a list of rule names is rejected before training",
+              not r["ok"] and r["failed_stage"] == P.CALL_ARITY
+              and "dict" in json.dumps(r["issues"]))
+
+    # The capture adapter is intentionally narrow: it converts the exact
+    # train_numpy_fm capture contract into a valid held-out rule comparison.
+    from runtime import research_tools as RT
+    users = np.repeat(np.arange(12), 4)
+    labels = np.tile([0.0, 1.0, 0.0, 1.0], 12)
+    rng = np.random.default_rng(2)
+    capture = [(i, 0.5 + i * 0.01, rng.normal(size=len(users))) for i in range(3)]
+    out = RT.capture_selection_rule_test(capture, users, labels, n_splits=2)
+    check("the capture adapter produces a held-out rule test",
+          out["reference_rule"] == "best_epoch" and "mean_top2" in out["rules"])
 
 
 

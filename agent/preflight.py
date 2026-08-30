@@ -231,7 +231,38 @@ def check_call_arity(tree: ast.AST) -> list:
            any(k.arg is None for k in node.keywords):
             continue
         supplied = len(node.args) + len({k.arg for k in node.keywords if k.arg})
+        allowed = set(required) | set(cap.params.get("optional") or [])
+        if not cap.params.get("var_keyword"):
+            unexpected = [k.arg for k in node.keywords
+                          if k.arg and k.arg not in allowed]
+            if unexpected:
+                issues.append(Issue(
+                    CALL_ARITY,
+                    f"`{name}` does not accept keyword argument(s): "
+                    f"{', '.join(unexpected)}", node.lineno,
+                    (cap.example or
+                     f"Accepted parameters: {', '.join(required + list(cap.params.get('optional') or []))}.")))
+                continue
         if supplied >= len(required):
+            # A common failure mode was passing a list of candidate names where
+            # selection_rule_test needs a mapping of name -> callable. Catch
+            # direct literals and simple aliases without attempting brittle
+            # whole-program type inference.
+            if name == "selection_rule_test":
+                rules_arg = None
+                if len(node.args) >= 4:
+                    rules_arg = node.args[3]
+                else:
+                    rules_arg = next((k.value for k in node.keywords
+                                      if k.arg == "rules"), None)
+                if isinstance(rules_arg, (ast.List, ast.Tuple, ast.Set)):
+                    issues.append(Issue(
+                        CALL_ARITY,
+                        "`selection_rule_test` needs `rules` to be a dict of "
+                        "name -> callable, not a list of rule names", node.lineno,
+                        "Use `capture_selection_rule_test(capture, users, labels)` "
+                        "for a captured epoch curve, or pass a dict such as "
+                        "{'best_epoch': lambda p, e: e[int(np.argmax(p))]}."))
             continue
         given_kw = {k.arg for k in node.keywords if k.arg}
         missing = [p for p in required[len(node.args):] if p not in given_kw]

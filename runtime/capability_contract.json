@@ -49,6 +49,28 @@
       "validation": "The per-epoch arrays are VALID-split predictions. Do not look for a test vector in them; take test predictions from train_numpy_fm's returned dict instead.",
       "when": "Whenever you want the epoch curve, or per-epoch predictions to feed selection_rule_test."
     },
+    "capture_selection_rule_test": {
+      "cost": "cheap",
+      "example": "res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\ndiag = capture_selection_rule_test(cfg['capture_epoch_scores'], valid_users, valid_labels)",
+      "failure_modes": "Requires non-empty (epoch, valid_primary, scores_valid) tuples whose score arrays match users and labels.",
+      "importable_from_generated_python": true,
+      "inputs": "capture_epoch_scores from cfg, users, labels",
+      "kind": "CONFIRM",
+      "module": "research_tools",
+      "orchestrator_only": false,
+      "outputs": "the selection_rule_test result for best_epoch, mean_top2 and mean_top3 when enough captured epochs exist",
+      "purpose": "Test fixed best-epoch versus top-epoch averaging rules on held-out users using one training run's captured validation curve.",
+      "returns": {
+        "keys": [
+          "reference_rule",
+          "n_evaluations",
+          "rules"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Diagnostic only. It does not create per-epoch test predictions and cannot itself authorise a submission change.",
+      "when": "After train_numpy_fm captured epoch scores and you need to check whether a checkpoint-selection rule generalises without manually rebuilding the selection_rule_test tensor and callable mapping."
+    },
     "evaluate": {
       "cost": "free",
       "example": "m = evaluate(list(users), labels, scores); print(m[\"primary\"])",

@@ -1286,7 +1286,12 @@ class AgentLoop:
                 interventions = sum(1 for line in fh if line.strip())
         summary = {
             "stop_reason": stop,
-            "iterations_used": len(self.tree.nodes),
+            # Keep raw journal records distinct from charged research decisions:
+            # preflight rejections are journalled for auditability but consume
+            # neither compute nor an outer-loop research decision.
+            "journal_nodes": len(self.tree.nodes),
+            "iterations_used": sum(1 for n in self.tree.nodes
+                                   if budget.consumes_budget(n)),
             "iteration_cap": self.max_iterations,
             "best_node": None if best is None else best.iteration_id,
             "best_valid_metrics": None if best is None else best.metrics,

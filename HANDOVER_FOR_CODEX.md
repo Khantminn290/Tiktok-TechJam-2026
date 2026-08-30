@@ -2,6 +2,80 @@
 
 Working branch: `opus-research-agent`, pushed at `e36a492`.
 
+## Codex continuation — 2026-08-31
+
+Codex ran the competition profile at `28142c1` and then added a narrow follow-up
+reliability patch. These changes are currently **uncommitted** alongside the
+run artifacts; preserve them and do not reset the worktree.
+
+### Latest live run
+
+`python3 run_agent.py --competition --fresh --wall-clock-limit-h 2.0` stopped
+at the charged 12-decision cap. It created 14 journal records because two
+preflight rejections are deliberately journalled but do not consume a research
+decision or training execution.
+
+| | |
+|---|---|
+| best single-seed primary | `0.60527` (node 9; not promoted) |
+| submitted incumbent | `0.60541`, unchanged |
+| journal nodes / charged decisions | 14 / 12 |
+| training executions | 27 of 90 |
+| completed / crashed training experiments | 9 / 3 |
+| Path B attempts / crashes | 7 / 5 |
+| preflight rejections | 2, no training spent |
+| paired confirmations / promoted | 3 / 0 (all REJECTED) |
+| LLM tokens / cost | 493,573 / $1.71402 |
+| training / agent wall time | 2,033.2s / 2,471.2s |
+| manual intervention | 0 |
+
+The run is valuable but does **not** establish score improvement. Node 9 is a
+single validation-selected Path B result and the evidence layer correctly left
+the submitted 16-seed ensemble alone.
+
+### Patch after the run
+
+Observed failures were all around the low-level `selection_rule_test` surface:
+
+1. node 10 used unsupported `user_ids` / `candidate_scores` keywords after
+   training;
+2. nodes 12/13 supplied the wrong curve/rule container shapes.
+
+The current uncommitted patch adds:
+
+- `research_tools.capture_selection_rule_test(...)`, a narrow adapter from the
+  exact `(epoch, valid_primary, scores_valid)` capture contract to the required
+  3-D tensor and fixed rule mapping;
+- a registered, machine-readable capability entry and generated runtime
+  contract for that adapter;
+- preflight rejection of unknown capability keywords and literal lists where
+  `selection_rule_test` requires a dict of rule callables;
+- honest final-summary accounting: `journal_nodes` is separate from charged
+  `iterations_used`;
+- results-report behavior that marks a malformed/non-zero test run **OPEN**
+  rather than falsely VERIFIED.
+
+Verified after the patch:
+
+```text
+python3 tests/test_harness.py        # 800 passed, 0 failed
+python3 -m agent.verify_incumbent    # 0.60541 / 0.67212 / 0.53870 exact
+python3 -m agent.results_report --run-tests
+```
+
+### Next recommended action
+
+Do not immediately spend another full competition run. First add a narrowly
+scoped integration test that makes generated Path B code use
+`capture_selection_rule_test`, then run a short competition smoke (`--max-
+iterations 4`) to confirm the planner chooses the adapter instead of manually
+reconstructing `selection_rule_test`. Only then schedule another clean full run.
+
+The dominant open reliability gap is semantic, well-formed Path B code. Static
+preflight now catches name, arity, return-shape, keyword and direct rule-type
+mistakes, but cannot prove a dynamically constructed argument has the intended
+meaning. Keep claims bounded accordingly.
+
 **Safety constraints — please preserve these.**
 - Do not reset, checkout or revert user changes. `CODE_REVIEW.md` and
   `QUICK_IMPLEMENTATION.md` are untracked on purpose; leave them.

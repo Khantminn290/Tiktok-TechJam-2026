@@ -188,6 +188,47 @@ def selection_rule_test(per_epoch_scores, users, labels, rules: dict,
     return out
 
 
+def capture_selection_rule_test(capture_epoch_scores, users, labels,
+                                n_splits: int = 4, seed: int = 7) -> dict:
+    """Validate fixed epoch-selection rules for one captured training curve.
+
+    ``train_numpy_fm`` records ``(epoch, valid_primary, scores_valid)`` tuples.
+    This adapter turns that documented payload into the 3-D tensor and callable
+    rule mapping required by :func:`selection_rule_test`, so generated code does
+    not have to reconstruct a subtle API contract after training has completed.
+    The result is a diagnostic; it does not authorise a validation-selected rule
+    to replace a submitted model.
+    """
+    rows = list(capture_epoch_scores or [])
+    if not rows:
+        raise ValueError("capture_epoch_scores is empty")
+    try:
+        curve = np.stack([np.asarray(row[2]) for row in rows], axis=0)
+    except (IndexError, TypeError, ValueError) as e:
+        raise ValueError(
+            "capture_epoch_scores must contain (epoch, valid_primary, "
+            "scores_valid) tuples with equal-length valid score arrays") from e
+    if curve.ndim != 2:
+        raise ValueError(f"captured score curve must be (epochs, rows); got {curve.shape}")
+
+    def best_epoch(primaries, scores):
+        return scores[int(np.argmax(primaries))]
+
+    def mean_top_n(n):
+        def _rule(primaries, scores):
+            top = np.argsort(-primaries)[:min(n, len(scores))]
+            return np.mean(scores[top], axis=0)
+        return _rule
+
+    rules = {"best_epoch": best_epoch}
+    if len(curve) >= 2:
+        rules["mean_top2"] = mean_top_n(2)
+    if len(curve) >= 3:
+        rules["mean_top3"] = mean_top_n(3)
+    return selection_rule_test(np.asarray([curve]), users, labels, rules,
+                               n_splits=n_splits, seed=seed)
+
+
 def free_recombination(member_scores, users, labels, rules: dict,
                        n_subsets: int = 24, subset: int = 8,
                        seed: int = 0) -> dict:
