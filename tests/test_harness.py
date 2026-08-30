@@ -3099,6 +3099,57 @@ def test_experiment_spec():
           not res3["usable"])
 
 
+def test_confirmation_is_not_re_queued():
+    """A node confirmed once must not be confirmed again, forever.
+
+    Found by running it. Node 0 scored well on one lucky seed, was confirmed,
+    came back UNCONFIRMED at a lower paired mean -- and remained the
+    highest-scoring node precisely BECAUSE its single seed was lucky. The gate
+    re-queued it on the next iteration, and would have spent six training runs
+    per iteration re-measuring the same thing until the budget ran out.
+    """
+    print("\n[confirmation queueing]")
+    with tempfile.TemporaryDirectory() as td:
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tree = ExperimentTree(td)
+        loop.max_iterations = 20
+        loop.exec_timeout_s = 60
+        loop._confirmation_queue = []
+        loop._confirm_seeds = (0, 1, 2)
+        loop._confirmed_nodes = set()
+        loop.menu = Menu(MENU_PATH)
+
+        good = {"iteration_id": 0, "status": "success", "action": "draft",
+                "metrics": {"primary": 0.6045},
+                "menu_choices": {"model": "deepfm_mlp", "loss": "bpr_pairwise"},
+                "events": []}
+        loop._maybe_queue_confirmation([good], {}, [], budget_left=6)
+        check("a promising single-seed node is queued for confirmation",
+              len(loop._confirmation_queue) == 1)
+
+        # Simulate that confirmation having run and come back unconfirmed.
+        loop._confirmation_queue.clear()
+        loop._confirmed_nodes.add(0)
+        loop._maybe_queue_confirmation([good], {}, [], budget_left=6)
+        check("...and is NOT queued a second time once answered",
+              loop._confirmation_queue == [],
+              "re-confirming the same node spends six runs to learn nothing")
+
+        # A node at the baseline is not worth six training runs either.
+        loop._confirmed_nodes.clear()
+        weak = dict(good, iteration_id=1, metrics={"primary": 0.6017})
+        loop._maybe_queue_confirmation([weak], {}, [], budget_left=6)
+        check("a result at the baseline does not trigger a paired run",
+              loop._confirmation_queue == [],
+              "confirming noise wastes as much budget as believing it")
+
+        # No budget, no confirmation: starting one it cannot finish is worse
+        # than not starting it.
+        loop._maybe_queue_confirmation([good], {}, [], budget_left=0)
+        check("no confirmation is queued without budget to finish it",
+              loop._confirmation_queue == [])
+
+
 def test_feature_store():
     """Path B discoveries must accumulate, not evaporate."""
     print("\n[feature store]")
@@ -3948,7 +3999,8 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
-              test_experiment_spec, test_feature_store, test_allocator,
+              test_experiment_spec, test_confirmation_is_not_re_queued,
+              test_feature_store, test_allocator,
               test_complete_cfg_is_obtainable,
               test_experience_write_is_not_fatal, test_run_metrics_and_demo,
               test_capability_contract, test_preflight, test_budget_accounting,

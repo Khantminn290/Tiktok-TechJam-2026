@@ -126,6 +126,10 @@ class AgentLoop:
         # never read, and `feature_source` appeared in no journal ever recorded.
         self._confirmation_queue = []
         self._confirm_seeds = (0, 1, 2)
+        # Parent nodes already put through a paired confirmation. A node
+        # whose confirmation came back UNCONFIRMED is answered, not
+        # unanswered -- asking again buys nothing and costs six runs.
+        self._confirmed_nodes = set()
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -541,6 +545,14 @@ class AgentLoop:
         # it would just spend runs re-measuring what is already measured.
         if (best.get("action") or "") == "confirm":
             return
+        # ...and neither may a node that has ALREADY been confirmed once.
+        # Found by running it: node 0 came back UNCONFIRMED, stayed the
+        # highest-scoring node because its single lucky seed still topped the
+        # paired mean, and was re-queued on the very next iteration. Left alone
+        # that spends six training runs per iteration re-measuring the same
+        # thing forever and never explores again.
+        if best.get("iteration_id") in self._confirmed_nodes:
+            return
         delta = best["metrics"]["primary"] - BASELINE_VALID_PRIMARY
         if delta < BASELINE_SEED_STD / 2:
             return
@@ -620,6 +632,8 @@ class AgentLoop:
                         code_path="", events=events,
                         research_category="confirmation",
                         implementation_path="A")
+            if spec.parent_node is not None:
+                self._confirmed_nodes.add(spec.parent_node)
             self.tree.add(node)
             return node
 
@@ -655,6 +669,8 @@ class AgentLoop:
                     expected_effect=f"{spec.expected_primary_effect:+.5f}",
                     decide_reason="queued paired confirmation",
                     research_category="confirmation", implementation_path="A")
+        if spec.parent_node is not None:
+            self._confirmed_nodes.add(spec.parent_node)
         self.tree.add(node)
         print(f"[iter {it}] CONFIRM {ev['state']}"
               + (f" primary {metrics['primary']:.5f}" if metrics else "")
