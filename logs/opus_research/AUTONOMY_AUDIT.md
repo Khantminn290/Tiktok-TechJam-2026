@@ -62,3 +62,45 @@ Keep (this is legitimate Level-B transfer — a *method*, not an *answer*):
 - the general methodological principle that a score computed on the data that
   selected it is not evidence
 - negative knowledge with scope and confidence, not blanket bans
+
+---
+
+# Clean autonomy validation — the honest result
+
+Environment stripped of every teacher finding (verified: 0 leak tokens across
+`pipeline_lab`, `frontier`, `research_state`, `feature_registry`; the dead-end
+block mentions snapshot only to say it was *rejected*, which steers away from
+the answer, not toward it).
+
+| Run | Diagnostics requested | Rediscovered the finding? | Best |
+|---|---|---|---|
+| Clean #1 | 0 of 5 iterations | no | 0.6022 |
+| Clean #2 (diagnostics made invocable) | 0 of 5 iterations | no | 0.6043 |
+| Clean #3 (measurement guidance rebalanced) | **4 of 4 iterations**, incl. `hardcoded_constants` in 3 | no | 0.6042 |
+
+## Two architectural defects this exposed, both mine
+
+1. **The capabilities were documentation, not an action space.** `training_dynamics()`,
+   `selection_rule_test()` and `free_recombination()` were described in the
+   planning prompt and callable only by me. Fixed: they are tools in the inspect
+   phase, with the expensive one capped at once per iteration.
+2. **The agent was told not to measure.** The inspect prompt said only that
+   "profiling is not free" and to prefer an empty list. It requested zero tools
+   in 10 of 10 iterations across two runs — it was following instructions.
+   Fixed with symmetric guidance; tool use went 0/10 → 4/4.
+
+## Verdict
+
+**Level B — capability transfer. Level A is NOT supported by this evidence.**
+
+What the agent does autonomously: selects a research objective, generates and
+deterministically scores candidates, invents features and writes their
+implementations, reads accumulated negative knowledge and declines on it, and
+**chooses which diagnostics to run**. All without being told what to try.
+
+What it did NOT do: rediscover the stopping-rule finding. It never chose
+`training_dynamics`, the one diagnostic that would have revealed the overfit.
+
+I stopped tuning here deliberately. Re-running until the agent produces the
+teacher's answer would be selection on the test — the same error this audit
+exists to catch, and the third time this project has had to correct for it.
