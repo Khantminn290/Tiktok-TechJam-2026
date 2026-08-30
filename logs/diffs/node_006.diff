@@ -1,128 +1,110 @@
---- logs/solutions/node_005.py
+--- logs/solutions/node_004.py
 +++ logs/solutions/node_006.py
-@@ -3,10 +3,7 @@
+@@ -3,7 +3,27 @@
  import os
  import sys
- import numpy as np
--
+ 
++import numpy as np
++
  import train_lib
--from research_tools import incumbent_cfg
--from evaluate import evaluate
++from evaluate import evaluate
++from research_tools import incumbent_cfg, selection_rule_test
++
++
++def _mean_arrays(arrs):
++    out = np.array(arrs[0], dtype=np.float64, copy=True)
++    for a in arrs[1:]:
++        out += np.asarray(a, dtype=np.float64)
++    out /= float(len(arrs))
++    return out
++
++
++def _safe_selection_rule_test(user_ids, labels, candidate_dict):
++    try:
++        return selection_rule_test(user_ids, labels, candidate_dict)
++    except TypeError:
++        # Fallback for alternate signature variants if present in runtime.
++        return selection_rule_test(candidate_dict, user_ids, labels)
  
  
- def parse_args():
-@@ -17,104 +14,21 @@
-     return p.parse_args()
- 
- 
--def write_outputs(output_dir, metrics, scores_valid, scores_test):
--    os.makedirs(output_dir, exist_ok=True)
--    with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
--        json.dump({k: float(v) for k, v in metrics.items()}, f)
--    np.save(os.path.join(output_dir, 'scores_valid.npy'), np.asarray(scores_valid, dtype=np.float64))
--    np.save(os.path.join(output_dir, 'scores_test.npy'), np.asarray(scores_test, dtype=np.float64))
--
--
  def main():
-     args = parse_args()
+@@ -14,14 +34,72 @@
+     args = parser.parse_args()
+ 
      try:
--        # Parse for CLI contract compatibility; experiment ignores menu overrides by design.
--        _ = json.loads(args.menu_choices)
--
--        splits, meta = train_lib.load_cache()
--
--        cfg, enc = incumbent_cfg(
--            splits,
--            meta,
--            loss='bpr_pairwise',
--            neg_sampling='uniform_1',
--            user_history='recency_weighted_pool',
--            multitask='none',
--            model='fm_numpy',
--            temporal='none',
--            training='lower_lr_longer',
--            data_extras='none',
--            sample_weighting='per_row',
--            regularization='l2_default'
--        )
--        cfg['seed'] = args.seed
--        cfg['capture_epoch_scores'] = []
--
--        saved_states = []
--        original_apply = train_lib.RankFM.apply_grads
--
--        def apply_and_snapshot(self, grad_pairs, aux_contribs):
--            out = original_apply(self, grad_pairs, aux_contribs)
--            saved_states.append(self.state())
--            return out
--
--        train_lib.RankFM.apply_grads = apply_and_snapshot
--        try:
--            res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
--        finally:
--            train_lib.RankFM.apply_grads = original_apply
--
--        epoch_records = list(cfg['capture_epoch_scores'])
--        if not epoch_records:
--            raise RuntimeError('capture_epoch_scores returned no epochs')
--
--        n_epochs = len(epoch_records)
--        if len(saved_states) < n_epochs:
--            raise RuntimeError('captured fewer model states than epoch score snapshots')
--        if len(saved_states) > n_epochs:
--            saved_states = saved_states[:n_epochs]
--
--        epoch_primaries = np.asarray([float(t[1]) for t in epoch_records], dtype=np.float64)
--        epoch_valid_scores = [np.asarray(t[2], dtype=np.float64) for t in epoch_records]
--
--        top_k = min(5, n_epochs)
--        top_idxs = np.argsort(epoch_primaries)[::-1][:top_k]
--        top_idxs = sorted(int(i) for i in top_idxs.tolist())
--
--        scores_valid = np.mean(np.stack([epoch_valid_scores[i] for i in top_idxs], axis=0), axis=0)
--
--        dim = int(enc['train'].max()) + 1
--        model = train_lib.RankFM(
--            dim=dim,
--            k=cfg['k'],
--            lr=cfg['lr'],
--            seed=args.seed,
--            aux_tasks=cfg.get('aux_tasks', [])
--        )
--
--        history = None
--        if cfg.get('user_history', 'none') != 'none':
--            history = train_lib.History(splits, meta['field_dims']['user'], cfg['user_history'])
--
--        X_test = enc['test']
--        H_test = None
--        if history is not None:
--            H_test = history.pooled['test']
--
--        test_preds = []
--        for idx in top_idxs:
--            model.load_state(saved_states[idx])
--            pred = model.predict(X_test, H_test)
--            test_preds.append(np.asarray(pred, dtype=np.float64))
--        scores_test = np.mean(np.stack(test_preds, axis=0), axis=0)
--
--        metrics = evaluate(splits['valid']['user_raw'], splits['valid']['long_view'], scores_valid)
--        write_outputs(args.output_dir, metrics, scores_valid, scores_test)
--
-+        menu_choices = json.loads(args.menu_choices)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+        if metrics is not None:
-+            metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+            if os.path.exists(metrics_path):
-+                with open(metrics_path, 'w') as f:
-+                    json.dump({k: float(v) for k, v in metrics.items()}, f)
-+        return 0
+-        menu_choices = json.loads(args.menu_choices)
+         os.makedirs(args.output_dir, exist_ok=True)
+-        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
+-        metrics = {k: float(v) for k, v in metrics.items()}
+-        metrics_path = os.path.join(args.output_dir, 'metrics.json')
+-        if not os.path.exists(metrics_path):
+-            with open(metrics_path, 'w') as f:
+-                json.dump(metrics, f)
++        _ = json.loads(args.menu_choices)  # accepted for contract compliance; mechanism is fixed for this diagnostic run
++
++        splits, meta = train_lib.load_cache()
++
++        # Build the exact incumbent-like/node-4-style configuration.
++        cfg, enc = incumbent_cfg(
++            splits,
++            meta,
++            loss='bpr_pairwise',
++            neg_sampling='uniform_1',
++            user_history='recency_weighted_pool',
++            multitask='none',
++            model='fm_numpy',
++            temporal='none',
++            training='lower_lr_longer',
++            data_extras='none',
++            sample_weighting='per_row',
++            regularization='l2_default',
++        )
++        cfg['seed'] = args.seed
++        cfg['capture_epoch_scores'] = []
++
++        res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
++        scores_valid = res['scores_valid']
++        scores_test = res['scores_test']
++
++        user_ids_valid = splits['valid']['user_raw']
++        labels_valid = splits['valid']['long_view']
++        metrics = evaluate(user_ids_valid, labels_valid, scores_valid)
++
++        # Gather per-epoch candidates for an epoch-selection audit.
++        epoch_records = list(cfg['capture_epoch_scores'])
++        candidate_scores = {}
++        candidate_scores['returned_best'] = np.asarray(scores_valid, dtype=np.float64)
++
++        if epoch_records:
++            epoch_records = sorted(epoch_records, key=lambda x: int(x[0]))
++            for epoch, valid_primary, epoch_scores in epoch_records:
++                candidate_scores['epoch_%02d' % int(epoch)] = np.asarray(epoch_scores, dtype=np.float64)
++
++            primaries = [float(vp) for _, vp, _ in epoch_records]
++            order = np.argsort(np.asarray(primaries))[::-1]
++            top1 = [np.asarray(epoch_records[order[0]][2], dtype=np.float64)]
++            candidate_scores['avg_top1'] = top1[0]
++            if len(order) >= 2:
++                top2 = [np.asarray(epoch_records[order[i]][2], dtype=np.float64) for i in range(2)]
++                candidate_scores['avg_top2'] = _mean_arrays(top2)
++            if len(order) >= 3:
++                top3 = [np.asarray(epoch_records[order[i]][2], dtype=np.float64) for i in range(3)]
++                candidate_scores['avg_top3'] = _mean_arrays(top3)
++            candidate_scores['last_epoch'] = np.asarray(epoch_records[-1][2], dtype=np.float64)
++
++        audit = _safe_selection_rule_test(user_ids_valid, labels_valid, candidate_scores)
++
++        metrics_out = {k: float(v) for k, v in metrics.items()}
++        metrics_out['epoch_selection_audit'] = audit
++        if epoch_records:
++            metrics_out['n_epochs_captured'] = int(len(epoch_records))
++            metrics_out['best_captured_epoch'] = int(max(epoch_records, key=lambda x: float(x[1]))[0])
++            metrics_out['best_captured_primary'] = float(max(float(x[1]) for x in epoch_records))
++
++        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
++            json.dump(metrics_out, f)
++        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), np.asarray(scores_valid, dtype=np.float32))
++        np.save(os.path.join(args.output_dir, 'scores_test.npy'), np.asarray(scores_test, dtype=np.float32))
+         return 0
      except Exception as e:
          sys.stderr.write(str(e) + '\n')
--        raise
-+        return 1
- 
- 
- if __name__ == '__main__':
--    main()
-+    sys.exit(main())

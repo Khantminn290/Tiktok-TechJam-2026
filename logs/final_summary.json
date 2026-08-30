@@ -1,27 +1,27 @@
 {
-  "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
-  "iterations_used": 11,
+  "stop_reason": "iteration cap reached (12)",
+  "iterations_used": 14,
   "iteration_cap": 12,
-  "best_node": 7,
+  "best_node": 9,
   "best_valid_metrics": {
-    "GAUC": 0.6720477510874213,
-    "nDCG@5": 0.5378881530235174,
-    "primary": 0.6049679520554694
+    "GAUC": 0.6722885728946539,
+    "nDCG@5": 0.538253811788693,
+    "primary": 0.6052711923416735
   },
-  "delta_valid_primary_over_baseline": 0.0034,
+  "delta_valid_primary_over_baseline": 0.0037,
   "total_llm_tokens": {
-    "input_tokens": 411379,
-    "output_tokens": 36202,
+    "input_tokens": 455166,
+    "output_tokens": 38407,
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 0,
-    "calls": 40,
+    "calls": 44,
     "provider": "openai",
     "model": "gpt-5.4",
-    "input_plus_output": 447581
+    "input_plus_output": 493573
   },
-  "total_training_wall_clock_s": 885.0,
-  "delta_in_baseline_seed_sigmas": 4.21,
-  "total_agent_wall_clock_s": 1495.2,
+  "total_training_wall_clock_s": 2033.2,
+  "delta_in_baseline_seed_sigmas": 4.59,
+  "total_agent_wall_clock_s": 2471.2,
   "gpu_hours": 0.0,
   "gpu_seconds_measured": 0.0,
   "devices_used": [
@@ -30,11 +30,11 @@
   "spend": {
     "provider": "openai",
     "model": "gpt-5.4",
-    "total_usd": 1.571477,
+    "total_usd": 1.71402,
     "ceiling_usd": 6.0,
-    "iterations_billed": 40,
-    "mean_usd_per_iteration": 0.039287,
-    "max_usd_per_iteration": 0.090133,
+    "iterations_billed": 44,
+    "mean_usd_per_iteration": 0.038955,
+    "max_usd_per_iteration": 0.098812,
     "rate_card": "$2.50/1M in, $15.00/1M out"
   },
   "draft_count": 5,
@@ -42,8 +42,8 @@
   "budget_ledger": {
     "max_iterations": 12,
     "max_training_runs": 90,
-    "training_runs_used": 16,
-    "training_runs_left": 74,
+    "training_runs_used": 27,
+    "training_runs_left": 63,
     "training_crashes": 3
   },
   "budget_counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",

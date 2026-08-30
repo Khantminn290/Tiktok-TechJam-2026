@@ -100,7 +100,7 @@ def assert_not_root() -> None:
             "protected-files lock (agent/executor.py) are enforced with POSIX "
             "chmod, which root bypasses unconditionally. Running this agent as "
             "root would silently provide none of the guarantees described in "
-            "README.md/HANDOVER.md -- every 'blocked' path would actually "
+            "README.md -- every 'blocked' path would actually "
             "succeed. Run as a non-root user.")
 
 

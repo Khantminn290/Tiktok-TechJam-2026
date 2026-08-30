@@ -1,6 +1,6 @@
 # Results — generated
 
-Generated `2026-08-30T16:41:16Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
+Generated `2026-08-30T17:06:48Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
 
 Tiers: **VERIFIED** recomputed during this generation · **OBSERVED** measured in a run and journalled · **OPEN** not established.
 
@@ -22,7 +22,7 @@ Provenance: commit `024238f2b9ec` on `opus-research-agent`, data fingerprint `60
 
 ## Harness
 
-`python3 tests/test_harness.py` → **802 passed, 0 failed** (8.6s) — **VERIFIED**
+`python3 tests/test_harness.py` → **810 passed, 0 failed** (8.6s) — **VERIFIED**
 
 ## Convergence rule
 

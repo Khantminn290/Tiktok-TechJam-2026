@@ -178,7 +178,8 @@ crash rate is unmeasured.
 rejections as crashes, which penalises preflight for working. They are now
 taken over attempts that actually reached training. The pre/post figures above
 barely move (0.714 / 0.909) because those runs had few rejections, but later
-runs do, and `HANDOVER_FOR_CODEX.md` carries the corrected series.
+runs do. The current series is generated into `RESULTS.md` by
+`python3 -m agent.results_report --run-tests`.
 
 ### The deeper lesson
 

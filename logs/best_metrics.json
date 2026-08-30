@@ -1,12 +1,12 @@
 {
-  "iteration_id": 7,
+  "iteration_id": 9,
   "menu_choices": {},
-  "hypothesis": "Validation-fitted checkpoint choice is likely overstating or misreading tiny single-run differences in this near-noise-floor regime; training the incumbent once while capturing every epoch’s VALID predictions, then using held-out user-split selection_rule_test to compare single-best-epoch against simple top-N checkpoint averages should give a less biased final checkpoint rule and a cleaner confirmation signal for whether checkpoint combination truly helps this branch.",
+  "hypothesis": "Confirm whether node 8's 0.60413 is partly a validation-selection artefact by replacing same-valid best-epoch choice with a held-out user-split-stable checkpoint rule inside the same FM+BPR+recency run. A small average over the best 2-3 epochs may help single-model GAUC/nDCG@5 if the rule is chosen for stability across validation-user splits rather than by the optimistic argmax on the same users it scores.",
   "valid_metrics": {
-    "GAUC": 0.6720477510874213,
-    "nDCG@5": 0.5378881530235174,
-    "primary": 0.6049679520554694
+    "GAUC": 0.6722885728946539,
+    "nDCG@5": 0.538253811788693,
+    "primary": 0.6052711923416735
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_007.py",
-  "timestamp": 1788102770.600616
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_009.py",
+  "timestamp": 1788105753.325165
 }

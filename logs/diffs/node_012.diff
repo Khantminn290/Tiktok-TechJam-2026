@@ -1,0 +1,180 @@
+--- logs/solutions/node_011.py
++++ logs/solutions/node_012.py
+@@ -7,49 +7,7 @@
+ 
+ import train_lib
+ from evaluate import evaluate
+-from research_tools import incumbent_cfg, selection_rule_test, contract
+-
+-
+-def _call_selection_rule_test(candidates, user_ids, labels, seed):
+-    """Call selection_rule_test defensively without guessing unsupported kwargs.
+-
+-    We first try the most likely keyword signature, then fall back to positional
+-    forms if needed. This preserves the original experiment intent while fixing
+-    the exact API mismatch that crashed node 10.
+-    """
+-    tried = []
+-
+-    # Likely modern keyword form.
+-    try:
+-        return selection_rule_test(candidates=candidates, user_ids=user_ids, labels=labels, seed=seed)
+-    except TypeError as e:
+-        tried.append(str(e))
+-
+-    # Positional core arguments with seed keyword.
+-    try:
+-        return selection_rule_test(candidates, user_ids, labels, seed=seed)
+-    except TypeError as e:
+-        tried.append(str(e))
+-
+-    # Pure positional fallback.
+-    try:
+-        return selection_rule_test(candidates, user_ids, labels, seed)
+-    except TypeError as e:
+-        tried.append(str(e))
+-
+-    # Final fallback: some implementations may infer labels/user ids from dict-like payload.
+-    try:
+-        payload = {
+-            'candidates': candidates,
+-            'user_ids': user_ids,
+-            'labels': labels,
+-            'seed': seed,
+-        }
+-        return selection_rule_test(payload)
+-    except TypeError as e:
+-        tried.append(str(e))
+-
+-    raise TypeError('selection_rule_test signature mismatch; attempts: ' + ' || '.join(tried))
++from research_tools import incumbent_cfg, selection_rule_test
+ 
+ 
+ def main():
+@@ -60,6 +18,7 @@
+     args = parser.parse_args()
+ 
+     try:
++        # Required by contract, but this custom Path-B run ignores menu contents.
+         _ = json.loads(args.menu_choices)
+         os.makedirs(args.output_dir, exist_ok=True)
+ 
+@@ -83,44 +42,68 @@
+         res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
+         scores_test = np.asarray(res['scores_test'])
+ 
+-        epoch_rows = cfg['capture_epoch_scores']
++        epoch_rows = list(cfg['capture_epoch_scores'])
+         if not epoch_rows:
+             raise RuntimeError('capture_epoch_scores returned no epochs')
+ 
+-        epoch_rows = sorted(epoch_rows, key=lambda t: float(t[1]), reverse=True)
+-        top = epoch_rows[:5]
+-        top_epochs = [int(ep) for ep, _, _ in top]
+-        top_arrays = [np.asarray(sv) for _, _, sv in top]
++        # selection_rule_test compares rules for choosing among per-epoch predictions.
++        # We therefore provide the same top-K epoch pool to every rule and let the tool
++        # evaluate which rule generalises on held-out user splits.
++        epoch_rows_sorted = sorted(epoch_rows, key=lambda t: float(t[1]), reverse=True)
++        top = epoch_rows_sorted[:5]
++        if len(top) < 1:
++            raise RuntimeError('need at least one epoch candidate')
+ 
+-        candidates = {}
+-        candidates['top1_uniform'] = np.asarray(top_arrays[0])
+-        if len(top_arrays) >= 2:
+-            candidates['top2_uniform'] = np.mean(np.stack(top_arrays[:2], axis=0), axis=0)
+-        if len(top_arrays) >= 3:
+-            candidates['top3_uniform'] = np.mean(np.stack(top_arrays[:3], axis=0), axis=0)
+-        if len(top_arrays) >= 5:
+-            candidates['top5_uniform'] = np.mean(np.stack(top_arrays[:5], axis=0), axis=0)
++        per_epoch_scores = [np.asarray(sv) for (_, _, sv) in top]
++        top_epochs = [int(ep) for (ep, _, _) in top]
++        top_primaries = [float(vp) for (_, vp, _) in top]
+ 
+         valid_user_ids = splits['valid']['user_raw']
+         valid_labels = splits['valid']['long_view']
+ 
+-        rule_test = _call_selection_rule_test(candidates, valid_user_ids, valid_labels, args.seed)
++        rules = ['top1_uniform', 'top2_uniform', 'top3_uniform', 'top5_uniform']
++        # Trim rules that require more epochs than available.
++        available_rules = []
++        for r in rules:
++            need = int(r.split('_')[0][3:])
++            if len(per_epoch_scores) >= need:
++                available_rules.append(r)
++        if not available_rules:
++            raise RuntimeError('no selection rules available for %d epochs' % len(per_epoch_scores))
++
++        rule_test = selection_rule_test(per_epoch_scores, valid_user_ids, valid_labels, available_rules)
+         rule_results = rule_test.get('rules', {})
+         if not rule_results:
+             raise RuntimeError('selection_rule_test returned no rule results')
+ 
+-        def sort_key(item):
+-            name, info = item
+-            mean_delta = float(info.get('mean_delta', -1e18))
+-            sigma = float(info.get('sigma', -1e18))
+-            tval = float(info.get('t', -1e18))
+-            return (mean_delta, sigma, tval, name)
++        def _rule_value(info, key, default=-1e18):
++            val = info.get(key, default)
++            try:
++                return float(val)
++            except Exception:
++                return float(default)
+ 
+-        chosen_rule = sorted(rule_results.items(), key=sort_key, reverse=True)[0][0]
+-        if chosen_rule not in candidates:
+-            raise RuntimeError('chosen rule %s not present in candidates %s' % (chosen_rule, sorted(candidates.keys())))
++        # Prefer the rule with best held-out mean delta; tie-break with sigma then t if present.
++        chosen_rule = sorted(
++            rule_results.items(),
++            key=lambda kv: (
++                _rule_value(kv[1], 'mean_delta'),
++                _rule_value(kv[1], 'sigma'),
++                _rule_value(kv[1], 't'),
++                kv[0],
++            ),
++            reverse=True,
++        )[0][0]
+ 
+-        final_scores_valid = np.asarray(candidates[chosen_rule])
++        def combine_rule(name, arrays):
++            n = int(name.split('_')[0][3:])
++            if len(arrays) < n:
++                raise RuntimeError('rule %s requires %d epochs, only have %d' % (name, n, len(arrays)))
++            if n == 1:
++                return np.asarray(arrays[0])
++            return np.mean(np.stack(arrays[:n], axis=0), axis=0)
++
++        final_scores_valid = combine_rule(chosen_rule, per_epoch_scores)
+         metrics = evaluate(valid_user_ids, valid_labels, final_scores_valid)
+         metrics = {k: float(v) for k, v in metrics.items()}
+ 
+@@ -129,20 +112,19 @@
+         np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_scores_valid)
+         np.save(os.path.join(args.output_dir, 'scores_test.npy'), scores_test)
+ 
+-        diag = {
++        diagnostics = {
+             'chosen_rule': chosen_rule,
+             'reference_rule': rule_test.get('reference_rule'),
+             'top_epochs_by_same_valid_primary': top_epochs,
+-            'epoch_primaries_top5': {str(int(ep)): float(vp) for ep, vp, _ in top},
++            'top_epoch_valid_primary': top_primaries,
+             'selection_rule_test': rule_test,
+             'candidate_full_valid_metrics': {
+-                name: {k: float(v) for k, v in evaluate(valid_user_ids, valid_labels, sc).items()}
+-                for name, sc in candidates.items()
++                r: {k: float(v) for k, v in evaluate(valid_user_ids, valid_labels, combine_rule(r, per_epoch_scores)).items()}
++                for r in available_rules
+             },
+-            'selection_rule_test_contract': contract('selection_rule_test'),
+         }
+         with open(os.path.join(args.output_dir, 'selection_diagnostics.json'), 'w') as f:
+-            json.dump(diag, f)
++            json.dump(diagnostics, f)
+ 
+         return 0
+     except Exception as e:

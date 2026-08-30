@@ -1,14 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [NEUTRAL] iter 5 -- Confirm whether the safer incumbent is the broader, repeatedly strong FM+BPR+recency-history recipe
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6037 (+0.00002 = +0.0 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
-### [HELPED] iter 0 -- DIN attention remains one of the few frontier directions with non-saturated upside, but prior probes
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "din_attention", "multitask": "none", "model": "deepfm_mlp", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 3, "checkpoint_combine": true} scored 0.6042 as the first scored node (no prior best to compare against).
-
-### [NEUTRAL] iter 4 -- A contemporaneous confirmation anchor with the long-standing strong classical recipe (fm_numpy + bpr
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "lr": 0.0005, "epochs": 12, "patience": 4, "n_checkpoints": 1, "checkpoint_combine": false} scored 0.6038 vs the then-best 0.6042 (-0.00040 = -0.5 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
 ### [CRASHED] iter 0 -- Because validation ranking lists are very short (median 4 impressions/user) while training users con
 menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} failed with unknown: Fix exactly this and resubmit. Do not change your hypothesis: the experiment has not been tested yet. -- Cause unclear. Reduce the experiment to the smallest version that still tests the hypothesis and re-run to localise the fault.
 
@@ -38,4 +29,16 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [DEAD_END] iter 9 -- Confirm whether the current best FM+BPR+recency recipe is still slightly under-optimised rather than
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "lr": 0.0007, "epochs": 18, "patience": 5} scored 0.6035 vs the then-best 0.6050 (-0.00145 = -1.8 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [HELPED] iter 0 -- A standalone GRU4Rec-style sequential model with BPR should modestly improve within-user ranking by
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6024 as the first scored node (no prior best to compare against).
+
+### [DEAD_END] iter 1 -- Confirm whether the stronger already-observed frontier recipe—classical FM with pointwise_logloss, r
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6015 vs the then-best 0.6024 (-0.00085 = -1.1 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [HELPED] iter 3 -- To confirm whether the small single-seed edge of the current best branch is actually due to the GRU
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6032 from 0.6024 (+0.00083 = +1.0 sigma).
+
+### [NEUTRAL] iter 4 -- Confirm the stronger incumbent-style FM branch in a fresh single run: fm_numpy with BPR, recency-wei
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6032 (+0.00054 = +0.7 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 

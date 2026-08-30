@@ -5,6 +5,9 @@ kuairand-starter-kit/KuaiRand-Pure.tar.gz
 # generated submission files
 submission*.csv
 
+# generated experiment-tree visualisation (rebuild: python3 -m agent.viz)
+viz/
+
 # secrets — never commit API keys
 .env
 

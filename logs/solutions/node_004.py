@@ -2,160 +2,31 @@ import argparse
 import json
 import os
 import sys
-import numpy as np
 
 import train_lib
-from research_tools import incumbent_cfg, selection_rule_test
-from evaluate import evaluate
-
-
-def parse_args():
-    p = argparse.ArgumentParser()
-    p.add_argument('--menu-choices', type=str, required=True)
-    p.add_argument('--output-dir', type=str, required=True)
-    p.add_argument('--seed', type=int, default=0)
-    return p.parse_args()
-
-
-def write_outputs(output_dir, metrics, scores_valid, scores_test):
-    os.makedirs(output_dir, exist_ok=True)
-    with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
-        json.dump({k: float(v) for k, v in metrics.items()}, f)
-    np.save(os.path.join(output_dir, 'scores_valid.npy'), scores_valid)
-    np.save(os.path.join(output_dir, 'scores_test.npy'), scores_test)
 
 
 def main():
-    args = parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--menu-choices', required=True)
+    parser.add_argument('--output-dir', required=True)
+    parser.add_argument('--seed', type=int, default=0)
+    args = parser.parse_args()
+
     try:
-        _ = json.loads(args.menu_choices)
-
-        splits, meta = train_lib.load_cache()
-
-        cfg, enc = incumbent_cfg(splits, meta,
-            loss='bpr_pairwise',
-            neg_sampling='uniform_1',
-            user_history='recency_weighted_pool',
-            multitask='none',
-            model='fm_numpy',
-            temporal='none',
-            training='lower_lr_longer',
-            data_extras='none',
-            sample_weighting='per_row',
-            regularization='l2_default'
-        )
-        cfg['seed'] = args.seed
-        cfg['capture_epoch_scores'] = []
-
-        saved_states = []
-        original_apply = train_lib.RankFM.apply_grads
-
-        def apply_and_snapshot(self, grad_pairs, aux_contribs):
-            out = original_apply(self, grad_pairs, aux_contribs)
-            saved_states.append(self.state())
-            return out
-
-        train_lib.RankFM.apply_grads = apply_and_snapshot
-        try:
-            res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
-        finally:
-            train_lib.RankFM.apply_grads = original_apply
-
-        epoch_records = list(cfg['capture_epoch_scores'])
-        if not epoch_records:
-            raise RuntimeError('capture_epoch_scores returned no epochs')
-
-        epoch_ids = [int(t[0]) for t in epoch_records]
-        epoch_valid_scores = [np.asarray(t[2], dtype=np.float64) for t in epoch_records]
-        epoch_primaries = [float(t[1]) for t in epoch_records]
-
-        n_epochs = len(epoch_records)
-        if len(saved_states) < n_epochs:
-            raise RuntimeError(f'captured {n_epochs} epoch score snapshots but only {len(saved_states)} model states')
-        if len(saved_states) > n_epochs:
-            saved_states = saved_states[:n_epochs]
-
-        order = np.argsort(np.asarray(epoch_primaries))[::-1]
-        best_idx = int(order[0])
-        top2 = sorted(order[:min(2, n_epochs)].tolist())
-        top3 = sorted(order[:min(3, n_epochs)].tolist())
-        suffix2 = sorted(list(range(max(0, best_idx - 1), min(n_epochs, best_idx + 1))))
-        suffix3 = sorted(list(range(max(0, best_idx - 1), min(n_epochs, best_idx + 2))))
-
-        candidate_defs = {
-            'best1': [best_idx],
-            'top2_avg': top2,
-            'top3_avg': top3,
-            'best_suffix2': suffix2,
-            'best_suffix3': suffix3,
-        }
-
-        # Deduplicate any identical index sets while preserving at least best1.
-        uniq = {}
-        for name, idxs in candidate_defs.items():
-            key = tuple(idxs)
-            if key not in uniq:
-                uniq[key] = name
-        candidate_defs = {name: list(key) for key, name in uniq.items()}
-        if 'best1' not in candidate_defs:
-            candidate_defs['best1'] = [best_idx]
-
-        rules = {}
-        for name, idxs in candidate_defs.items():
-            avg_scores = np.mean(np.stack([epoch_valid_scores[i] for i in idxs], axis=0), axis=0)
-            rules[name] = np.asarray(avg_scores, dtype=np.float64)
-
-        valid_user_ids = splits['valid']['user_raw']
-        valid_labels = splits['valid']['long_view']
-
-        srt = selection_rule_test(valid_user_ids, valid_labels, rules)
-
-        chosen_rule = srt.get('reference_rule', 'best1')
-        if chosen_rule not in rules:
-            best_name = None
-            best_score = -1e18
-            for name, info in srt.get('rules', {}).items():
-                score = info.get('mean', info.get('score', -1e18))
-                if score > best_score and name in rules:
-                    best_score = score
-                    best_name = name
-            chosen_rule = best_name if best_name is not None else 'best1'
-
-        chosen_idxs = candidate_defs[chosen_rule]
-        scores_valid = rules[chosen_rule]
-
-        # Reconstruct test predictions for the chosen checkpoints by replaying saved states.
-        dim = int(enc['train'].max()) + 1
-        model = train_lib.RankFM(
-            dim=dim,
-            k=cfg['k'],
-            lr=cfg['lr'],
-            seed=args.seed,
-            aux_tasks=cfg.get('aux_tasks', [])
-        )
-
-        history = None
-        if cfg.get('user_history', 'none') != 'none':
-            history = train_lib.History(splits, meta['field_dims']['user'], cfg['user_history'])
-
-        X_test = enc['test']
-        H_test = None
-        if history is not None:
-            H_test = history.pooled['test']
-
-        test_preds = []
-        for idx in chosen_idxs:
-            model.load_state(saved_states[idx])
-            pred = model.predict(X_test, H_test)
-            test_preds.append(np.asarray(pred, dtype=np.float64))
-        scores_test = np.mean(np.stack(test_preds, axis=0), axis=0)
-
-        metrics = evaluate(valid_user_ids, valid_labels, scores_valid)
-        write_outputs(args.output_dir, metrics, scores_valid, scores_test)
+        menu_choices = json.loads(args.menu_choices)
+        os.makedirs(args.output_dir, exist_ok=True)
+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
+        metrics = {k: float(v) for k, v in metrics.items()}
+        metrics_path = os.path.join(args.output_dir, 'metrics.json')
+        if not os.path.exists(metrics_path):
+            with open(metrics_path, 'w') as f:
+                json.dump(metrics, f)
+        return 0
     except Exception as e:
         sys.stderr.write(str(e) + '\n')
         raise
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

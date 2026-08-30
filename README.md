@@ -71,7 +71,7 @@ the agent with no code changes.
 ### 1. Harness self-test (free, no model calls, seconds)
 
 ```bash
-python3 tests/test_harness.py        # 468 checks
+python3 tests/test_harness.py        # prints the live count
 ```
 
 Covers the safety gate, cross-axis validation, every search-policy branch
@@ -134,8 +134,22 @@ the agent *resumes* the journal, which is how a crashed run continues),
 
 ```bash
 python3 -m agent.report              # per-iteration history, spend, tokens, GPU-hours
-python3 -m agent.report --html       # search-tree view -> logs/tree.html
+python3 -m agent.results_report --run-tests   # regenerate RESULTS.md from artifacts
 ```
+
+**See what the agent was thinking** — hypotheses, competing explanations, where
+the search branched, and how much each result was allowed to count for:
+
+```bash
+python3 -m agent.viz --open          # writes viz/tree.html and opens it
+python3 -m agent.viz --serve         # or serve at http://localhost:8000/tree.html
+python3 -m agent.viz --journal logs/opus_research/phase4_competition_run.jsonl
+```
+
+Indentation on that page is the real search tree: a child node branched from its
+parent, so `improve` chains, debug chains and paired confirmations sit under
+whatever they extended. Evidence states are recomputed from the current rules at
+render time, so nothing can display as more established than it is.
 
 The report prints delta over baseline **both raw and in units of the baseline's own
 5-seed standard deviation (σ = 0.0008)**. That second number is the one that matters:
@@ -242,7 +256,19 @@ agent/
   loop.py                    orchestration, convergence, spend + GPU accounting
   interventions.py           manual-intervention log
   make_submission.py         submission CSV, ensembling, one-time test eval
-  report.py                  journal -> human-readable report and tree view
+  report.py                  journal -> human-readable report
+  viz.py                     journal -> experiment-tree page (viz/tree.html)
+  results_report.py          artifacts -> RESULTS.md, tiered VERIFIED/OBSERVED/OPEN
+  capabilities.py            the capability contract (what/where/cost/returns)
+  preflight.py               8-stage script validation before any training
+  profiles.py                --competition profile: resolve, validate, print
+  budget.py                  decisions vs training executions, separately capped
+  evidence.py                PRELIMINARY / CONFIRMED / REJECTED, from how it was measured
+  confirm.py                 paired multi-seed experiments, executed
+  experiment_spec.py         an experiment the system runs, not describes
+  knowledge.py               scoped claims with counterevidence
+  allocator.py               transparent utility over experiment families
+  verify_incumbent.py        recompute the submitted score from stored predictions
 runtime/
   train_lib.py               training engine the generated scripts build on
   seed_solution.py           the solution-script interface, by example
@@ -252,7 +278,12 @@ config/
   llm_config.json            provider/model defaults   (never keys)
   model_rates.json           $/token for the budget guard
   agent_config.json          caps, seed, safety-gate override
-tests/test_harness.py        468 checks, no model calls, no training
+tests/test_harness.py        harness self-tests, no model calls, no training
+docs/
+  ARCHITECTURE.md            design, measured before/after, honest autonomy level
+  RESEARCH_LOG.md            dead ends with evidence, and what is still open
+  TRANSFER_PLAN.md           KuaiRand-1K/27K plan (blocked: not available locally)
+RESULTS.md                   generated -- do not hand-edit
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
 

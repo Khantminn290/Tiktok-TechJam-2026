@@ -3053,6 +3053,65 @@ def _profile_args(**kw):
     return ns
 
 
+def test_experiment_tree_visualisation():
+    """The tree page must show the real shape, and must not overstate evidence."""
+    print("\n[experiment tree viz]")
+    from agent import viz as V
+
+    nodes = [
+        {"iteration_id": 0, "parent_id": None, "action": "draft",
+         "status": "success", "metrics": {"primary": 0.6040},
+         "implementation_path": "A", "hypothesis": "root experiment",
+         "menu_choices": {"model": "fm_numpy"},
+         "events": [{"type": "inquiry", "question": "why is it flat?",
+                     "observation": "runs cluster at 0.604",
+                     "hypotheses": ["noise", "a real effect"]}]},
+        {"iteration_id": 1, "parent_id": 0, "action": "improve",
+         "status": "success", "metrics": {"primary": 0.6050},
+         "implementation_path": "A", "hypothesis": "extend the root",
+         "menu_choices": {}, "events": []},
+        {"iteration_id": 2, "parent_id": 0, "action": "draft",
+         "status": "error", "implementation_path": "B", "menu_choices": {},
+         "wall_clock_seconds": 0.0,
+         "error_trace": "PREFLIGHT REJECTED THIS SCRIPT\nValueError: nope",
+         "events": []},
+    ]
+
+    roots = V.build_tree(nodes)
+    check("branching comes from parent_id, not journal order",
+          len(roots) == 1 and len(roots[0]["children"]) == 2,
+          "two children hang off node 0")
+
+    h = V.render(nodes, "t")
+    check("the page is self-contained (no network fetches)",
+          "http://" not in h.replace("http://localhost", "")
+          and "cdn" not in h.lower() and "<script" not in h.lower(),
+          "it must open offline from a file:// URL")
+    check("it shows the agent's question and competing hypotheses",
+          "why is it flat?" in h and "Competing hypotheses" in h)
+    check("a child is indented under its parent", "margin-left:26px" in h)
+    check("a preflight rejection is shown as free, not as a crash",
+          "PREFLIGHT — no compute spent" in h)
+
+    # Evidence must be recomputed, never trusted from the journal.
+    check("a single-seed result renders as PRELIMINARY",
+          "PRELIMINARY" in h and "CONFIRMED" not in h,
+          "the page must not display a result as more established than it is")
+
+    paired = [dict(nodes[0], action="confirm", events=[{
+        "type": "paired_result", "promote": False,
+        "result": {"usable": True, "n": 3, "control_mean": 0.6044,
+                   "treatment_mean": 0.6045, "delta": 0.0001, "sigma": 0.12,
+                   "t": 1.2, "wins": 2, "seeds": [0, 1, 2]},
+        "evidence": {"state": "UNCONFIRMED", "why": "below threshold"}}])]
+    hp = V.render(paired, "t")
+    check("a paired confirmation shows both arms and the promote decision",
+          "Paired confirmation" in hp and "promote=NO" in hp)
+
+    check("an empty journal renders without crashing",
+          "No nodes" in V.render([], "t"))
+
+
 def test_results_report_is_generated_not_retyped():
     """Documentation must be derivable from artifacts, or it rots."""
     print("\n[generated results report]")
@@ -4447,6 +4506,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_experiment_tree_visualisation,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,
               test_confirmation_defers_when_runs_exhausted,

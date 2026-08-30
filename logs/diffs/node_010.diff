@@ -1,177 +1,270 @@
---- logs/solutions/node_007.py
+--- logs/solutions/node_009.py
 +++ logs/solutions/node_010.py
-@@ -23,13 +23,13 @@
-         "sample_weighting": "per_row",
-         "regularization": "l2_default",
-     }
--    for k, v in user_menu.items():
--        base[k] = v
-+    if user_menu:
-+        for k, v in user_menu.items():
-+            base[k] = v
-     return base
+@@ -10,103 +10,6 @@
+ from research_tools import incumbent_cfg, selection_rule_test
  
  
- def _scores_for_rule(rule_name, epoch_scores):
--    # epoch_scores: list of (epoch:int, valid_primary:float, valid_scores:np.ndarray)
-     primaries = np.array([float(t[1]) for t in epoch_scores], dtype=float)
-     order = np.argsort(-primaries)
- 
-@@ -46,35 +46,39 @@
-     raise ValueError("Unknown rule: %s" % rule_name)
- 
- 
-+def _extract_rule_score(info):
-+    if isinstance(info, dict):
-+        for key in ["mean", "score", "primary", "heldout_primary", "avg_primary"]:
-+            if key in info and info[key] is not None:
-+                return float(info[key])
-+        return None
-+    if info is None:
-+        return None
-+    return float(info)
-+
-+
- def _pick_rule(epoch_scores, user_ids, labels):
-     candidates = ["best_epoch", "top2_mean", "top3_mean", "top5_mean"]
--    candidates = [c for c in candidates if not (c == "top5_mean" and len(epoch_scores) < 5)]
-+    if len(epoch_scores) < 5:
-+        candidates = [c for c in candidates if c != "top5_mean"]
- 
-     pred_map = {name: _scores_for_rule(name, epoch_scores) for name in candidates}
- 
--    # selection_rule_test requires concrete rules; pass prediction vectors directly.
--    # If the helper fails for any reason, fall back to unbiased-free but safe best_epoch.
-     chosen = "best_epoch"
-     report = {"status": "fallback", "reason": "selection_rule_test not run"}
-+
-     try:
--        rule_payload = {name: pred_map[name] for name in candidates}
--        res = selection_rule_test(user_ids=user_ids, labels=labels, rules=rule_payload)
-+        rules = {name: pred_map[name] for name in candidates}
-+        res = selection_rule_test(user_ids=user_ids, labels=labels, rules=rules)
-         report = res
-+
-+        best_name = None
-         best_score = None
--        best_name = None
-         for name, info in res.get("rules", {}).items():
--            if isinstance(info, dict):
--                score = info.get("mean")
--                if score is None:
--                    score = info.get("score")
--                if score is None:
--                    score = info.get("primary")
--            else:
--                score = info
-+            score = _extract_rule_score(info)
-             if score is None:
-                 continue
--            score = float(score)
--            if (best_score is None) or (score > best_score):
-+            if best_score is None or score > best_score:
-                 best_score = score
-                 best_name = name
-         if best_name in pred_map:
-@@ -87,57 +91,66 @@
- 
+-def user_group_indices(user_ids):
+-    groups = {}
+-    for i, u in enumerate(user_ids):
+-        if u in groups:
+-            groups[u].append(i)
+-        else:
+-            groups[u] = [i]
+-    return groups
+-
+-
+-def subset_scores_from_groups(groups, selected_users, scores):
+-    idx = []
+-    for u in selected_users:
+-        idx.extend(groups[u])
+-    if len(idx) == 0:
+-        return np.zeros(0, dtype=scores.dtype), np.zeros(0, dtype=object), np.zeros(0, dtype=np.int8)
+-    idx = np.asarray(idx, dtype=np.int64)
+-    return scores[idx], idx
+-
+-
+-def metrics_on_user_subset(valid_user_raw, valid_labels, groups, selected_users, scores):
+-    idx = []
+-    for u in selected_users:
+-        idx.extend(groups[u])
+-    if not idx:
+-        return {'GAUC': 0.0, 'nDCG@5': 0.0, 'primary': 0.0}
+-    idx = np.asarray(idx, dtype=np.int64)
+-    m = evaluate(valid_user_raw[idx], valid_labels[idx], scores[idx])
+-    return {k: float(v) for k, v in m.items()}
+-
+-
+-def choose_rule_by_halves(valid_user_raw, valid_labels, epoch_entries, top_epoch_ids):
+-    candidates = {}
+-
+-    sorted_epochs = list(top_epoch_ids)
+-    for n in [1, 2, 3, 5]:
+-        if len(sorted_epochs) >= n:
+-            name = f'top{n}_uniform'
+-            arrs = [epoch_entries[e]['scores_valid'] for e in sorted_epochs[:n]]
+-            candidates[name] = np.mean(np.stack(arrs, axis=0), axis=0)
+-
+-    groups = user_group_indices(valid_user_raw)
+-    users = np.array(list(groups.keys()), dtype=object)
+-
+-    rng = np.random.RandomState(12345)
+-    evals = []
+-    for _ in range(6):
+-        perm = users[rng.permutation(len(users))]
+-        mid = len(perm) // 2
+-        a = set(perm[:mid].tolist())
+-        b = set(perm[mid:].tolist())
+-        if len(a) == 0 or len(b) == 0:
+-            continue
+-        evals.append((a, b))
+-        evals.append((b, a))
+-
+-    rule_stats = {k: [] for k in candidates}
+-    rule_means = {}
+-    for rule_name, scores in candidates.items():
+-        full_m = evaluate(valid_user_raw, valid_labels, scores)
+-        rule_means[rule_name] = float(full_m['primary'])
+-
+-    for select_users, score_users in evals:
+-        best_rule = None
+-        best_select = None
+-        for rule_name, scores in candidates.items():
+-            m_sel = metrics_on_user_subset(valid_user_raw, valid_labels, groups, select_users, scores)
+-            val = m_sel['primary']
+-            if best_select is None or val > best_select:
+-                best_select = val
+-                best_rule = rule_name
+-        for rule_name, scores in candidates.items():
+-            m_score = metrics_on_user_subset(valid_user_raw, valid_labels, groups, score_users, scores)
+-            rule_stats[rule_name].append(m_score['primary'])
+-        rule_stats[best_rule].append(rule_stats[best_rule][-1] + 0.0)
+-
+-    stable = []
+-    for rule_name, vals in rule_stats.items():
+-        if len(vals) == 0:
+-            mean_oos = -1e18
+-            std_oos = 1e18
+-        else:
+-            mean_oos = float(np.mean(vals))
+-            std_oos = float(np.std(vals))
+-        stable.append((mean_oos, -std_oos, rule_means[rule_name], rule_name))
+-    stable.sort(reverse=True)
+-    chosen = stable[0][3]
+-
+-    return chosen, candidates, {
+-        'rule_full_valid_primary': rule_means,
+-        'stability_ranking': [
+-            {'rule': r, 'oos_mean_primary': float(m), 'oos_std_primary': float(-s), 'full_valid_primary': float(f)}
+-            for (m, s, f, r) in stable
+-        ]
+-    }
+-
+-
  def main():
      parser = argparse.ArgumentParser()
--    parser.add_argument('--menu-choices', required=True)
--    parser.add_argument('--output-dir', required=True)
--    parser.add_argument('--seed', type=int, default=0)
-+    parser.add_argument("--menu-choices", required=True)
-+    parser.add_argument("--output-dir", required=True)
-+    parser.add_argument("--seed", type=int, default=0)
+     parser.add_argument('--menu-choices', required=True)
+@@ -115,100 +18,92 @@
      args = parser.parse_args()
  
      try:
-         menu_choices = json.loads(args.menu_choices)
-         if not isinstance(menu_choices, dict):
--            raise ValueError('--menu-choices must decode to a JSON object')
-+            raise ValueError("--menu-choices must decode to a JSON object")
- 
++        # Contract requires accepting this argument; for this Path B run the
++        # mechanism is fixed and does not depend on menu primitives.
+         _ = json.loads(args.menu_choices)
          os.makedirs(args.output_dir, exist_ok=True)
  
          splits, meta = train_lib.load_cache()
-         base_menu = _build_base_menu(menu_choices)
-         cfg, enc = incumbent_cfg(splits, meta, **base_menu)
+         cfg, enc = incumbent_cfg(splits, meta)
+-        cfg['loss'] = 'bpr_pairwise'
+-        cfg['neg_sampling'] = 'uniform_1'
+-        cfg['user_history'] = 'recency_weighted_pool'
+-        cfg['multitask'] = 'none'
+-        cfg['model'] = 'fm_numpy'
+-        cfg['temporal'] = 'none'
+-        cfg['training'] = 'lower_lr_longer'
+-        cfg['data_extras'] = 'none'
+-        cfg['sample_weighting'] = 'per_row'
+-        cfg['regularization'] = 'l2_default'
 -        cfg['seed'] = args.seed
--        cfg['capture_epoch_scores'] = []
-+        cfg["seed"] = int(args.seed)
-+        cfg["capture_epoch_scores"] = []
++        cfg.update({
++            'loss': 'bpr_pairwise',
++            'neg_sampling': 'uniform_1',
++            'user_history': 'recency_weighted_pool',
++            'multitask': 'none',
++            'model': 'fm_numpy',
++            'temporal': 'none',
++            'training': 'lower_lr_longer',
++            'data_extras': 'none',
++            'sample_weighting': 'per_row',
++            'regularization': 'l2_default',
++            'seed': args.seed,
++        })
+         cfg['capture_epoch_scores'] = []
  
          res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
++        scores_test = res['scores_test']
  
--        epoch_scores = cfg['capture_epoch_scores']
-+        epoch_scores = cfg["capture_epoch_scores"]
-         if not epoch_scores:
--            raise RuntimeError('No per-epoch scores captured; cannot test checkpoint rules')
-+            raise RuntimeError("No per-epoch scores captured; cannot test checkpoint rules")
+-        epoch_entries = {}
+-        for epoch, valid_primary, scores_valid in cfg['capture_epoch_scores']:
+-            epoch_entries[int(epoch)] = {
+-                'primary': float(valid_primary),
+-                'scores_valid': np.asarray(scores_valid)
+-            }
+-
+-        if not epoch_entries:
++        epoch_rows = cfg['capture_epoch_scores']
++        if not epoch_rows:
+             raise RuntimeError('capture_epoch_scores returned no epochs')
  
--        user_ids = splits['valid']['user_raw']
--        labels = splits['valid']['long_view']
-+        valid_user_ids = splits["valid"]["user_raw"]
-+        valid_labels = splits["valid"]["long_view"]
+-        ranked_epochs = sorted(epoch_entries.keys(), key=lambda e: epoch_entries[e]['primary'], reverse=True)
+-        top_epoch_ids = ranked_epochs[:5]
++        epoch_rows = sorted(epoch_rows, key=lambda t: float(t[1]), reverse=True)
++        top = epoch_rows[:5]
  
--        chosen_rule, scores_valid, selection_report, pred_map = _pick_rule(epoch_scores, user_ids, labels)
-+        chosen_rule, chosen_valid_scores, selection_report, pred_map = _pick_rule(
-+            epoch_scores, valid_user_ids, valid_labels
-+        )
+-        chosen_rule, candidate_valid_scores, diag = choose_rule_by_halves(
+-            splits['valid']['user_raw'],
+-            splits['valid']['long_view'],
+-            epoch_entries,
+-            top_epoch_ids,
++        candidates = {}
++        top_epochs = [int(ep) for ep, _, _ in top]
++        top_arrays = [np.asarray(sv) for _, _, sv in top]
++
++        candidates['top1_uniform'] = np.asarray(top_arrays[0])
++        if len(top_arrays) >= 2:
++            candidates['top2_uniform'] = np.mean(np.stack(top_arrays[:2], axis=0), axis=0)
++        if len(top_arrays) >= 3:
++            candidates['top3_uniform'] = np.mean(np.stack(top_arrays[:3], axis=0), axis=0)
++        if len(top_arrays) >= 5:
++            candidates['top5_uniform'] = np.mean(np.stack(top_arrays[:5], axis=0), axis=0)
++
++        rule_test = selection_rule_test(
++            user_ids=splits['valid']['user_raw'],
++            labels=splits['valid']['long_view'],
++            candidate_scores=candidates,
++            n_evaluations=8,
++            seed=args.seed,
+         )
  
--        # Test output exists only for the trained model's final built-in selection.
--        # For custom checkpoint selection among VALID-captured candidates, only VALID can be re-ranked exactly.
--        # To satisfy the contract without reading test labels, write the model's blind test scores.
--        scores_test = np.array(res['scores_test'], dtype=np.float32)
--        scores_valid = np.array(scores_valid, dtype=np.float32)
-+        # Official outputs must be row-aligned arrays for both valid and test.
-+        # For test, only the trained model's blind final predictions are available.
-+        scores_valid = np.array(res["scores_valid"], dtype=np.float32)
-+        scores_test = np.array(res["scores_test"], dtype=np.float32)
+-        final_scores_valid = candidate_valid_scores[chosen_rule]
++        rule_results = rule_test.get('rules', {})
++        if not rule_results:
++            raise RuntimeError('selection_rule_test returned no rule results')
++
++        def sort_key(item):
++            name, info = item
++            mean_delta = float(info.get('mean_delta', -1e18))
++            sigma = float(info.get('sigma', 0.0))
++            t = float(info.get('t', 0.0))
++            return (mean_delta, sigma, t, name)
++
++        chosen_rule = sorted(rule_results.items(), key=sort_key, reverse=True)[0][0]
++        final_scores_valid = np.asarray(candidates[chosen_rule])
+         metrics = evaluate(splits['valid']['user_raw'], splits['valid']['long_view'], final_scores_valid)
+         metrics = {k: float(v) for k, v in metrics.items()}
+-
+-        # Produce test scores with the nearest expressible built-in checkpoint rule.
+-        if chosen_rule == 'top1_uniform':
+-            menu = {
+-                'loss': 'bpr_pairwise',
+-                'neg_sampling': 'uniform_1',
+-                'user_history': 'recency_weighted_pool',
+-                'multitask': 'none',
+-                'model': 'fm_numpy',
+-                'temporal': 'none',
+-                'training': 'lower_lr_longer',
+-                'data_extras': 'none',
+-                'sample_weighting': 'per_row',
+-                'regularization': 'l2_default',
+-                'checkpoint_combine': False,
+-                'n_checkpoints': 1,
+-            }
+-        else:
+-            n = int(chosen_rule.replace('top', '').replace('_uniform', ''))
+-            menu = {
+-                'loss': 'bpr_pairwise',
+-                'neg_sampling': 'uniform_1',
+-                'user_history': 'recency_weighted_pool',
+-                'multitask': 'none',
+-                'model': 'fm_numpy',
+-                'temporal': 'none',
+-                'training': 'lower_lr_longer',
+-                'data_extras': 'none',
+-                'sample_weighting': 'per_row',
+-                'regularization': 'l2_default',
+-                'checkpoint_combine': True,
+-                'n_checkpoints': n,
+-            }
+-
+-        tmp_dir = os.path.join(args.output_dir, 'menu_rerun')
+-        train_lib.run(menu, tmp_dir, seed=args.seed)
+-        scores_test = np.load(os.path.join(tmp_dir, 'scores_test.npy'))
  
--        metrics = evaluate(user_ids, labels, scores_valid)
-+        metrics = evaluate(valid_user_ids, valid_labels, scores_valid)
+         with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
+             json.dump(metrics, f)
+         np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_scores_valid)
+         np.save(os.path.join(args.output_dir, 'scores_test.npy'), scores_test)
  
--        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-+        with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
-             json.dump({k: float(v) for k, v in metrics.items()}, f)
- 
--        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), scores_valid)
--        np.save(os.path.join(args.output_dir, 'scores_test.npy'), scores_test)
-+        np.save(os.path.join(args.output_dir, "scores_valid.npy"), scores_valid)
-+        np.save(os.path.join(args.output_dir, "scores_test.npy"), scores_test)
- 
--        with open(os.path.join(args.output_dir, 'selection_report.json'), 'w') as f:
++        diag = {
++            'chosen_rule': chosen_rule,
++            'reference_rule': rule_test.get('reference_rule'),
++            'top_epochs_by_same_valid_primary': top_epochs,
++            'epoch_primaries': {str(int(ep)): float(vp) for ep, vp, _ in top},
++            'selection_rule_test': rule_test,
++            'candidate_full_valid_metrics': {
++                name: {k: float(v) for k, v in evaluate(splits['valid']['user_raw'], splits['valid']['long_view'], sc).items()}
++                for name, sc in candidates.items()
++            }
++        }
+         with open(os.path.join(args.output_dir, 'selection_diagnostics.json'), 'w') as f:
 -            json.dump({
 -                'chosen_rule': chosen_rule,
--                'n_epochs': int(len(epoch_scores)),
--                'candidate_rules': list(pred_map.keys()),
--                'selection_report': selection_report,
--                'base_menu': base_menu,
+-                'top_epochs_by_same_valid': [int(e) for e in top_epoch_ids],
+-                'epoch_primaries': {str(int(e)): float(epoch_entries[e]['primary']) for e in top_epoch_ids},
+-                'diagnostics': diag,
+-                'menu_rerun_rule': menu,
 -            }, f)
-+        diag = {
-+            "base_menu": base_menu,
-+            "seed": int(args.seed),
-+            "n_epochs": int(len(epoch_scores)),
-+            "candidate_rules": list(pred_map.keys()),
-+            "chosen_rule": chosen_rule,
-+            "chosen_rule_valid_metrics": {k: float(v) for k, v in evaluate(valid_user_ids, valid_labels, np.array(chosen_valid_scores, dtype=np.float32)).items()},
-+            "final_model_valid_metrics": {k: float(v) for k, v in metrics.items()},
-+            "selection_report": selection_report,
-+            "epoch_table": [
-+                {"epoch": int(ep), "valid_primary": float(primary)}
-+                for ep, primary, _ in epoch_scores
-+            ],
-+        }
-+        with open(os.path.join(args.output_dir, "selection_report.json"), "w") as f:
 +            json.dump(diag, f)
  
          return 0
      except Exception as e:
-@@ -145,5 +158,5 @@
-         return 1
- 
- 
--if __name__ == '__main__':
-+if __name__ == "__main__":
-     sys.exit(main())
