@@ -3053,6 +3053,83 @@ def _profile_args(**kw):
     return ns
 
 
+def test_live_view_state():
+    """The live view must show error RECOVERY, not just errors.
+
+    It exists to be screen-recorded, and the thing worth recording is not a
+    score — it is the agent hitting a failure and getting itself out of it, and
+    declining to promote a result it cannot justify.
+    """
+    print("\n[live view]")
+    from agent import live as L
+
+    nodes = [
+        {"iteration_id": 0, "parent_id": None, "action": "draft",
+         "status": "success", "metrics": {"primary": 0.6050},
+         "implementation_path": "A", "hypothesis": "root",
+         "events": [{"type": "allocation", "choice": "exploration"},
+                    {"type": "inquiry", "question": "is it flat?",
+                     "hypotheses": ["noise", "real"]}]},
+        {"iteration_id": 1, "parent_id": 0, "action": "draft",
+         "status": "error", "implementation_path": "B",
+         "error_trace": "Traceback\nTypeError: bad call", "events": []},
+        {"iteration_id": 2, "parent_id": 1, "action": "debug",
+         "status": "success", "metrics": {"primary": 0.6041},
+         "implementation_path": "B", "events": []},
+        {"iteration_id": 3, "parent_id": 0, "action": "draft",
+         "status": "error", "implementation_path": "B",
+         "wall_clock_seconds": 0.0,
+         "error_trace": "PREFLIGHT REJECTED THIS SCRIPT\nValueError: nope",
+         "events": []},
+    ]
+
+    s0 = L.summarise(nodes[0], nodes)
+    check("a node carries the decision that produced it",
+          s0["allocator"] == "exploration" and s0["question"] == "is it flat?")
+    check("a single-seed result is held at PRELIMINARY",
+          s0["evidence"]["state"] == "PRELIMINARY",
+          "a viewer must see a good number NOT being adopted")
+
+    s1 = L.summarise(nodes[1], nodes)
+    check("a crash shows the error line", "TypeError" in s1["error"])
+    check("...and what happened NEXT",
+          "recovered" in s1["outcome"],
+          "an error with no visible recovery reads as a broken agent")
+
+    s3 = L.summarise(nodes[3], nodes)
+    check("a preflight rejection is shown as costing nothing",
+          s3["state"] == "preflight" and "no compute" in s3["outcome"])
+
+    # Abandoned chains must read as abandoned, not silently vanish.
+    abandoned = [nodes[0], dict(nodes[1], iteration_id=9),
+                 {"iteration_id": 10, "parent_id": 9, "action": "debug",
+                  "status": "error", "error_trace": "still broken", "events": []}]
+    check("an unrecovered chain says it was abandoned",
+          "abandoned" in L.summarise(abandoned[1], abandoned)["outcome"])
+
+    with tempfile.TemporaryDirectory() as td:
+        j = os.path.join(td, "journal.jsonl")
+        with open(j, "w") as fh:
+            for n in nodes:
+                fh.write(json.dumps(n) + "\n")
+        st = L.state(j)
+        check("the live state reports live counters",
+              st["kpi"]["nodes"] == 4 and st["kpi"]["crashed"] == 1
+              and st["kpi"]["preflight"] == 1,
+              "a preflight rejection is not counted as a crash")
+        check("it reports whether a run is actually in flight",
+              isinstance(st["running"], bool))
+        check("the state serialises for the browser",
+              isinstance(json.loads(json.dumps(st, default=str)), dict))
+
+    check("an unreadable journal degrades instead of crashing the view",
+          L.state("/nonexistent/journal.jsonl")["kpi"]["nodes"] == 0,
+          "the agent chmods paths mid-run; a poll must survive that")
+
+    check("the page polls rather than assuming a finished run",
+          "setTimeout(poll" in L.PAGE and "state.json" in L.PAGE)
+
+
 def test_experiment_tree_visualisation():
     """The tree page must show the real shape, and must not overstate evidence."""
     print("\n[experiment tree viz]")
@@ -4506,7 +4583,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
-              test_experiment_tree_visualisation,
+              test_live_view_state, test_experiment_tree_visualisation,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,
               test_confirmation_defers_when_runs_exhausted,

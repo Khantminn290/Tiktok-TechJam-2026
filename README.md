@@ -137,13 +137,28 @@ python3 -m agent.report              # per-iteration history, spend, tokens, GPU
 python3 -m agent.results_report --run-tests   # regenerate RESULTS.md from artifacts
 ```
 
-**See what the agent was thinking** — hypotheses, competing explanations, where
-the search branched, and how much each result was allowed to count for:
+**Watch it work, live.** Start this in a second terminal *before* kicking off a
+run and leave it open — it polls every 3s, so new decisions, errors and
+recoveries appear as they happen. This is the view to screen-record:
+
+```bash
+python3 -m agent.live                # http://localhost:8000
+python3 -m agent.live --port 8080    # if 8000 is taken
+```
+
+It shows, per node: the allocator's chosen experiment family, the question the
+agent could not answer, its competing hypotheses, the experiment it ran, the
+score with Δ and σ — and for failures, the error **and what happened next**
+(recovered by the debug chain, abandoned, or rejected by preflight for no
+compute). The header carries live counters: nodes, crashes, free preflight
+rejections, confirmations, promotions, training runs against the cap, and spend.
+
+**Inspect a finished run** as a static page you can share or archive:
 
 ```bash
 python3 -m agent.viz --open          # writes viz/tree.html and opens it
-python3 -m agent.viz --serve         # or serve at http://localhost:8000/tree.html
-python3 -m agent.viz --journal logs/opus_research/phase4_competition_run.jsonl
+python3 -m agent.viz --journal logs/opus_research/phase4_competition_run.jsonl \
+                     --out viz/phase4.html
 ```
 
 Indentation on that page is the real search tree: a child node branched from its
@@ -257,7 +272,8 @@ agent/
   interventions.py           manual-intervention log
   make_submission.py         submission CSV, ensembling, one-time test eval
   report.py                  journal -> human-readable report
-  viz.py                     journal -> experiment-tree page (viz/tree.html)
+  live.py                    live view for a running agent (localhost:8000)
+  viz.py                     journal -> static experiment-tree page
   results_report.py          artifacts -> RESULTS.md, tiered VERIFIED/OBSERVED/OPEN
   capabilities.py            the capability contract (what/where/cost/returns)
   preflight.py               8-stage script validation before any training
