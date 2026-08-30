@@ -524,8 +524,34 @@ def _aux_grad_contribs(model, cache, aux, idx, lam):
     return out
 
 
+REQUIRED_CFG_KEYS = ("dim", "k", "lr", "bs", "epochs", "patience", "seed",
+                     "loss", "history", "multitask", "model", "training",
+                     "aux_tasks")
+
+
+def _check_cfg(cfg) -> None:
+    """Report EVERY missing config key at once, not the first one.
+
+    Failing on the first missing key costs one debug iteration per key. Measured
+    across three runs: five separate crashes -- 'history', then 'dim', then
+    'bs', then 'seed', then 'k' -- each burning an iteration to learn one more
+    key name. Listing them together turns that into a single repair, and naming
+    the builder turns it into no repair at all.
+    """
+    missing = [k for k in REQUIRED_CFG_KEYS if k not in cfg]
+    if missing:
+        raise KeyError(
+            f"train_numpy_fm: config is missing {len(missing)} required key(s): "
+            f"{', '.join(missing)}. Required: {', '.join(REQUIRED_CFG_KEYS)}. "
+            f"Do not hand-build this dict -- use "
+            f"`from research_tools import incumbent_cfg; "
+            f"cfg, enc = incumbent_cfg(splits, meta)`, which returns a complete "
+            f"config, then override only the key you are experimenting with.")
+
+
 def train_numpy_fm(cfg, enc, splits, meta, log):
     """Returns (best_state_scores) dict with valid metrics + scores for all splits."""
+    _check_cfg(cfg)
     Xtr, Xva, Xte = enc["train"], enc["valid"], enc["test"]
     tr = splits["train"]
     ytr = tr["long_view"]

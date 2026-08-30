@@ -1,244 +1,258 @@
-#!/usr/bin/env python3
 import argparse
 import json
 import os
 import sys
-import traceback
 import numpy as np
+
 import train_lib
+from evaluate import evaluate
 
 
-def sigmoid(x):
-    x = np.clip(x, -35.0, 35.0)
-    return 1.0 / (1.0 + np.exp(-x))
+FALLBACK_MENU = {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "none",
+    "multitask": "none",
+    "model": "gru4rec_seq",
+    "temporal": "none",
+    "training": "lower_lr_longer",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default"
+}
 
 
-def primary_from_scores(user_ids, labels, scores):
-    m = train_lib.evaluate(user_ids, labels, scores)
-    return {
-        'GAUC': float(m['GAUC']),
-        'nDCG@5': float(m['nDCG@5']),
-        'primary': float((float(m['GAUC']) + float(m['nDCG@5'])) / 2.0),
-    }
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument("--menu-choices", required=True)
+    p.add_argument("--output-dir", required=True)
+    p.add_argument("--seed", type=int, default=0)
+    return p.parse_args()
 
 
-def build_user_masks(user_raw):
-    uniq = np.unique(user_raw)
-    rng = np.random.RandomState(12345)
-    perm = uniq.copy()
-    rng.shuffle(perm)
-    half = len(perm) // 2
-    a_users = set(perm[:half].tolist())
-    mask_a = np.array([u in a_users for u in user_raw], dtype=bool)
-    mask_b = ~mask_a
-    return mask_a, mask_b
-
-
-def metrics_on_mask(user_ids, labels, scores, mask):
-    return primary_from_scores(user_ids[mask], labels[mask], scores[mask])
-
-
-def make_history_vectors(choice, history_obj, row_idx, users, split_is_train):
-    if choice == 'none':
-        return None
-    return history_obj.batch_vectors(row_idx, users, split_is_train)
-
-
-def build_user_negatives(users, y):
-    user_to_negs = {}
-    neg_idx = np.flatnonzero(y <= 0.5)
-    if len(neg_idx) == 0:
-        return user_to_negs
-    for u in np.unique(users[neg_idx]):
-        idx = neg_idx[users[neg_idx] == u]
-        if len(idx) > 0:
-            user_to_negs[int(u)] = idx
-    return user_to_negs
-
-
-def train_epoch_bpr(model, X, y, users, hist_choice, history_obj, batch_size, rng):
-    pos_idx = np.flatnonzero(y > 0.5)
-    if len(pos_idx) == 0:
-        return
-
-    user_to_negs = build_user_negatives(users, y)
-    pos_kept = [i for i in pos_idx if int(users[i]) in user_to_negs]
-    if not pos_kept:
-        return
-    pos_kept = np.asarray(pos_kept, dtype=np.int64)
-    rng.shuffle(pos_kept)
-
-    for start in range(0, len(pos_kept), batch_size):
-        pidx = pos_kept[start:start + batch_size]
-        nidx = np.empty(len(pidx), dtype=np.int64)
-        for j, pi in enumerate(pidx):
-            negs = user_to_negs[int(users[pi])]
-            nidx[j] = negs[rng.randint(len(negs))]
-
-        Xp = X[pidx]
-        Xn = X[nidx]
-        Hp = make_history_vectors(hist_choice, history_obj, pidx, users[pidx], True)
-        Hn = make_history_vectors(hist_choice, history_obj, nidx, users[nidx], True)
-
-        sp, cp = model.forward(Xp, Hp)
-        sn, cn = model.forward(Xn, Hn)
-        diff = sp - sn
-        g = -(1.0 - sigmoid(diff)) / max(1, len(pidx))
-        model.apply_grads([(cp, g), (cn, -g)], aux_contribs=None)
-
-
-def predict_in_batches(model, X, H, batch_size=65536):
-    out = np.empty(X.shape[0], dtype=np.float32)
-    for s in range(0, X.shape[0], batch_size):
-        e = min(X.shape[0], s + batch_size)
-        Hb = None if H is None else H[s:e]
-        out[s:e] = model.predict(X[s:e], Hb).astype(np.float32)
+def normalize_menu(menu):
+    if not isinstance(menu, dict):
+        raise ValueError("--menu-choices must decode to a JSON object")
+    out = dict(FALLBACK_MENU)
+    out.update(menu)
     return out
 
 
-def choose_rule(valid_user_ids, valid_labels, epoch_valid_scores, mask_a, mask_b):
-    candidates = []
-    n = len(epoch_valid_scores)
-    for i in range(n):
-        candidates.append((f'epoch_{i+1}', epoch_valid_scores[i]))
-    if n >= 2:
-        candidates.append(('avg_last2', np.mean(epoch_valid_scores[-2:], axis=0).astype(np.float32)))
-    if n >= 3:
-        candidates.append(('avg_last3', np.mean(epoch_valid_scores[-3:], axis=0).astype(np.float32)))
+def build_cfg_from_menu(menu, seed):
+    cfg = dict(menu)
 
-    best_name = None
-    best_cv = -1e18
-    best_scores = None
-    details = {}
-    for name, scores in candidates:
-        ab = metrics_on_mask(valid_user_ids, valid_labels, scores, mask_b)['primary']
-        ba = metrics_on_mask(valid_user_ids, valid_labels, scores, mask_a)['primary']
-        cv = (ab + ba) / 2.0
-        full = primary_from_scores(valid_user_ids, valid_labels, scores)['primary']
-        details[name] = {'split_cv_primary': float(cv), 'full_valid_primary': float(full)}
-        if cv > best_cv:
-            best_cv = cv
-            best_name = name
-            best_scores = scores
-    return best_name, best_scores, details
+    training = cfg.get("training", "default")
+    if training == "default":
+        cfg.setdefault("k", 16)
+        cfg.setdefault("lr", 1e-3)
+        cfg.setdefault("bs", 8192)
+        cfg.setdefault("epochs", 40)
+        cfg.setdefault("patience", 4)
+    elif training == "k32":
+        cfg.setdefault("k", 32)
+        cfg.setdefault("lr", 1e-3)
+        cfg.setdefault("bs", 8192)
+        cfg.setdefault("epochs", 40)
+        cfg.setdefault("patience", 4)
+    elif training == "lower_lr_longer":
+        cfg.setdefault("k", 16)
+        cfg.setdefault("lr", 5e-4)
+        cfg.setdefault("bs", 8192)
+        cfg.setdefault("epochs", 12)
+        cfg.setdefault("patience", 4)
+    elif training == "two_stage_finetune":
+        cfg.setdefault("k", 16)
+        cfg.setdefault("lr", 1e-3)
+        cfg.setdefault("bs", 8192)
+        cfg.setdefault("epochs", 40)
+        cfg.setdefault("patience", 4)
+    else:
+        raise ValueError("Unknown training schedule: %s" % training)
+
+    reg = cfg.get("regularization", "l2_default")
+    if reg == "l2_default":
+        cfg.setdefault("l2", 1e-6)
+    elif reg == "l2_1e5":
+        cfg.setdefault("l2", 1e-5)
+    elif reg == "l2_1e4":
+        cfg.setdefault("l2", 1e-4)
+    elif reg == "l2_1e3":
+        cfg.setdefault("l2", 1e-3)
+    else:
+        raise ValueError("Unknown regularization: %s" % reg)
+
+    cfg["history"] = cfg.get("user_history", "none")
+    cfg.setdefault("n_checkpoints", 1)
+    cfg.setdefault("checkpoint_combine", False)
+    cfg["seed"] = seed
+    cfg["capture_epoch_scores"] = []
+    return cfg
+
+
+def user_half_splits(user_ids, n_splits=6, seed=0):
+    uniq = np.unique(user_ids)
+    rng = np.random.RandomState(seed)
+    splits = []
+    for _ in range(n_splits):
+        perm = rng.permutation(len(uniq))
+        mid = len(uniq) // 2
+        a_users = uniq[perm[:mid]]
+        mask_a = np.isin(user_ids, a_users)
+        mask_b = ~mask_a
+        if np.any(mask_a) and np.any(mask_b):
+            splits.append((mask_a, mask_b))
+    return splits
+
+
+def eval_primary(user_ids, labels, scores):
+    return float(evaluate(user_ids, labels, scores)["primary"])
+
+
+def mean_selected_predictions(masked_preds, idxs):
+    arr = np.stack([masked_preds[j] for j in idxs], axis=0)
+    return np.mean(arr, axis=0)
+
+
+def analyze_epoch_selection(capture, valid_user_ids, valid_labels, output_dir, seed):
+    if not capture:
+        return
+
+    epochs = []
+    primaries = []
+    preds = []
+    for item in capture:
+        if len(item) < 3:
+            continue
+        ep, primary, score_vec = item
+        epochs.append(int(ep))
+        primaries.append(float(primary))
+        preds.append(np.asarray(score_vec, dtype=np.float64))
+
+    if len(preds) == 0:
+        return
+
+    full_argmax_idx = int(np.argmax(np.asarray(primaries, dtype=np.float64)))
+    full_argmax_metrics = evaluate(valid_user_ids, valid_labels, preds[full_argmax_idx])
+
+    candidate_rules = [{"name": "single_best_epoch", "kind": "single"}]
+    if len(preds) >= 2:
+        candidate_rules.append({"name": "top2_avg", "kind": "topk_avg", "k": 2})
+    if len(preds) >= 3:
+        candidate_rules.append({"name": "top3_avg", "kind": "topk_avg", "k": 3})
+
+    splits = user_half_splits(valid_user_ids, n_splits=6, seed=seed)
+    details = []
+    heldout_scores = {rule["name"]: [] for rule in candidate_rules}
+    baseline_scores = []
+
+    for split_id, (sel_mask, eval_mask) in enumerate(splits):
+        directions = [
+            (sel_mask, eval_mask, "a_to_b"),
+            (eval_mask, sel_mask, "b_to_a"),
+        ]
+        for choose_mask, score_mask, tag in directions:
+            choose_users = valid_user_ids[choose_mask]
+            choose_labels = valid_labels[choose_mask]
+            score_users = valid_user_ids[score_mask]
+            score_labels = valid_labels[score_mask]
+
+            choose_primary_by_epoch = np.asarray(
+                [eval_primary(choose_users, choose_labels, p[choose_mask]) for p in preds],
+                dtype=np.float64,
+            )
+
+            baseline = evaluate(score_users, score_labels, preds[full_argmax_idx][score_mask])
+            baseline_scores.append(float(baseline["primary"]))
+
+            row = {
+                "split": int(split_id),
+                "direction": tag,
+                "full_valid_argmax_epoch": int(epochs[full_argmax_idx]),
+                "full_valid_argmax_primary_on_scored_half": float(baseline["primary"]),
+                "rule_results": [],
+            }
+
+            masked_preds = [p[score_mask] for p in preds]
+            for rule in candidate_rules:
+                if rule["kind"] == "single":
+                    chosen_idx = int(np.argmax(choose_primary_by_epoch))
+                    pred_scored = masked_preds[chosen_idx]
+                    met = evaluate(score_users, score_labels, pred_scored)
+                    heldout_scores[rule["name"]].append(float(met["primary"]))
+                    row["rule_results"].append({
+                        "rule": rule["name"],
+                        "selected_epochs": [int(epochs[chosen_idx])],
+                        "heldout_primary": float(met["primary"]),
+                    })
+                elif rule["kind"] == "topk_avg":
+                    k = int(rule["k"])
+                    idxs = np.argsort(choose_primary_by_epoch)[::-1][:k]
+                    pred_scored = mean_selected_predictions(masked_preds, idxs)
+                    met = evaluate(score_users, score_labels, pred_scored)
+                    heldout_scores[rule["name"]].append(float(met["primary"]))
+                    row["rule_results"].append({
+                        "rule": rule["name"],
+                        "selected_epochs": [int(epochs[j]) for j in idxs.tolist()],
+                        "heldout_primary": float(met["primary"]),
+                    })
+            details.append(row)
+
+    summary = {
+        "epochs": [int(x) for x in epochs],
+        "full_valid_primary_by_epoch": [float(x) for x in primaries],
+        "full_valid_argmax_epoch": int(epochs[full_argmax_idx]),
+        "full_valid_argmax_metrics": {k: float(v) for k, v in full_argmax_metrics.items()},
+        "heldout_user_split_summary": {
+            "mean_primary_full_valid_argmax": float(np.mean(np.asarray(baseline_scores, dtype=np.float64))) if baseline_scores else float(full_argmax_metrics["primary"])
+        },
+        "heldout_user_split_details": details,
+    }
+
+    for rule in candidate_rules:
+        vals = np.asarray(heldout_scores[rule["name"]], dtype=np.float64)
+        base = np.asarray(baseline_scores, dtype=np.float64)
+        summary["heldout_user_split_summary"][rule["name"]] = {
+            "mean_primary": float(np.mean(vals)) if len(vals) else None,
+            "delta_vs_full_valid_argmax": float(np.mean(vals - base)) if len(vals) and len(base) == len(vals) else None,
+        }
+
+    with open(os.path.join(output_dir, "checkpoint_selection_analysis.json"), "w") as f:
+        json.dump(summary, f)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--menu-choices', type=str, required=True)
-    ap.add_argument('--output-dir', type=str, required=True)
-    ap.add_argument('--seed', type=int, default=0)
-    args = ap.parse_args()
-
+    args = parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
+    raw_menu = json.loads(args.menu_choices)
+    menu = normalize_menu(raw_menu)
+
+    metrics = train_lib.run(menu, args.output_dir, seed=args.seed)
+
+    cfg = build_cfg_from_menu(menu, args.seed)
+    splits, meta = train_lib.load_cache()
+    temporal = menu.get("temporal", "none")
+    enc, dim, offsets, dims = train_lib.encode_features(splits, meta, temporal)
+
+    model_name = menu.get("model", "")
+    if model_name == "fm_numpy":
+        train_lib.train_numpy_fm(cfg, enc, splits, meta, log=lambda *a, **k: None)
+    elif model_name in ("deepfm_mlp", "dcn_lite", "gru4rec_seq"):
+        train_lib.train_torch(cfg, enc, splits, meta, log=lambda *a, **k: None)
+    else:
+        raise ValueError("Unknown model: %s" % model_name)
+
+    valid_user_ids = np.asarray(splits["valid"]["user_raw"])
+    valid_labels = np.asarray(splits["valid"]["long_view"])
+    analyze_epoch_selection(cfg["capture_epoch_scores"], valid_user_ids, valid_labels, args.output_dir, args.seed)
+
+    with open(os.path.join(args.output_dir, "metrics.json"), "w") as f:
+        json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+
+if __name__ == "__main__":
     try:
-        menu = json.loads(args.menu_choices)
-        seed = int(args.seed)
-        rng = np.random.RandomState(seed)
-
-        cfg = {
-            'loss': menu.get('loss', 'bpr_pairwise'),
-            'neg_sampling': menu.get('neg_sampling', 'uniform_1'),
-            'user_history': menu.get('user_history', 'recency_weighted_pool'),
-            'multitask': menu.get('multitask', 'none'),
-            'model': menu.get('model', 'fm_numpy'),
-            'temporal': menu.get('temporal', 'none'),
-            'training': menu.get('training', 'lower_lr_longer'),
-            'data_extras': menu.get('data_extras', 'none'),
-            'sample_weighting': menu.get('sample_weighting', 'per_row'),
-            'regularization': menu.get('regularization', 'l2_default'),
-            'lr': float(menu.get('lr', 5e-4)),
-            'epochs': int(menu.get('epochs', 12)),
-            'patience': int(menu.get('patience', 4)),
-            'k': int(menu.get('k', 16)),
-            'l2': float(menu.get('l2', 1e-6)),
-            'bs': int(menu.get('bs', 8192)),
-            'hist_tau_days': float(menu.get('hist_tau_days', 7.0)),
-        }
-
-        if cfg['loss'] != 'bpr_pairwise' or cfg['model'] != 'fm_numpy':
-            raise ValueError('This custom confirmation script is implemented only for fm_numpy + bpr_pairwise.')
-
-        splits, meta = train_lib.load_cache()
-        enc, dim, offsets, dims = train_lib.encode_features(splits, meta, cfg['temporal'])
-
-        history_mode = cfg['user_history']
-        history_obj = None
-        H_valid = H_test = None
-        if history_mode != 'none':
-            history_obj = train_lib.History(splits, meta['field_dims']['user'], history_mode)
-            valid_rows = np.arange(len(splits['valid']['user']), dtype=np.int64)
-            test_rows = np.arange(len(splits['test']['user']), dtype=np.int64)
-            H_valid = make_history_vectors(history_mode, history_obj, valid_rows, splits['valid']['user'], False)
-            H_test = make_history_vectors(history_mode, history_obj, test_rows, splits['test']['user'], False)
-
-        model = train_lib.RankFM(dim=dim, k=cfg['k'], lr=cfg['lr'], seed=seed, aux_tasks=[])
-        if hasattr(model, 'l2'):
-            model.l2 = cfg['l2']
-
-        Xtr = enc['train']
-        ytr = splits['train']['long_view'].astype(np.float32)
-        utr = splits['train']['user'].astype(np.int64)
-        Xva = enc['valid']
-        Xte = enc['test']
-        valid_user_ids = splits['valid']['user_raw']
-        valid_labels = splits['valid']['long_view']
-
-        best_primary = -1e18
-        bad = 0
-        epoch_valid_scores = []
-        epoch_test_scores = []
-
-        for epoch in range(cfg['epochs']):
-            train_epoch_bpr(model, Xtr, ytr, utr, history_mode, history_obj, cfg['bs'], rng)
-            s_valid = predict_in_batches(model, Xva, H_valid)
-            s_test = predict_in_batches(model, Xte, H_test)
-            epoch_valid_scores.append(s_valid)
-            epoch_test_scores.append(s_test)
-            m = primary_from_scores(valid_user_ids, valid_labels, s_valid)
-            if m['primary'] > best_primary:
-                best_primary = m['primary']
-                bad = 0
-            else:
-                bad += 1
-                if bad >= cfg['patience']:
-                    break
-
-        mask_a, mask_b = build_user_masks(valid_user_ids)
-        chosen_name, chosen_valid_scores, rule_details = choose_rule(
-            valid_user_ids,
-            valid_labels,
-            epoch_valid_scores,
-            mask_a,
-            mask_b,
-        )
-
-        if chosen_name.startswith('epoch_'):
-            idx = int(chosen_name.split('_')[1]) - 1
-            final_valid = epoch_valid_scores[idx]
-            final_test = epoch_test_scores[idx]
-        elif chosen_name == 'avg_last2':
-            final_valid = np.mean(epoch_valid_scores[-2:], axis=0).astype(np.float32)
-            final_test = np.mean(epoch_test_scores[-2:], axis=0).astype(np.float32)
-        elif chosen_name == 'avg_last3':
-            final_valid = np.mean(epoch_valid_scores[-3:], axis=0).astype(np.float32)
-            final_test = np.mean(epoch_test_scores[-3:], axis=0).astype(np.float32)
-        else:
-            raise RuntimeError('Unknown chosen rule')
-
-        metrics = primary_from_scores(valid_user_ids, valid_labels, final_valid)
-        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
-            json.dump({k: float(v) for k, v in metrics.items()}, f)
-        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_valid)
-        np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test)
-        with open(os.path.join(args.output_dir, 'selection_details.json'), 'w') as f:
-            json.dump({'chosen_rule': chosen_name, 'rule_details': rule_details}, f)
-
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
-
-
-if __name__ == '__main__':
-    main()
+        main()
+    except Exception as e:
+        sys.stderr.write(str(e) + "\n")
+        raise

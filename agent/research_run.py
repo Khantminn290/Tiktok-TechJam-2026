@@ -31,30 +31,14 @@ OUT_DIR = os.path.join(ROOT, "logs", "opus_research")
 
 
 def incumbent_cfg(splits, meta, choices=None):
-    """The incumbent training config, rebuilt exactly as train_lib.run does."""
-    import train_lib
-    ch = choices or json.load(open(os.path.join(
-        ROOT, "logs", "ensemble_results.json")))["config"]
-    enc, dim, _off, _dims = train_lib.encode_features(splits, meta, ch["temporal"])
-    training = ch.get("training", "default")
-    cfg = {
-        "dim": dim, "k": 32 if training == "k32" else 16,
-        "lr": 5e-4 if training == "lower_lr_longer" else 1e-3,
-        "bs": 8192,
-        "epochs": 60 if training == "lower_lr_longer" else 40,
-        "patience": 6 if training == "lower_lr_longer" else 4,
-        "seed": 0,
-        "loss": ch["loss"], "history": ch["user_history"],
-        "multitask": ch.get("multitask", "none"), "model": ch["model"],
-        "training": training, "neg_sampling": ch["neg_sampling"],
-        "sample_weighting": ch["sample_weighting"],
-        "l2": {"l2_default": 1e-6, "l2_1e5": 1e-5, "l2_1e4": 1e-4,
-               "l2_1e3": 1e-3}.get(ch.get("regularization", "l2_default"), 1e-6),
-        "snapshot_ensemble": 0, "bootstrap_seed": None,
-        "aux_weight": 0.2, "device": "cpu",
-    }
-    cfg["aux_tasks"] = train_lib.AUX_MAP[cfg["multitask"]]
-    return cfg, enc
+    """The incumbent training config, rebuilt exactly as train_lib.run does.
+
+    Delegates to runtime/research_tools.py so the orchestrator and generated
+    experiment code build configs with the same code rather than two copies
+    that can drift.
+    """
+    from research_tools import incumbent_cfg as _build
+    return _build(splits, meta, choices)
 
 
 def control_scores(n_seeds: int) -> dict:

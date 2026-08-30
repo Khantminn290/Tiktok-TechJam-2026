@@ -205,10 +205,15 @@ register(Capability(
                "finding, not the exact peak.",
     failure_modes="Costs a full training run; allowed at most once per agent run.",
     instead="INSIDE GENERATED CODE, do not call this and do not re-train to get "
-            "it. Your script is already training. Capture its own curve: pass "
-            "cfg['capture_epoch_scores'] = [] to train_lib.train_numpy_fm, and "
-            "after training that list holds (epoch, valid_primary, scores) "
-            "tuples for every epoch. That is the same data at no extra cost."))
+            "it. Your script is already training. Capture its own curve:\n"
+            "      from research_tools import incumbent_cfg\n"
+            "      cfg, enc = incumbent_cfg(splits, meta)\n"
+            "      cfg['capture_epoch_scores'] = []\n"
+            "      train_lib.train_numpy_fm(cfg, enc, splits, meta, print)\n"
+            "  ...and that list then holds (epoch, valid_primary, scores) for "
+            "every epoch. Same data, no extra training run. Use incumbent_cfg "
+            "to build the config -- train_numpy_fm needs 13 required keys and "
+            "hand-assembling them costs an iteration per missing key."))
 
 register(Capability(
     name="selection_rule_test", kind=CONFIRM,
@@ -294,18 +299,43 @@ register(Capability(
                   "bound."))
 
 register(Capability(
+    name="incumbent_cfg", kind=MODIFY,
+    purpose="Build a COMPLETE, valid training config for the incumbent, plus "
+            "its feature encoding, with any key overridden by keyword.",
+    when="Before every direct call to train_numpy_fm. This is how you obtain a "
+         "config; do not assemble one by hand.",
+    resolves="Nothing on its own -- it is the correct starting point for any "
+             "one-axis experiment.",
+    inputs="splits, meta, choices=None, **overrides "
+           "(e.g. hist_tau_days=7.0, k=32)",
+    outputs="(cfg: dict, enc) ready to pass straight to train_numpy_fm",
+    contexts=(ORCHESTRATOR, GENERATED), module="research_tools", cost=FREE,
+    mutates_pipeline=True,
+    validation="Change ONE key per experiment. Overriding several at once makes "
+               "the result uninterpretable.",
+    failure_modes="Needs the loaded splits and meta. Overriding 'multitask' "
+                  "also rebuilds 'aux_tasks' for you."))
+
+register(Capability(
     name="train_numpy_fm", kind=TRAIN,
     purpose="Train one model under an explicit cfg dict and return its "
             "validation and test score vectors.",
-    when="The normal way a generated experiment produces predictions.",
+    when="The normal way a generated experiment produces predictions. Get the "
+         "cfg from incumbent_cfg -- never hand-build it.",
     resolves="What a specific configuration actually scores.",
-    inputs="cfg: dict, enc, splits, meta, log: callable",
+    inputs="cfg: dict, enc, splits, meta, log: callable. The cfg must contain "
+           "ALL of: dim, k, lr, bs, epochs, patience, seed, loss, history, "
+           "multitask, model, training, aux_tasks. Use "
+           "`cfg, enc = incumbent_cfg(splits, meta, <overrides>)` to get one. "
+           "Optionally set cfg['capture_epoch_scores'] = [] first; after "
+           "training that list holds (epoch, valid_primary, scores) per epoch.",
     outputs="{'scores_valid': array, 'scores_test': array, ...}",
     contexts=(GENERATED,), module="train_lib", cost=ONE_RUN,
     mutates_pipeline=True,
     validation="One seed is one draw. A single-seed difference is not evidence.",
-    failure_modes="A cfg key that does not exist is silently ignored -- check "
-                  "spelling against the override list."))
+    failure_modes="An INCOMPLETE cfg raises KeyError listing every missing key "
+                  "at once. An unrecognised extra key is silently ignored, so "
+                  "check spelling against the override list."))
 
 register(Capability(
     name="evaluate", kind=EVALUATE,

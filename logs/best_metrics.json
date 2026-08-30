@@ -1,26 +1,23 @@
 {
-  "iteration_id": 0,
+  "iteration_id": 2,
   "menu_choices": {
-    "loss": "pointwise_logloss",
+    "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
-    "user_history": "din_attention",
+    "user_history": "none",
     "multitask": "none",
-    "model": "deepfm_mlp",
+    "model": "gru4rec_seq",
     "temporal": "none",
-    "training": "k32",
+    "training": "lower_lr_longer",
     "data_extras": "none",
     "sample_weighting": "per_row",
-    "regularization": "l2_default",
-    "lr": 0.0005,
-    "epochs": 12,
-    "patience": 4
+    "regularization": "l2_default"
   },
-  "hypothesis": "DIN attention remains one of the few still-open mechanisms with a frontier best near the top (0.60434) but only at low confidence; giving it the higher embedding width and gentler optimization that attention-style history models typically need may let it exploit the long train histories better than the default-tuned runs and lift both GAUC and nDCG@5.",
+  "hypothesis": "The observed gru4rec_seq gain at 0.60294 may come from the sequential architecture rather than from pointwise supervision; rerunning the same GRU4Rec-style scaffold with BPR isolates whether pointwise_logloss was incidental in node 1. If this BPR version matches or exceeds 0.6029, the branch is real and the loss choice is not essential; if it drops clearly, the short validation lists vs much longer train histories likely make pointwise supervision specifically beneficial for this sequential model.",
   "valid_metrics": {
-    "GAUC": 0.6710609099290654,
-    "nDCG@5": 0.5376273232487265,
-    "primary": 0.604344116588896
+    "GAUC": 0.6697579334026141,
+    "nDCG@5": 0.5363557345999813,
+    "primary": 0.6030568340012977
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
-  "timestamp": 1788071822.3454962
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_002.py",
+  "timestamp": 1788086910.2221289
 }

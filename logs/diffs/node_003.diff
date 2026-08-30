@@ -1,189 +1,236 @@
---- logs/solutions/node_002.py
+--- runtime/seed_solution.py
 +++ logs/solutions/node_003.py
-@@ -3,19 +3,18 @@
+@@ -1,35 +1,205 @@
+-"""Reference solution script — the interface every generated solution must follow.
+-
+-Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
+-
+-Contract (enforced by the harness):
+-  * on success: write to --output-dir
+-      metrics.json        {"GAUC": float, "nDCG@5": float, "primary": float}  (VALID split)
+-      scores_valid.npy    float array, one score per valid row, data.load() row order
+-      scores_test.npy     float array, one score per test row,  data.load() row order
+-    and exit 0.
+-  * on failure: exit non-zero with a readable traceback on stderr.
+-  * never read test labels or compute test metrics (hidden-test discipline).
+-"""
+ import argparse
+ import json
  import os
  import sys
- import traceback
--import numpy as np
- 
- import train_lib
- 
- 
--INCUMBENT = {
--    "loss": "pointwise_logloss",
-+FIXED_MENU_CHOICES = {
-+    "loss": "bpr_pairwise",
-     "neg_sampling": "uniform_1",
--    "user_history": "din_attention",
-+    "user_history": "recency_weighted_pool",
-     "multitask": "none",
--    "model": "deepfm_mlp",
-+    "model": "fm_numpy",
-     "temporal": "none",
--    "training": "k32",
-+    "training": "lower_lr_longer",
-     "data_extras": "none",
-     "sample_weighting": "per_row",
-     "regularization": "l2_default",
-@@ -23,103 +22,6 @@
-     "epochs": 12,
-     "patience": 4,
- }
 -
--
--def _ensure_dir(path):
--    os.makedirs(path, exist_ok=True)
--
--
--def _write_outputs(output_dir, metrics, scores_valid, scores_test):
--    _ensure_dir(output_dir)
--    with open(os.path.join(output_dir, "metrics.json"), "w") as f:
--        json.dump({k: float(v) for k, v in metrics.items()}, f)
--    np.save(os.path.join(output_dir, "scores_valid.npy"), np.asarray(scores_valid, dtype=np.float32))
--    np.save(os.path.join(output_dir, "scores_test.npy"), np.asarray(scores_test, dtype=np.float32))
--
--
--def _call_training_dynamics(menu_choices, output_dir, seed):
--    fn = getattr(train_lib, "training_dynamics", None)
--    if fn is None:
--        raise RuntimeError("train_lib.training_dynamics() is unavailable; this Path B experiment requires per-epoch predictions.")
--
--    tried = []
--    # Try several plausible calling conventions defensively.
--    call_specs = [
--        ((menu_choices, output_dir, seed), {}),
--        ((menu_choices,), {"output_dir": output_dir, "seed": seed}),
--        ((), {"menu_choices": menu_choices, "output_dir": output_dir, "seed": seed}),
--        ((menu_choices,), {"seed": seed}),
--        ((), {"cfg": menu_choices, "output_dir": output_dir, "seed": seed}),
--    ]
--    last_err = None
--    for args, kwargs in call_specs:
--        try:
--            return fn(*args, **kwargs)
--        except TypeError as e:
--            tried.append({"args_len": len(args), "kwargs": sorted(kwargs.keys()), "err": str(e)})
--            last_err = e
--            continue
--    raise RuntimeError("Could not call train_lib.training_dynamics with any supported signature: %s" % tried) from last_err
--
--
--def _extract_epoch_predictions(obj):
--    if isinstance(obj, dict):
--        keys = list(obj.keys())
--        candidate_lists = []
--        for k in [
--            "epoch_predictions",
--            "per_epoch_predictions",
--            "predictions_by_epoch",
--            "epoch_preds",
--            "preds_by_epoch",
--        ]:
--            if k in obj:
--                candidate_lists.append(obj[k])
--        if candidate_lists:
--            pred_container = candidate_lists[0]
--        else:
--            pred_container = obj
--    else:
--        pred_container = obj
--
--    if isinstance(pred_container, list):
--        epochs = pred_container
--    elif isinstance(pred_container, tuple):
--        epochs = list(pred_container)
--    elif isinstance(pred_container, dict):
--        # dict keyed by epoch index/name
--        items = sorted(pred_container.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else str(kv[0]))
--        epochs = [v for _, v in items]
--    else:
--        raise RuntimeError("Unrecognised training_dynamics return type for epoch predictions: %r" % type(obj))
--
--    valid_list = []
--    test_list = []
--    for i, ep in enumerate(epochs):
--        if isinstance(ep, dict):
--            vk = None
--            tk = None
--            for cand in ["scores_valid", "valid_scores", "pred_valid", "valid_pred", "valid"]:
--                if cand in ep:
--                    vk = cand
--                    break
--            for cand in ["scores_test", "test_scores", "pred_test", "test_pred", "test"]:
--                if cand in ep:
--                    tk = cand
--                    break
--            if vk is None or tk is None:
--                raise RuntimeError(f"Epoch {i} missing valid/test predictions; keys={list(ep.keys())}")
--            valid_list.append(np.asarray(ep[vk], dtype=np.float64))
--            test_list.append(np.asarray(ep[tk], dtype=np.float64))
--        elif isinstance(ep, (list, tuple)) and len(ep) == 2:
--            valid_list.append(np.asarray(ep[0], dtype=np.float64))
--            test_list.append(np.asarray(ep[1], dtype=np.float64))
--        else:
--            raise RuntimeError(f"Epoch {i} prediction container not understood: type={type(ep)}")
--
--    if not valid_list or not test_list:
--        raise RuntimeError("No epoch predictions extracted from training_dynamics output")
--    return valid_list, test_list
+-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+-import train_lib  # noqa: E402
++import numpy as np
++
++import train_lib
++from evaluate import evaluate
++
++
++def parse_args():
++    p = argparse.ArgumentParser()
++    p.add_argument('--menu-choices', required=True)
++    p.add_argument('--output-dir', required=True)
++    p.add_argument('--seed', type=int, default=0)
++    return p.parse_args()
++
++
++def build_cfg_from_menu(menu):
++    cfg = dict(menu)
++    training = cfg.get('training', 'default')
++    if training == 'default':
++        cfg.setdefault('k', 16)
++        cfg.setdefault('lr', 1e-3)
++        cfg.setdefault('bs', 8192)
++        cfg.setdefault('epochs', 40)
++        cfg.setdefault('patience', 4)
++    elif training == 'k32':
++        cfg.setdefault('k', 32)
++        cfg.setdefault('lr', 1e-3)
++        cfg.setdefault('bs', 8192)
++        cfg.setdefault('epochs', 40)
++        cfg.setdefault('patience', 4)
++    elif training == 'lower_lr_longer':
++        cfg.setdefault('k', 16)
++        cfg.setdefault('lr', 5e-4)
++        cfg.setdefault('bs', 8192)
++        cfg.setdefault('epochs', 12)
++        cfg.setdefault('patience', 4)
++    elif training == 'two_stage_finetune':
++        cfg.setdefault('k', 16)
++        cfg.setdefault('lr', 1e-3)
++        cfg.setdefault('bs', 8192)
++        cfg.setdefault('epochs', 40)
++        cfg.setdefault('patience', 4)
++    cfg.setdefault('l2', 1e-6)
++    cfg.setdefault('n_checkpoints', 1)
++    cfg.setdefault('checkpoint_combine', False)
++    return cfg
++
++
++def user_half_splits(user_ids, n_splits=6, seed=0):
++    uniq = np.unique(user_ids)
++    rng = np.random.RandomState(seed)
++    splits = []
++    for i in range(n_splits):
++        perm = rng.permutation(len(uniq))
++        mid = len(uniq) // 2
++        a_users = set(uniq[perm[:mid]].tolist())
++        mask_a = np.array([u in a_users for u in user_ids], dtype=bool)
++        mask_b = ~mask_a
++        if mask_a.any() and mask_b.any():
++            splits.append((mask_a, mask_b))
++    return splits
++
++
++def safe_primary(user_ids, labels, scores):
++    m = evaluate(user_ids, labels, scores)
++    return float(m['primary'])
++
++
++def analyze_epoch_selection(capture, valid_user_ids, valid_labels, output_dir, seed):
++    if not capture:
++        return
++    epochs = []
++    primaries = []
++    preds = []
++    for item in capture:
++        if len(item) < 3:
++            continue
++        ep, primary, score_vec = item
++        epochs.append(int(ep))
++        primaries.append(float(primary))
++        preds.append(np.asarray(score_vec, dtype=np.float64))
++    if len(preds) < 2:
++        return
++
++    full_argmax_idx = int(np.argmax(np.asarray(primaries)))
++    full_best_metrics = evaluate(valid_user_ids, valid_labels, preds[full_argmax_idx])
++
++    splits = user_half_splits(valid_user_ids, n_splits=6, seed=seed)
++    analysis_rows = []
++    heldout_best = []
++    heldout_top3 = []
++    heldout_argmax_full = []
++
++    for split_id, (sel_mask, eval_mask) in enumerate(splits):
++        sel_users = valid_user_ids[sel_mask]
++        sel_labels = valid_labels[sel_mask]
++        eval_users = valid_user_ids[eval_mask]
++        eval_labels = valid_labels[eval_mask]
++
++        sel_scores = [safe_primary(sel_users, sel_labels, p[sel_mask]) for p in preds]
++        chosen = int(np.argmax(np.asarray(sel_scores)))
++        eval_chosen = evaluate(eval_users, eval_labels, preds[chosen][eval_mask])
++        eval_full_argmax = evaluate(eval_users, eval_labels, preds[full_argmax_idx][eval_mask])
++
++        topk = min(3, len(preds))
++        order = np.argsort(np.asarray(sel_scores))[::-1][:topk]
++        avg_pred = np.mean(np.stack([preds[j][eval_mask] for j in order], axis=0), axis=0)
++        eval_avg = evaluate(eval_users, eval_labels, avg_pred)
++
++        heldout_best.append(float(eval_chosen['primary']))
++        heldout_top3.append(float(eval_avg['primary']))
++        heldout_argmax_full.append(float(eval_full_argmax['primary']))
++
++        analysis_rows.append({
++            'split': int(split_id),
++            'selected_epoch': int(epochs[chosen]),
++            'heldout_primary_selected_epoch': float(eval_chosen['primary']),
++            'heldout_primary_full_valid_argmax_epoch': float(eval_full_argmax['primary']),
++            'heldout_primary_top3_avg_by_selection_half': float(eval_avg['primary'])
++        })
++
++        sel_users2 = valid_user_ids[eval_mask]
++        sel_labels2 = valid_labels[eval_mask]
++        eval_users2 = valid_user_ids[sel_mask]
++        eval_labels2 = valid_labels[sel_mask]
++
++        sel_scores2 = [safe_primary(sel_users2, sel_labels2, p[eval_mask]) for p in preds]
++        chosen2 = int(np.argmax(np.asarray(sel_scores2)))
++        eval_chosen2 = evaluate(eval_users2, eval_labels2, preds[chosen2][sel_mask])
++        eval_full_argmax2 = evaluate(eval_users2, eval_labels2, preds[full_argmax_idx][sel_mask])
++        order2 = np.argsort(np.asarray(sel_scores2))[::-1][:topk]
++        avg_pred2 = np.mean(np.stack([preds[j][sel_mask] for j in order2], axis=0), axis=0)
++        eval_avg2 = evaluate(eval_users2, eval_labels2, avg_pred2)
++
++        heldout_best.append(float(eval_chosen2['primary']))
++        heldout_top3.append(float(eval_avg2['primary']))
++        heldout_argmax_full.append(float(eval_full_argmax2['primary']))
++
++        analysis_rows.append({
++            'split': int(split_id) + 1000,
++            'selected_epoch': int(epochs[chosen2]),
++            'heldout_primary_selected_epoch': float(eval_chosen2['primary']),
++            'heldout_primary_full_valid_argmax_epoch': float(eval_full_argmax2['primary']),
++            'heldout_primary_top3_avg_by_selection_half': float(eval_avg2['primary'])
++        })
++
++    report = {
++        'epochs': [int(x) for x in epochs],
++        'full_valid_primary_by_epoch': [float(x) for x in primaries],
++        'full_valid_argmax_epoch': int(epochs[full_argmax_idx]),
++        'full_valid_argmax_metrics': {k: float(v) for k, v in full_best_metrics.items()},
++        'heldout_user_split_summary': {
++            'mean_primary_selected_epoch': float(np.mean(heldout_best)),
++            'mean_primary_full_valid_argmax_epoch': float(np.mean(heldout_argmax_full)),
++            'mean_primary_top3_avg': float(np.mean(heldout_top3)),
++            'delta_selected_minus_full_argmax': float(np.mean(np.asarray(heldout_best) - np.asarray(heldout_argmax_full))),
++            'delta_top3avg_minus_full_argmax': float(np.mean(np.asarray(heldout_top3) - np.asarray(heldout_argmax_full)))
++        },
++        'heldout_user_split_details': analysis_rows
++    }
++
++    with open(os.path.join(output_dir, 'checkpoint_selection_analysis.json'), 'w') as f:
++        json.dump(report, f)
  
  
  def main():
-@@ -134,46 +36,20 @@
-         if not isinstance(user_menu, dict):
-             raise ValueError("--menu-choices must decode to a JSON object")
- 
--        # Confirmation candidate is fixed by the research policy; allow harmless extras only.
--        cfg = dict(INCUMBENT)
--        if "epochs" in user_menu:
--            cfg["epochs"] = int(user_menu["epochs"])
--        if "lr" in user_menu:
--            cfg["lr"] = float(user_menu["lr"])
--        if "patience" in user_menu:
--            cfg["patience"] = int(user_menu["patience"])
-+        os.makedirs(args.output_dir, exist_ok=True)
- 
--        # First run the standard training once to keep the path faithful to the incumbent setup
--        # and ensure the model family/config is executable in this environment.
--        tmp_standard = os.path.join(args.output_dir, "_standard_run")
--        _ensure_dir(tmp_standard)
--        try:
--            train_lib.run(cfg, tmp_standard, seed=args.seed)
--        except Exception as e:
--            raise RuntimeError(f"Incumbent standard run failed before last-K averaging: {e}")
-+        # Faithfully execute the selected confirmation candidate from the policy.
-+        # Ignore caller-side substitutions except for exact matching informational use;
-+        # the experiment definition is fixed by this node.
-+        metrics = train_lib.run(FIXED_MENU_CHOICES, args.output_dir, seed=args.seed)
- 
--        dyn = _call_training_dynamics(cfg, args.output_dir, args.seed)
--        valid_epochs, test_epochs = _extract_epoch_predictions(dyn)
+-    ap = argparse.ArgumentParser()
+-    ap.add_argument("--menu-choices", required=True)
+-    ap.add_argument("--output-dir", required=True)
+-    ap.add_argument("--seed", type=int, default=0)
+-    a = ap.parse_args()
+-    choices = json.loads(a.menu_choices)
+-    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
+-    print(json.dumps(metrics))
 -
--        k_last = 3
--        if len(valid_epochs) < k_last:
--            k_last = len(valid_epochs)
--        if k_last < 1:
--            raise RuntimeError("training_dynamics returned zero epochs")
 -
--        scores_valid = np.mean(np.stack(valid_epochs[-k_last:], axis=0), axis=0)
--        scores_test = np.mean(np.stack(test_epochs[-k_last:], axis=0), axis=0)
--
--        splits, _meta = train_lib.load_cache()
--        metrics = train_lib.evaluate(
--            splits["valid"]["user_raw"],
--            splits["valid"]["long_view"],
--            scores_valid,
--        )
--
--        _write_outputs(args.output_dir, metrics, scores_valid, scores_test)
-+        # Ensure metrics.json exists with plain Python floats per contract, even if
-+        # train_lib already wrote it.
-+        metrics_path = os.path.join(args.output_dir, "metrics.json")
-+        with open(metrics_path, "w") as f:
-+            json.dump({k: float(v) for k, v in metrics.items()}, f)
-     except Exception as e:
--        sys.stderr.write("ERROR: %s\n" % str(e))
-+        sys.stderr.write(f"ERROR: {e}\n")
-         sys.stderr.write(traceback.format_exc())
-         sys.exit(1)
- 
+-if __name__ == "__main__":
+-    main()
++    args = parse_args()
++    os.makedirs(args.output_dir, exist_ok=True)
++    menu = json.loads(args.menu_choices)
++
++    metrics = train_lib.run(menu, args.output_dir, seed=args.seed)
++
++    cfg = build_cfg_from_menu(menu)
++    cfg['seed'] = args.seed
++    cfg['capture_epoch_scores'] = []
++
++    splits, meta = train_lib.load_cache()
++    temporal = menu.get('temporal', 'none')
++    enc, dim, offsets, dims = train_lib.encode_features(splits, meta, temporal)
++
++    model_name = menu.get('model', '')
++    if model_name == 'fm_numpy':
++        train_lib.train_numpy_fm(cfg, enc, splits, meta, log=lambda *a, **k: None)
++    elif model_name in ('deepfm_mlp', 'dcn_lite', 'gru4rec_seq'):
++        train_lib.train_torch(cfg, enc, splits, meta, log=lambda *a, **k: None)
++    else:
++        raise ValueError('Unknown model: %s' % model_name)
++
++    valid_user_ids = np.asarray(splits['valid']['user_raw'])
++    valid_labels = np.asarray(splits['valid']['long_view'])
++    analyze_epoch_selection(cfg['capture_epoch_scores'], valid_user_ids, valid_labels, args.output_dir, args.seed)
++
++    with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
++        json.dump({k: float(v) for k, v in metrics.items()}, f)
++
++
++if __name__ == '__main__':
++    try:
++        main()
++    except Exception as e:
++        sys.stderr.write(str(e) + '\n')
++        raise

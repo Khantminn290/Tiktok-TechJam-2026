@@ -84,6 +84,7 @@ Full entry: `python3 -m agent.capabilities --name selection_rule_test`.
 | `audit_comparison` | CONFIRM | both | `from research_tools import ...` | free |
 | `selection_pressure` | CONFIRM | both | `from research_tools import ...` | free |
 | `evaluate` | EVALUATE | both | `from evaluate import evaluate` | free |
+| `incumbent_cfg` | MODIFY | both | `from research_tools import ...` | free |
 | `train_numpy_fm` | TRAIN | generated code | `from train_lib import ...` | one run |
 | `pipeline_override` | MODIFY | both | a key in `menu_choices` | free |
 | `hardcoded_constants` | INSPECT | **orchestrator only** | — | free |
@@ -98,6 +99,128 @@ afterwards. Same data, no extra cost.
 No API was invented to satisfy the model. `pipeline_override` is available in
 generated code but is *not* invoked by import, and the contract distinguishes
 those two things rather than implying a module that does not exist.
+
+---
+
+## 3. Reliability metrics — pre-registered, and the primary criterion FAILED
+
+Three runs before the architecture work, three after, identical settings
+(`--fresh --feature-discovery --research-state --data-tools --n-candidates 4
+--max-iterations 6 --max-spend-usd 3.0`). Definitions fixed in
+`CLEAN_PROTOCOL_2.json` before any run and computed by `agent/run_metrics.py`,
+which applies the same definitions to both sets of journals.
+
+| metric | PRE | POST | |
+|---|---|---|---|
+| nodes | 16 | 21 | |
+| iterations consumed | 16 | 18 | |
+| experiments completed | 11 | 8 | worse |
+| experiments crashed | 5 | 10 | worse |
+| Path B attempts | 7 | 13 | |
+| Path B crashes | 5 | 12 | |
+| **Path B crash rate** | **0.714** | **0.923** | **worse** |
+| **orchestration-only misuse** | **1** | **0** | **fixed** |
+| preflight rejections (free) | 0 | 3 | new |
+| repeated identical failures | 1 | 0 | fixed |
+| manual interventions | 0 | 0 | held |
+
+**The pre-registered primary criterion was "Path B crash rate strictly below
+0.71 AND zero training time spent on orchestration-only misuse". Only the
+second half holds. The criterion failed.** Reporting it as a partial success
+would be reframing the target around the half that worked.
+
+### What actually happened
+
+The targeted defect is gone. Orchestration-only misuse went to zero, preflight
+caught three bad scripts before execution for no training time, and no failure
+repeated identically. Those were the things the architecture was built to fix
+and they are fixed.
+
+But fixing the capability boundary made the agent *do the right thing* — follow
+the contract's advice to train directly and capture its own epoch curve — and
+that exposed the next defect immediately underneath:
+
+```
+failure modes across the three post-architecture runs
+  preflight rejection (free, 0s)                3
+  partial cfg KeyError: history, dim, bs, seed, k   5
+  other (NameError 'false', unknown model)      2
+```
+
+**Five of the six real crashes were one root cause, and it was mine.**
+`train_numpy_fm` requires thirteen config keys and failed on the first missing
+one, so the agent burned an iteration per key: `'history'`, then `'dim'`, then
+`'bs'`, then `'seed'`, then `'k'`. The contract told it to train directly
+without saying what a complete config contains, and gave it no way to obtain
+one — `incumbent_cfg` existed but lived in `agent/`, which generated code
+cannot import.
+
+### The fix, and its status
+
+Applied after the protocol closed, never during:
+
+1. `incumbent_cfg` moved into `runtime/research_tools.py` and registered in the
+   contract, so generated code can get a complete config and override one key:
+   `cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)`. The orchestrator
+   now delegates to the same implementation.
+2. `train_numpy_fm` validates its config up front and reports **every** missing
+   key at once, naming the builder — turning five sequential repair iterations
+   into at most one.
+
+**This fix is verified at unit level (12 keys reported together, builder
+resolves, orchestrator and generated code share one implementation) and is NOT
+verified at run level.** Running a fourth evaluation to show the improved number
+would be adding runs after seeing results, which this protocol forbids. The
+honest status is: the diagnosis is solid, the fix is tested, its effect on the
+crash rate is unmeasured.
+
+### The deeper lesson
+
+Both evaluations found the same shape of defect: **the agent's model of its
+tools was incomplete, and it paid for that in iterations.** First it did not
+know *where* a capability lived; now it did not know *what a call requires*.
+Preflight catches a function that does not exist; it does not catch a function
+called with an incomplete argument, because that is a runtime property of a
+dict. That is the honest boundary of the current design.
+
+---
+
+## 4. Scientific rigor metrics
+
+| metric | PRE | POST |
+|---|---|---|
+| nodes stating a complete inquiry (observation + ≥2 hypotheses + measurement) | 16/16 | 21/21 |
+| nodes naming the capability they need | **0/16** | **21/21** |
+| ...naming one that exists and is valid in that context | 0/16 | **20/21** |
+| nodes stating a promotion criterion in advance | **0/16** | **21/21** |
+| confirmation-category nodes | 10/16 | 17/21 |
+| diagnostic tool calls | 56 | 76 |
+| **single-seed results promoted to confirmed** | — | **0** |
+
+This is where the architecture paid off unambiguously.
+
+**Every node now names the capability it needs and states in advance what
+result would make it act.** Both were absent before. Deciding after the fact
+what counts as success is how a noisy draw becomes a discovery, so requiring
+the criterion up front is the cheapest available protection.
+
+**No single-seed result was promoted.** The evidence state is computed from how
+a number was obtained, and one seed is `PRELIMINARY` at every effect size —
+including +3.20σ, which is what the best post-architecture run actually
+produced. The agent internalised the vocabulary rather than merely being graded
+by it; run 2 node 0 wrote its own promotion criterion as *"that would still be
+only PRELIMINARY and would require paired repetition before adoption."*
+
+**Methodology self-audit is live.** `audit_comparison` and `selection_pressure`
+are in the contract and the validity block is in the prompt. The agent named
+`selection_rule_test` — the held-out selection-rule check — as the measurement
+it wanted, which is the correct tool for the question it asked.
+
+**Leakage protection.** Before the runs, an audit of every prompt-facing channel
+found 0 answer-shaped statements in the capability contract, evidence block and
+validity block; 5 in research memory and 21 in the dead-end notes. Those two
+channels are legitimate accumulated knowledge and were deliberately left in
+place, which is precisely why §7 refuses to claim independent discovery.
 
 ---
 
@@ -128,6 +251,40 @@ VERIFIED: the reported result follows from the artifacts on disk.
 A dirty working tree is recorded rather than hidden — a SHA from a dirty tree
 does not identify the code that ran, and saying so is more useful than a stamp
 that implies precision it does not have.
+
+---
+
+## 6. Autonomous demonstration — one complete cycle
+
+From `logs/opus_research/post_arch_run_2.jsonl`, node 0. Rendered by
+`python3 -m agent.demo_cycle --journal logs/opus_research/post_arch_run_2.jsonl`,
+which reads every line from the journal and prints `NOT PRESENT` for any step
+that did not happen.
+
+| step | what the agent did |
+|---|---|
+| **OBSERVATION** | Noticed its own research memory contradicted itself: *"checkpoint-combination claims are internally inconsistent: claim [2] says top-N snapshot averaging was initially rejected…"* |
+| **QUESTION** | Is the remaining headroom in model *selection* along one trajectory, or in the one still-open history mechanism? |
+| **HYPOTHESES** | Three, competing: H1 epoch-selection overfitting worth 0.0005–0.001; H2 DIN attention holds real under-realised signal; H3 both are noise. |
+| **DIAGNOSTIC** | Capture per-epoch validation predictions and compare checkpoint rules on held-out user splits. |
+| **CAPABILITY** | Named `selection_rule_test` — a real contract capability, valid in the chosen context. |
+| **PROMOTION CRITERION** | Declared *before* the result: rule must beat single-best-epoch by ≥0.0005, then score ≥+0.0008 over baseline — *"and that would still be only PRELIMINARY."* |
+| **TOOL CALL** | `get_within_user_auc` ×3, `hardcoded_constants`. 4 requested, 0 errors. |
+| **EXPERIMENT** | DIN-attention + deepfm_mlp with `lr=0.0005`, `epochs=12` — pipeline overrides the menu cannot express. |
+| **PREFLIGHT** | Passed; the experiment ran. |
+| **EVALUATION** | primary 0.60416 (GAUC 0.67058, nDCG@5 0.53775). |
+| **CONFIRM/REJECT** | **PRELIMINARY** (+0.00256, +3.20σ, 1 seed). *"This does NOT authorise changing the submitted system."* |
+| **MEMORY** | 4 claims, 1 CONTESTED by counterevidence — the contradiction it opened on. |
+| **NEXT DECISION** | Objective switched to **confirmation**: *"Is node 0 genuinely better, or is its gain mostly a validation-selection artifact from epoch/checkpoint choice and one favorable seed?"* |
+
+The loop closes. The agent found a contradiction in its own memory, formed
+competing explanations, named the right tool, pre-committed to what would count,
+ran the experiment, was told a +3.20σ result was still only preliminary, and
+responded by scheduling confirmation instead of building on it.
+
+That last step is the one worth looking at. The pre-architecture agent, given a
+result like this, adopted it on one seed and carried it forward. This one did
+not.
 
 ---
 
@@ -194,9 +351,16 @@ elsewhere. **Absence of the answer is not absence of direction.**
   aimed at the score, and the score did not move. The architecture work is the
   deliverable; claiming otherwise would be dishonest.
 - **Preflight is static.** It catches a function that does not exist. It does
-  **not** catch a function called with the wrong arguments — two of run 3's
-  three Path B crashes were signature misuse of a real API, which only a smoke
-  execution of the full script would catch.
+  **not** catch one called with wrong or incomplete arguments — that is a
+  runtime property. This is what let the partial-config failure through, and it
+  is the honest boundary of the design.
+- **The post-architecture crash-rate fix is unverified at run level.** The
+  diagnosis is solid and the fix is unit-tested, but measuring its effect would
+  mean adding a fourth evaluation run after seeing results, which the protocol
+  forbids.
+- **Two aborted protocol attempts are disclosed** in `CLEAN_PROTOCOL_2.json`,
+  with what was examined before each stop. Neither was abandoned for
+  unfavourable results.
 - **Autonomy is Level B and bounded by a knowledge-rich environment.**
 - **The evidence states are computed from reported metadata.** If a node
   understates how many variants it really compared, the audit understates the

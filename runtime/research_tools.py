@@ -21,7 +21,9 @@ the agent.
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import statistics
 
 import numpy as np
@@ -270,6 +272,57 @@ def redundancy(delta_a, delta_b, users=None) -> dict:
                        f"Do not assume solo gains add: {expect}."}
 
 
+# ------------------------------------------------------------ config builder ---
+def incumbent_cfg(splits, meta, choices=None, **overrides):
+    """A COMPLETE, valid training config for the incumbent, plus its encoding.
+
+    Returns `(cfg, enc)` ready to pass straight to `train_lib.train_numpy_fm`.
+    Any keyword argument overrides one key, so a one-axis experiment is:
+
+        cfg, enc = incumbent_cfg(splits, meta, hist_tau_days=7.0)
+        cfg["capture_epoch_scores"] = []          # if you want the epoch curve
+        r = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
+
+    This exists because `train_numpy_fm` requires FIFTEEN keys and fails on the
+    first missing one, so hand-building a config costs an iteration per key.
+    That was measured: across three post-architecture runs, five of six real
+    crashes were partial configs -- `KeyError: 'history'`, then `'dim'`, then
+    `'bs'`, then `'seed'`, then `'k'`. The agent was correctly following the
+    capability contract's advice to train directly; the contract simply had not
+    told it what a complete config contains, and there was no way to obtain one.
+    """
+    import train_lib
+    ch = choices
+    if ch is None:
+        here = os.path.dirname(os.path.abspath(__file__))
+        root = os.path.dirname(here)
+        with open(os.path.join(root, "logs", "ensemble_results.json")) as fh:
+            ch = json.load(fh)["config"]
+    enc, dim, _off, _dims = train_lib.encode_features(splits, meta, ch["temporal"])
+    training = ch.get("training", "default")
+    cfg = {
+        "dim": dim, "k": 32 if training == "k32" else 16,
+        "lr": 5e-4 if training == "lower_lr_longer" else 1e-3,
+        "bs": 8192,
+        "epochs": 60 if training == "lower_lr_longer" else 40,
+        "patience": 6 if training == "lower_lr_longer" else 4,
+        "seed": 0,
+        "loss": ch["loss"], "history": ch["user_history"],
+        "multitask": ch.get("multitask", "none"), "model": ch["model"],
+        "training": training, "neg_sampling": ch["neg_sampling"],
+        "sample_weighting": ch["sample_weighting"],
+        "l2": {"l2_default": 1e-6, "l2_1e5": 1e-5, "l2_1e4": 1e-4,
+               "l2_1e3": 1e-3}.get(ch.get("regularization", "l2_default"), 1e-6),
+        "snapshot_ensemble": 0, "bootstrap_seed": None,
+        "aux_weight": 0.2, "device": "cpu",
+    }
+    cfg["aux_tasks"] = train_lib.AUX_MAP[cfg["multitask"]]
+    cfg.update(overrides)
+    if "multitask" in overrides:
+        cfg["aux_tasks"] = train_lib.AUX_MAP[cfg["multitask"]]
+    return cfg, enc
+
+
 __all__ = ["NOISE", "expected_max_of_n", "selection_pressure",
            "convergence_epsilon", "audit_comparison", "selection_rule_test",
-           "free_recombination", "redundancy"]
+           "free_recombination", "redundancy", "incumbent_cfg"]

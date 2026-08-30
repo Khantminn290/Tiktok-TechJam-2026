@@ -3039,6 +3039,61 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_complete_cfg_is_obtainable():
+    """The failure mode the post-architecture evaluation exposed.
+
+    Fixing the capability boundary made the agent do the right thing -- call
+    train_numpy_fm directly and capture its own epoch curve -- and it then
+    crashed five times across three runs on partial configs: KeyError 'history',
+    then 'dim', then 'bs', then 'seed', then 'k'. One iteration burned per key.
+    The contract had told it to train directly without telling it what a
+    complete config contains, and gave it no way to obtain one.
+    """
+    print("\n[complete cfg]")
+    import train_lib
+    from research_tools import incumbent_cfg
+
+    splits, meta = train_lib.load_cache()
+    cfg, enc = incumbent_cfg(splits, meta)
+    missing = [k for k in train_lib.REQUIRED_CFG_KEYS if k not in cfg]
+    check("incumbent_cfg returns a config with every required key",
+          not missing, f"missing: {missing}")
+    check("...and the encoding to go with it", enc is not None)
+
+    cfg2, _ = incumbent_cfg(splits, meta, hist_tau_days=7.0, k=32)
+    check("keyword overrides apply",
+          cfg2["hist_tau_days"] == 7.0 and cfg2["k"] == 32)
+    check("...without disturbing the other keys",
+          all(cfg2[k] == cfg[k] for k in cfg
+              if k not in ("hist_tau_days", "k")))
+
+    # Every missing key at once, not the first one.
+    try:
+        train_lib.train_numpy_fm({"k": 16}, enc, splits, meta, print)
+        raised = ""
+    except KeyError as e:
+        raised = str(e)
+    check("an incomplete cfg is rejected before training starts", bool(raised))
+    for key in ("history", "dim", "bs", "seed"):
+        check(f"  the error names the missing '{key}'", key in raised)
+    check("the error points at the builder rather than making them guess",
+          "incumbent_cfg" in raised,
+          "listing keys is better; naming the fix is better still")
+
+    # And the orchestrator must use the same implementation, not a copy.
+    from agent import research_run
+    cfg3, _ = research_run.incumbent_cfg(splits, meta)
+    check("the orchestrator builds configs with the same code",
+          cfg3 == cfg, "two copies of a config builder will drift")
+
+    from agent import capabilities as C
+    check("the contract advertises incumbent_cfg as importable",
+          "incumbent_cfg" in C.importable_names())
+    check("...and train_numpy_fm's entry names the required keys",
+          "aux_tasks" in C.get("train_numpy_fm").inputs
+          and "incumbent_cfg" in C.get("train_numpy_fm").inputs)
+
+
 def test_experience_write_is_not_fatal():
     """A note that cannot be written must not end a research run."""
     print("\n[experience robustness]")
@@ -3444,7 +3499,11 @@ def test_redundancy_reasoning():
           "do not assume" in redundancy(shared, shared)["reading"].lower())
     # It must be a general question, not a rule about specific interventions.
     src = open(os.path.join(_ROOT, "runtime", "research_tools.py")).read()
-    body = src[src.index("def redundancy"):src.index("__all__")]
+    # Slice the redundancy function ONLY -- up to the next top-level def, not to
+    # __all__, or a neighbouring function's docstring gets scanned instead.
+    start = src.index("def redundancy")
+    nxt = src.find("\ndef ", start + 1)
+    body = src[start:nxt if nxt != -1 else src.index("__all__")]
     check("the implementation names no specific intervention",
           not any(w in body for w in ("checkpoint", "snapshot", "ensemble_k",
                                       "tau", "hist_")),
@@ -3709,6 +3768,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_complete_cfg_is_obtainable,
               test_experience_write_is_not_fatal, test_run_metrics_and_demo,
               test_capability_contract, test_preflight, test_budget_accounting,
               test_evidence_states, test_research_memory,

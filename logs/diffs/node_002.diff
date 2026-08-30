@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_002.py
-@@ -1,34 +1,181 @@
+@@ -1,35 +1,33 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -18,188 +18,43 @@
  import json
  import os
  import sys
-+import traceback
-+import numpy as np
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
 +import train_lib
-+
-+
-+INCUMBENT = {
-+    "loss": "pointwise_logloss",
-+    "neg_sampling": "uniform_1",
-+    "user_history": "din_attention",
-+    "multitask": "none",
-+    "model": "deepfm_mlp",
-+    "temporal": "none",
-+    "training": "k32",
-+    "data_extras": "none",
-+    "sample_weighting": "per_row",
-+    "regularization": "l2_default",
-+    "lr": 0.0005,
-+    "epochs": 12,
-+    "patience": 4,
-+}
-+
-+
-+def _ensure_dir(path):
-+    os.makedirs(path, exist_ok=True)
-+
-+
-+def _write_outputs(output_dir, metrics, scores_valid, scores_test):
-+    _ensure_dir(output_dir)
-+    with open(os.path.join(output_dir, "metrics.json"), "w") as f:
-+        json.dump({k: float(v) for k, v in metrics.items()}, f)
-+    np.save(os.path.join(output_dir, "scores_valid.npy"), np.asarray(scores_valid, dtype=np.float32))
-+    np.save(os.path.join(output_dir, "scores_test.npy"), np.asarray(scores_test, dtype=np.float32))
-+
-+
-+def _call_training_dynamics(menu_choices, output_dir, seed):
-+    fn = getattr(train_lib, "training_dynamics", None)
-+    if fn is None:
-+        raise RuntimeError("train_lib.training_dynamics() is unavailable; this Path B experiment requires per-epoch predictions.")
-+
-+    tried = []
-+    # Try several plausible calling conventions defensively.
-+    call_specs = [
-+        ((menu_choices, output_dir, seed), {}),
-+        ((menu_choices,), {"output_dir": output_dir, "seed": seed}),
-+        ((), {"menu_choices": menu_choices, "output_dir": output_dir, "seed": seed}),
-+        ((menu_choices,), {"seed": seed}),
-+        ((), {"cfg": menu_choices, "output_dir": output_dir, "seed": seed}),
-+    ]
-+    last_err = None
-+    for args, kwargs in call_specs:
-+        try:
-+            return fn(*args, **kwargs)
-+        except TypeError as e:
-+            tried.append({"args_len": len(args), "kwargs": sorted(kwargs.keys()), "err": str(e)})
-+            last_err = e
-+            continue
-+    raise RuntimeError("Could not call train_lib.training_dynamics with any supported signature: %s" % tried) from last_err
-+
-+
-+def _extract_epoch_predictions(obj):
-+    if isinstance(obj, dict):
-+        keys = list(obj.keys())
-+        candidate_lists = []
-+        for k in [
-+            "epoch_predictions",
-+            "per_epoch_predictions",
-+            "predictions_by_epoch",
-+            "epoch_preds",
-+            "preds_by_epoch",
-+        ]:
-+            if k in obj:
-+                candidate_lists.append(obj[k])
-+        if candidate_lists:
-+            pred_container = candidate_lists[0]
-+        else:
-+            pred_container = obj
-+    else:
-+        pred_container = obj
-+
-+    if isinstance(pred_container, list):
-+        epochs = pred_container
-+    elif isinstance(pred_container, tuple):
-+        epochs = list(pred_container)
-+    elif isinstance(pred_container, dict):
-+        # dict keyed by epoch index/name
-+        items = sorted(pred_container.items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else str(kv[0]))
-+        epochs = [v for _, v in items]
-+    else:
-+        raise RuntimeError("Unrecognised training_dynamics return type for epoch predictions: %r" % type(obj))
-+
-+    valid_list = []
-+    test_list = []
-+    for i, ep in enumerate(epochs):
-+        if isinstance(ep, dict):
-+            vk = None
-+            tk = None
-+            for cand in ["scores_valid", "valid_scores", "pred_valid", "valid_pred", "valid"]:
-+                if cand in ep:
-+                    vk = cand
-+                    break
-+            for cand in ["scores_test", "test_scores", "pred_test", "test_pred", "test"]:
-+                if cand in ep:
-+                    tk = cand
-+                    break
-+            if vk is None or tk is None:
-+                raise RuntimeError(f"Epoch {i} missing valid/test predictions; keys={list(ep.keys())}")
-+            valid_list.append(np.asarray(ep[vk], dtype=np.float64))
-+            test_list.append(np.asarray(ep[tk], dtype=np.float64))
-+        elif isinstance(ep, (list, tuple)) and len(ep) == 2:
-+            valid_list.append(np.asarray(ep[0], dtype=np.float64))
-+            test_list.append(np.asarray(ep[1], dtype=np.float64))
-+        else:
-+            raise RuntimeError(f"Epoch {i} prediction container not understood: type={type(ep)}")
-+
-+    if not valid_list or not test_list:
-+        raise RuntimeError("No epoch predictions extracted from training_dynamics output")
-+    return valid_list, test_list
  
  
  def main():
-     ap = argparse.ArgumentParser()
+-    ap = argparse.ArgumentParser()
 -    ap.add_argument("--menu-choices", required=True)
 -    ap.add_argument("--output-dir", required=True)
-+    ap.add_argument("--menu-choices", type=str, required=True)
-+    ap.add_argument("--output-dir", type=str, required=True)
-     ap.add_argument("--seed", type=int, default=0)
+-    ap.add_argument("--seed", type=int, default=0)
 -    a = ap.parse_args()
 -    choices = json.loads(a.menu_choices)
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
-+    args = ap.parse_args()
++    parser = argparse.ArgumentParser()
++    parser.add_argument('--menu-choices', required=True)
++    parser.add_argument('--output-dir', required=True)
++    parser.add_argument('--seed', type=int, default=0)
++    args = parser.parse_args()
 +
 +    try:
-+        user_menu = json.loads(args.menu_choices)
-+        if not isinstance(user_menu, dict):
-+            raise ValueError("--menu-choices must decode to a JSON object")
++        menu_choices = json.loads(args.menu_choices)
++        if not isinstance(menu_choices, dict):
++            raise ValueError('--menu-choices must decode to a JSON object')
 +
-+        # Confirmation candidate is fixed by the research policy; allow harmless extras only.
-+        cfg = dict(INCUMBENT)
-+        if "epochs" in user_menu:
-+            cfg["epochs"] = int(user_menu["epochs"])
-+        if "lr" in user_menu:
-+            cfg["lr"] = float(user_menu["lr"])
-+        if "patience" in user_menu:
-+            cfg["patience"] = int(user_menu["patience"])
++        os.makedirs(args.output_dir, exist_ok=True)
++        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
 +
-+        # First run the standard training once to keep the path faithful to the incumbent setup
-+        # and ensure the model family/config is executable in this environment.
-+        tmp_standard = os.path.join(args.output_dir, "_standard_run")
-+        _ensure_dir(tmp_standard)
-+        try:
-+            train_lib.run(cfg, tmp_standard, seed=args.seed)
-+        except Exception as e:
-+            raise RuntimeError(f"Incumbent standard run failed before last-K averaging: {e}")
-+
-+        dyn = _call_training_dynamics(cfg, args.output_dir, args.seed)
-+        valid_epochs, test_epochs = _extract_epoch_predictions(dyn)
-+
-+        k_last = 3
-+        if len(valid_epochs) < k_last:
-+            k_last = len(valid_epochs)
-+        if k_last < 1:
-+            raise RuntimeError("training_dynamics returned zero epochs")
-+
-+        scores_valid = np.mean(np.stack(valid_epochs[-k_last:], axis=0), axis=0)
-+        scores_test = np.mean(np.stack(test_epochs[-k_last:], axis=0), axis=0)
-+
-+        splits, _meta = train_lib.load_cache()
-+        metrics = train_lib.evaluate(
-+            splits["valid"]["user_raw"],
-+            splits["valid"]["long_view"],
-+            scores_valid,
-+        )
-+
-+        _write_outputs(args.output_dir, metrics, scores_valid, scores_test)
++        metrics_path = os.path.join(args.output_dir, 'metrics.json')
++        with open(metrics_path, 'w') as f:
++            json.dump({k: float(v) for k, v in metrics.items()}, f)
 +    except Exception as e:
-+        sys.stderr.write("ERROR: %s\n" % str(e))
-+        sys.stderr.write(traceback.format_exc())
-+        sys.exit(1)
++        sys.stderr.write(str(e) + '\n')
++        raise
  
  
- if __name__ == "__main__":
+-if __name__ == "__main__":
++if __name__ == '__main__':
+     main()

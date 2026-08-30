@@ -157,6 +157,14 @@ The menu is **prior knowledge, not the boundary**. The agent can also:
   builder, which is probed for leakage, within-user variation, redundancy and
   *incremental* value before any training run. Rejections are remembered in
   `logs/feature_registry.jsonl` so nothing is re-proposed.
+- **read its own capability contract** (`agent/capabilities.py`) — every tool
+  states where it can be invoked, whether generated code can import it, what it
+  costs, and how it fails. `agent/preflight.py` enforces the same registry
+  before an experiment runs, so a script calling something that does not exist
+  in its context is rejected in seconds instead of costing a training run.
+- **build a complete training config** with
+  `from research_tools import incumbent_cfg` and override one key at a time.
+  Do not hand-assemble a cfg dict — `train_numpy_fm` needs 13 keys.
 - **set pipeline overrides directly** in `menu_choices`: `k`, `lr`, `epochs`,
   `patience`, `l2`, `bs`, `hist_tau_days`, `aux_weight`, `snapshot_ensemble`,
   `snapshot_force`. Range-checked at the menu boundary.
@@ -273,7 +281,13 @@ python3 -m agent.learning_curve                    # data-limited or not?
 | `logs/opus_research/DISTILLATION.md` | how each research behaviour became an agent capability |
 | `logs/opus_research/AUTONOMY_AUDIT.md` | the teacher→student leak that invalidated the first autonomy claim |
 | `logs/opus_research/AUTONOMY_EVALUATION.md` | the 3 pre-registered clean runs and the honest Level A/B/C verdict |
+| `ARCHITECTURE.md` | **the architecture report** — before/after, capability contract, reliability metrics, one full autonomous cycle |
+| `agent/capabilities.py` | the authoritative capability contract; `--name X` prints a full entry |
 | `agent/autonomy_eval.py` | grades a journal against the 5 independent-discovery criteria |
+| `agent/run_metrics.py` | reliability + rigor metrics for any journal, pre/post comparable |
+| `agent/demo_cycle.py` | renders one complete research cycle from a journal |
+| `agent/verify_incumbent.py` | recomputes the submitted 0.60541 from stored members |
+| `logs/opus_research/reliability_comparison.json` | the pre/post numbers behind the report |
 | `logs/feature_registry.jsonl` | every feature proposed, probed, accepted or rejected |
 | `logs/ensemble_results.json` | the authoritative result + provenance (git sha, data fingerprint) |
 | `logs/journal.jsonl` | per-iteration hypothesis, diff, metrics, errors (competition deliverable) |
