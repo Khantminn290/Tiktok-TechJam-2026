@@ -5,8 +5,9 @@ Working branch: `opus-research-agent`, pushed at `e36a492`.
 ## Codex continuation — 2026-08-31
 
 Codex ran the competition profile at `28142c1` and then added a narrow follow-up
-reliability patch. These changes are currently **uncommitted** alongside the
-run artifacts; preserve them and do not reset the worktree.
+reliability patch in commit `ab6c315`. The run artifacts are intentionally still
+uncommitted alongside the live journal; preserve them and do not reset the
+worktree.
 
 ### Latest live run
 
