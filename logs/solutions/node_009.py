@@ -1,0 +1,116 @@
+import argparse
+import json
+import os
+import sys
+
+import numpy as np
+
+import train_lib
+from research_tools import incumbent_cfg, selection_rule_test
+from evaluate import evaluate
+
+
+def rankdata_average(x):
+    x = np.asarray(x)
+    n = x.shape[0]
+    order = np.argsort(x, kind='mergesort')
+    ranks = np.empty(n, dtype=np.float64)
+    i = 0
+    while i < n:
+        j = i + 1
+        while j < n and x[order[j]] == x[order[i]]:
+            j += 1
+        avg_rank = (i + j - 1) / 2.0 + 1.0
+        ranks[order[i:j]] = avg_rank
+        i = j
+    return ranks
+
+
+def rank_normalize(scores):
+    scores = np.asarray(scores, dtype=np.float64)
+    if scores.size == 0:
+        return scores.copy()
+    ranks = rankdata_average(scores)
+    return ranks / float(scores.size)
+
+
+def combine_topn(per_epoch_scores, n):
+    ordered = sorted(per_epoch_scores, key=lambda t: t[1], reverse=True)
+    chosen = ordered[:n]
+    mats = [rank_normalize(t[2]) for t in chosen]
+    return np.mean(np.stack(mats, axis=0), axis=0)
+
+
+def build_rule_predictions(per_epoch_scores):
+    ordered = sorted(per_epoch_scores, key=lambda t: t[1], reverse=True)
+    rules = {}
+    best_epoch, _, best_scores = ordered[0]
+    rules['best_epoch'] = np.asarray(best_scores, dtype=np.float64)
+    rules[f'epoch_{best_epoch}'] = np.asarray(best_scores, dtype=np.float64)
+    max_topn = min(5, len(ordered))
+    for n in range(2, max_topn + 1):
+        rules[f'top{n}_avg_ranknorm'] = combine_topn(per_epoch_scores, n)
+    return rules
+
+
+def parse_args():
+    p = argparse.ArgumentParser()
+    p.add_argument('--menu-choices', type=str, required=True)
+    p.add_argument('--output-dir', type=str, required=True)
+    p.add_argument('--seed', type=int, default=0)
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+    try:
+        menu_choices = json.loads(args.menu_choices)
+        if not isinstance(menu_choices, dict):
+            raise ValueError('--menu-choices must decode to a JSON object')
+
+        os.makedirs(args.output_dir, exist_ok=True)
+
+        splits, meta = train_lib.load_cache()
+        cfg, enc = incumbent_cfg(splits, meta)
+        cfg.update(menu_choices)
+        cfg['seed'] = int(args.seed)
+        cfg['capture_epoch_scores'] = []
+
+        res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
+        scores_valid = np.asarray(res['scores_valid'], dtype=np.float64)
+        scores_test = np.asarray(res['scores_test'], dtype=np.float64)
+
+        labels_valid = np.asarray(splits['valid']['long_view'])
+        users_valid = np.asarray(splits['valid']['user_raw'])
+        metrics = evaluate(users_valid, labels_valid, scores_valid)
+
+        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), scores_valid)
+        np.save(os.path.join(args.output_dir, 'scores_test.npy'), scores_test)
+        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
+            json.dump({k: float(v) for k, v in metrics.items()}, f)
+
+        per_epoch = cfg['capture_epoch_scores']
+        if len(per_epoch) == 0:
+            raise RuntimeError('No epoch scores were captured')
+
+        rule_preds = build_rule_predictions(per_epoch)
+        audit = selection_rule_test(rule_preds, users_valid, labels_valid, 'best_epoch')
+        with open(os.path.join(args.output_dir, 'checkpoint_rule_audit.json'), 'w') as f:
+            json.dump(audit, f, indent=2)
+
+        required = [
+            os.path.join(args.output_dir, 'metrics.json'),
+            os.path.join(args.output_dir, 'scores_valid.npy'),
+            os.path.join(args.output_dir, 'scores_test.npy'),
+        ]
+        missing = [p for p in required if not os.path.exists(p)]
+        if missing:
+            raise FileNotFoundError('Missing expected outputs: ' + ', '.join(missing))
+        return 0
+    except Exception as e:
+        print('ERROR: {}'.format(e), file=sys.stderr)
+        raise
+
+
+if __name__ == '__main__':
+    sys.exit(main())

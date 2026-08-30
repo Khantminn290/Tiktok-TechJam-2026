@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
-+++ logs/solutions/node_000.py
-@@ -1,35 +1,32 @@
++++ logs/solutions/node_002.py
+@@ -1,35 +1,45 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -34,8 +34,8 @@
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
 +    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', required=True)
-+    parser.add_argument('--output-dir', required=True)
++    parser.add_argument('--menu-choices', type=str, required=True)
++    parser.add_argument('--output-dir', type=str, required=True)
 +    parser.add_argument('--seed', type=int, default=0)
 +    args = parser.parse_args()
 +
@@ -43,17 +43,31 @@
 +        menu_choices = json.loads(args.menu_choices)
 +        if not isinstance(menu_choices, dict):
 +            raise ValueError('--menu-choices must decode to a JSON object')
++
 +        os.makedirs(args.output_dir, exist_ok=True)
 +        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
++
 +        metrics_path = os.path.join(args.output_dir, 'metrics.json')
 +        if not os.path.exists(metrics_path):
 +            with open(metrics_path, 'w') as f:
 +                json.dump({k: float(v) for k, v in metrics.items()}, f)
++
++        required = [
++            os.path.join(args.output_dir, 'metrics.json'),
++            os.path.join(args.output_dir, 'scores_valid.npy'),
++            os.path.join(args.output_dir, 'scores_test.npy'),
++        ]
++        missing = [p for p in required if not os.path.exists(p)]
++        if missing:
++            raise FileNotFoundError('Missing expected outputs: ' + ', '.join(missing))
++
++        return 0
 +    except Exception as e:
 +        print(f'ERROR: {e}', file=sys.stderr)
 +        raise
  
  
 -if __name__ == "__main__":
+-    main()
 +if __name__ == '__main__':
-     main()
++    sys.exit(main())

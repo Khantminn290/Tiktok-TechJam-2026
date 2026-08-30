@@ -1,0 +1,64 @@
+--- logs/solutions/node_004.py
++++ logs/solutions/node_005.py
+@@ -12,12 +12,12 @@
+     print(msg, file=sys.stderr)
+ 
+ 
+-def topk_mean(preds, idxs):
++def mean_from_indices(preds, idxs):
+     arr = np.stack([np.asarray(preds[i], dtype=np.float64) for i in idxs], axis=0)
+     return arr.mean(axis=0)
+ 
+ 
+-def build_candidate_predictions(epoch_records):
++def build_rules_from_epochs(epoch_records):
+     epoch_records = sorted(epoch_records, key=lambda x: x[0])
+     epochs = [int(e) for e, _, _ in epoch_records]
+     primaries = [float(p) for _, p, _ in epoch_records]
+@@ -39,7 +39,7 @@
+     for n in range(2, max_topn + 1):
+         idxs = [int(i) for i in order[:n]]
+         name = f"top{n}_mean"
+-        candidates[name] = topk_mean(preds, idxs)
++        candidates[name] = mean_from_indices(preds, idxs)
+         rule_specs[name] = {
+             "type": "mean",
+             "epoch_indices": idxs,
+@@ -52,7 +52,7 @@
+         idxs = list(range(start, best_pos + 1))
+         if len(idxs) >= 2:
+             name = f"recent{len(idxs)}_to_best_mean"
+-            candidates[name] = topk_mean(preds, idxs)
++            candidates[name] = mean_from_indices(preds, idxs)
+             rule_specs[name] = {
+                 "type": "mean",
+                 "epoch_indices": idxs,
+@@ -62,9 +62,11 @@
+     return candidates, rule_specs, epochs, primaries
+ 
+ 
+-def choose_rule_with_heldout_users(user_ids, labels, candidates):
+-    rules = [{"name": k, "scores": np.asarray(v, dtype=np.float64)} for k, v in candidates.items()]
+-    res = selection_rule_test(user_ids, labels, rules)
++def choose_rule_with_heldout_users(epoch_records, user_ids, labels, candidates):
++    rules = []
++    for name in candidates.keys():
++        rules.append({"name": name})
++    res = selection_rule_test(epoch_records, user_ids, labels, rules)
+ 
+     best_name = res.get("reference_rule")
+     if best_name in candidates:
+@@ -127,11 +129,11 @@
+         if len(epoch_records) == 0:
+             raise RuntimeError("capture_epoch_scores produced no epoch records")
+ 
+-        candidates, rule_specs, epochs, primaries = build_candidate_predictions(epoch_records)
++        candidates, rule_specs, epochs, primaries = build_rules_from_epochs(epoch_records)
+         user_ids = np.asarray(splits["valid"]["user_raw"])
+         labels = np.asarray(splits["valid"]["long_view"])
+ 
+-        chosen_rule, heldout_res = choose_rule_with_heldout_users(user_ids, labels, candidates)
++        chosen_rule, heldout_res = choose_rule_with_heldout_users(epoch_records, user_ids, labels, candidates)
+         scores_valid = np.asarray(candidates[chosen_rule], dtype=np.float64)
+         metrics = train_lib.evaluate(user_ids, labels, scores_valid)
+         scores_test = np.asarray(res["scores_test"], dtype=np.float64)

@@ -1,23 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [HELPED] iter 1 -- Root cause of the last failure was purely mechanical: the script imported `traceback`, which is not
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6029 as the first scored node (no prior best to compare against).
-
-### [NEUTRAL] iter 2 -- The observed gru4rec_seq gain at 0.60294 may come from the sequential architecture rather than from
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6031 vs the then-best 0.6029 (+0.00012 = +0.1 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
-### [HELPED] iter 0 -- The unresolved single-model headroom is in DCN-lite rather than the FM branch: although most menu ax
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "dcn_lite", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6040 as the first scored node (no prior best to compare against).
-
-### [NEUTRAL] iter 1 -- Confirm whether the apparent 0.6040 single-run gain from the incumbent branch actually depends on us
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6040 (-0.00025 = -0.3 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
-### [HELPED] iter 0 -- A small within-run checkpoint average may improve the strongest FM+BPR+recency configuration by redu
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 16, "n_checkpoints": 3, "checkpoint_combine": true} scored 0.6037 as the first scored node (no prior best to compare against).
-
-### [HELPED] iter 0 -- The unresolved single-model branch is DCN-lite under the strongest incumbent-like training recipe: i
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "dcn_lite", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6040 as the first scored node (no prior best to compare against).
-
 ### [NEUTRAL] iter 3 -- A direct confirmation-style ablation from the current best single-run recipe back to fm_numpy, while
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6040 (-0.00025 = -0.3 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 
@@ -41,4 +23,19 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [HELPED] iter 0 -- A standalone GRU4Rec-style sequential model with BPR and a conservative longer/lower-LR schedule may
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6031 as the first scored node (no prior best to compare against).
+
+### [HELPED] iter 0 -- The remaining menu-side headroom is most plausibly in pipeline constants rather than a new mechanism
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001} scored 0.5980 as the first scored node (no prior best to compare against).
+
+### [DEAD_END] iter 1 -- A clean single-axis ablation of the current FM+recency bundle should show whether the apparent value
+menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001} scored 0.5873 vs the then-best 0.5980 (-0.01074 = -13.4 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [NEUTRAL] iter 2 -- A single-run confirmation of the selected incumbent-like FM+BPR recipe should test whether our local
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001, "n_checkpoints": 5, "checkpoint_combine": true} scored 0.5982 vs the then-best 0.5980 (+0.00011 = +0.1 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
+
+### [HELPED] iter 6 -- The recent local incumbent is likely being held back by an explicitly strong L2 override rather than
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "n_checkpoints": 5, "checkpoint_combine": true} raised valid primary to 0.6040 from 0.5982 (+0.00587 = +7.3 sigma).
+
+### [NEUTRAL] iter 7 -- A matched confirmation ablation of node 6 without checkpoint combination should clarify whether its
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "n_checkpoints": 1, "checkpoint_combine": false} scored 0.6038 vs the then-best 0.6040 (-0.00026 = -0.3 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 

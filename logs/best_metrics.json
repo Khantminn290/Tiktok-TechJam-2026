@@ -1,23 +1,29 @@
 {
-  "iteration_id": 0,
+  "iteration_id": 6,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
-    "user_history": "none",
+    "user_history": "recency_weighted_pool",
     "multitask": "none",
-    "model": "gru4rec_seq",
+    "model": "fm_numpy",
     "temporal": "none",
     "training": "lower_lr_longer",
     "data_extras": "none",
     "sample_weighting": "per_row",
-    "regularization": "l2_default"
+    "regularization": "l2_default",
+    "k": 4,
+    "lr": 0.0005,
+    "epochs": 20,
+    "patience": 5,
+    "n_checkpoints": 5,
+    "checkpoint_combine": true
   },
-  "hypothesis": "A standalone GRU4Rec-style sequential model with BPR and a conservative longer/lower-LR schedule may modestly improve within-user ranking over the baseline FM by exploiting train-period order information in users' long_view histories, which set-based history mechanisms and plain FM cannot represent. This specifically tests the still-open standalone merit of sequence modelling rather than heterogeneous blending, whose failure does not rule out single-model gains.",
+  "hypothesis": "The recent local incumbent is likely being held back by an explicitly strong L2 override rather than by its FM+BPR recipe itself. Re-running the same confirmation-style FM+BPR+recency configuration but switching from regularization=l2_1e3 with l2=0.001 to regularization=l2_default should restore the score toward the saturated frontier region around 0.6049, because the broader measured frontier says strong L2 is a null-to-harm direction while the target node's 0.5982 is far below both the official 0.6016 baseline and repeated l2_default FM runs around 0.6038. If this rebounds, it still remains only PRELIMINARY and should trigger paired confirmation next.",
   "valid_metrics": {
-    "GAUC": 0.6697579334026141,
-    "nDCG@5": 0.5363557345999813,
-    "primary": 0.6030568340012977
+    "GAUC": 0.6708821256332423,
+    "nDCG@5": 0.537165179473899,
+    "primary": 0.6040236525535707
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_000.py",
-  "timestamp": 1788110424.455013
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_006.py",
+  "timestamp": 1788113889.345004
 }

@@ -1,0 +1,56 @@
+{
+  "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
+  "journal_nodes": 11,
+  "iterations_used": 9,
+  "iteration_cap": 14,
+  "best_node": 6,
+  "best_valid_metrics": {
+    "GAUC": 0.6708821256332423,
+    "nDCG@5": 0.537165179473899,
+    "primary": 0.6040236525535707
+  },
+  "delta_valid_primary_over_baseline": 0.0024,
+  "total_llm_tokens": {
+    "input_tokens": 385227,
+    "output_tokens": 33010,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "calls": 36,
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "input_plus_output": 418237
+  },
+  "total_training_wall_clock_s": 6578.6,
+  "delta_in_baseline_seed_sigmas": 3.03,
+  "total_agent_wall_clock_s": 6899.3,
+  "gpu_hours": 0.0,
+  "gpu_seconds_measured": 0.0,
+  "devices_used": [
+    "cpu"
+  ],
+  "spend": {
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "total_usd": 1.458217,
+    "ceiling_usd": 8.0,
+    "iterations_billed": 36,
+    "mean_usd_per_iteration": 0.040506,
+    "max_usd_per_iteration": 0.09282,
+    "rate_card": "$2.50/1M in, $15.00/1M out"
+  },
+  "draft_count": 5,
+  "manual_interventions": 0,
+  "budget_ledger": {
+    "max_iterations": 14,
+    "max_training_runs": 90,
+    "training_runs_used": 21,
+    "training_runs_left": 69,
+    "training_crashes": 2
+  },
+  "budget_counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
+  "convergence_rule": {
+    "epsilon": 0.00047746678414832246,
+    "N": 3,
+    "counted_iterations": "scored (successful) only"
+  }
+}

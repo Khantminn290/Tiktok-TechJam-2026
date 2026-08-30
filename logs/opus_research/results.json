@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-08-30T15:18:43Z",
+  "generated_utc": "2026-08-30T20:05:59Z",
   "generator": "python3 -m agent.results_report",
   "dataset_scope": "KuaiRand-Pure only",
   "metric": {
@@ -152,10 +152,10 @@
   },
   "harness": {
     "tier": "VERIFIED",
-    "passed": 796,
+    "passed": 855,
     "failed": 0,
     "exit_code": 0,
-    "seconds": 8.4
+    "seconds": 10.9
   },
   "convergence": {
     "epsilon": 0.000477,
@@ -180,61 +180,68 @@
     "paired_evidence_states": {
       "UNCONFIRMED": 1
     },
-    "allocations_recorded": 10,
+    "allocations_recorded": 9,
     "confirmations_queued": 1,
     "automatic_repair_attempts": 2,
-    "automatic_repairs_succeeded": 1,
-    "iterations_consumed": 11,
-    "preflight_rejections": 0,
-    "preflight_stages": {},
-    "experiments_completed": 8,
-    "experiments_crashed": 3,
-    "training_wall_clock_s": 885.0,
-    "path_b_attempts": 6,
-    "path_b_crashes": 3,
-    "path_b_crash_rate": 0.5,
+    "automatic_repairs_succeeded": 0,
+    "iterations_consumed": 9,
+    "preflight_rejections": 2,
+    "preflight_stages": {
+      "imports": 1,
+      "call_arity": 1
+    },
+    "experiments_completed": 7,
+    "experiments_crashed": 2,
+    "training_wall_clock_s": 6578.6,
+    "path_b_attempts": 4,
+    "path_b_preflight_rejected": 2,
+    "path_b_reached_training": 2,
+    "path_b_crashes": 2,
+    "path_b_crash_rate": 1.0,
     "orchestration_only_misuse": 0,
     "repeated_identical_failures": 1,
     "failure_classes": {
-      "evaluation_failure": 3
+      "unknown": 2,
+      "evaluation_failure": 1,
+      "data_contract": 1
     },
     "tool_calls": {
-      "get_user_history_stats": 10,
-      "get_within_user_auc": 17,
-      "hardcoded_constants": 7,
-      "free_recombination": 3,
-      "selection_pressure": 1,
-      "selection_rule_test": 1
+      "hardcoded_constants": 8,
+      "get_within_user_auc": 19,
+      "get_user_history_stats": 9
     },
-    "tool_call_total": 39,
-    "nodes_with_inquiry": 10,
-    "inquiry_complete": 10,
-    "capability_named": 10,
-    "capability_named_valid": 10,
-    "promotion_criterion_stated": 10,
+    "tool_call_total": 36,
+    "nodes_with_inquiry": 9,
+    "inquiry_complete": 9,
+    "capability_named": 9,
+    "capability_named_valid": 9,
+    "promotion_criterion_stated": 9,
     "categories": {
+      "ablation": 2,
+      "confirmation": 7,
       "exploration": 1,
-      "confirmation": 10
+      "integration": 1
     },
-    "confirmation_nodes": 10,
-    "best_primary": 0.60497,
+    "confirmation_nodes": 7,
+    "best_primary": 0.60402,
     "manual_interventions": 0,
     "tier": "OBSERVED",
     "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
     "budget_ledger": {
-      "max_iterations": 12,
+      "max_iterations": 14,
       "max_training_runs": 90,
-      "training_runs_used": 16,
-      "training_runs_left": 74,
-      "training_crashes": 3
+      "training_runs_used": 21,
+      "training_runs_left": 69,
+      "training_crashes": 2
     },
     "counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
-    "llm_spend_usd": 1.571477,
-    "agent_wall_clock_s": 1495.2,
+    "llm_spend_usd": 1.458217,
+    "agent_wall_clock_s": 6899.3,
     "devices": [
       "cpu"
     ],
-    "llm_tokens_total": 237246
+    "llm_tokens_total": 418237,
+    "llm_token_source": "provider_final_summary"
   },
   "path_b": {
     "features_probed": 8,
