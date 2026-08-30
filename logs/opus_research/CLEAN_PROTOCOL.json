@@ -1,0 +1,10 @@
+{
+  "written_before_any_run": true,
+  "runs": 3,
+  "config_per_run": "--fresh --feature-discovery --research-state --data-tools --n-candidates 4 --max-iterations 6 --max-spend-usd 3.0",
+  "environment": "identical and verified answer-leak-free for all three",
+  "what_counts_as_LEVEL_A": "the agent (a) states an observation it cannot explain, (b) gives >=2 competing hypotheses, (c) selects a measurement not dictated by the teacher's known answer, (d) executes it, and (e) changes its stated belief or next direction because of the result",
+  "what_counts_as_LEVEL_B": "the agent selects and invokes a transferred capability appropriately, but the insight itself was available in the environment",
+  "reporting_rule": "all three trajectories reported regardless of outcome; no additional runs will be added after seeing results",
+  "score_expectation": "a Level A demonstration does NOT require beating 0.60541; a negative but well-reasoned finding counts"
+}
