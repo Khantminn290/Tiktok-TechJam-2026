@@ -376,6 +376,32 @@ register(Capability(
                   "bound."))
 
 register(Capability(
+    name="ensemble_construction", kind=ENSEMBLE,
+    purpose="Train k independent seeds of one configuration, rank-normalise "
+            "their predictions and average them, then score the result.",
+    when="Once a configuration is CONFIRMED, or has scored repeatedly. Averaging "
+         "seeds of a configuration that is not actually good just buys a "
+         "precise estimate of a mediocre number.",
+    resolves="How much of the submitted score is seed variance rather than the "
+             "model.",
+    inputs="menu_choices for the configuration, and k (number of seeds)",
+    outputs="{'primary','mean_member','sd_member','gain_over_mean_member',...}",
+    contexts=(ORCHESTRATOR,), module=None, cost=ONE_RUN, mutates_pipeline=False,
+    validation="Measure the gain against the MEAN member, never the best one. "
+               "The best of k draws sits above the mean by construction, so "
+               "that comparison reports a gain even when ensembling does "
+               "nothing. Fix k before looking at any score, and use every seed "
+               "trained -- dropping a weak member is selection on validation.",
+    failure_modes="Costs k training runs. Fewer than 4 members makes the "
+                  "average itself noisy.",
+    instead="You do not implement this yourself. The loop schedules it as an "
+            "experiment once something is worth ensembling; propose it by "
+            "saying so in your hypothesis.",
+    returns={"kind": "dict", "keys": ["primary", "mean_member",
+                                      "gain_over_mean_member", "k"]},
+    example="(scheduled by the loop; see agent/ensemble_experiment.py)"))
+
+register(Capability(
     name="incumbent_cfg", kind=MODIFY,
     purpose="Build a COMPLETE, valid training config for the incumbent, plus "
             "its feature encoding, with any key overridden by keyword.",

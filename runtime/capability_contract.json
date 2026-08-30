@@ -71,6 +71,29 @@
       "validation": "Diagnostic only. It does not create per-epoch test predictions and cannot itself authorise a submission change.",
       "when": "After train_numpy_fm captured epoch scores and you need to check whether a checkpoint-selection rule generalises without manually rebuilding the selection_rule_test tensor and callable mapping."
     },
+    "ensemble_construction": {
+      "cost": "one_training_run",
+      "example": "(scheduled by the loop; see agent/ensemble_experiment.py)",
+      "failure_modes": "Costs k training runs. Fewer than 4 members makes the average itself noisy.",
+      "importable_from_generated_python": false,
+      "inputs": "menu_choices for the configuration, and k (number of seeds)",
+      "kind": "ENSEMBLE",
+      "module": null,
+      "orchestrator_only": true,
+      "outputs": "{'primary','mean_member','sd_member','gain_over_mean_member',...}",
+      "purpose": "Train k independent seeds of one configuration, rank-normalise their predictions and average them, then score the result.",
+      "returns": {
+        "keys": [
+          "primary",
+          "mean_member",
+          "gain_over_mean_member",
+          "k"
+        ],
+        "kind": "dict"
+      },
+      "validation": "Measure the gain against the MEAN member, never the best one. The best of k draws sits above the mean by construction, so that comparison reports a gain even when ensembling does nothing. Fix k before looking at any score, and use every seed trained -- dropping a weak member is selection on validation.",
+      "when": "Once a configuration is CONFIRMED, or has scored repeatedly. Averaging seeds of a configuration that is not actually good just buys a precise estimate of a mediocre number."
+    },
     "evaluate": {
       "cost": "free",
       "example": "m = evaluate(list(users), labels, scores); print(m[\"primary\"])",
@@ -349,6 +372,7 @@
     "train_lib"
   ],
   "orchestration_only": [
+    "ensemble_construction",
     "hardcoded_constants",
     "training_dynamics"
   ],

@@ -232,6 +232,38 @@ flattered by the thing being measured.
 
 ---
 
+## What the agent can do
+
+**Modify the pipeline** — 10 axes, ~45 options: `loss`, `neg_sampling`,
+`user_history`, `multitask`, `model`, `temporal`, `training`, `data_extras`,
+`sample_weighting`, `regularization`. Plus pipeline constants no menu axis
+reaches: embedding size, learning rate, epochs, patience, decay constants,
+checkpoint rules.
+
+**Run experiments** — one action space, not tiers:
+
+| Action | What it is |
+|---|---|
+| **New idea** | a fresh configuration |
+| **Refine best** | extend the leading result |
+| **Fix failure** | read its own traceback and repair its script |
+| **Implement** | write a mechanism the menu cannot express (a new objective, representation, or aggregation rule) |
+| **Confirm** | a paired multi-seed experiment — the only thing that can make a result CONFIRMED |
+| **Ensemble** | train k seeds of a confirmed configuration and average their rank-normalised predictions |
+
+`implementation_path` in the journal records only *how* an experiment was
+implemented — `A` for a menu configuration, `B` for an agent-written script. It
+is not a hierarchy and neither is the default.
+
+**On ensembling.** This was added because it was a real gap: the submitted
+result is a 16-seed ensemble, but ensembling was not in the agent's action
+space, so the largest measured gain available (**+0.00078**, about 1σ) sat
+outside its reach and a human ran `agent.final_ensemble --seeds 16` afterwards.
+The agent now schedules it itself once a configuration is confirmed or has
+scored repeatedly. Its value is measured against the **mean** member, never the
+best one — the best of k draws sits above the mean by construction, so that
+comparison would report a gain even if ensembling did nothing.
+
 ## The search space
 
 `config/modification_menu.json` defines everything the agent is allowed to change.
@@ -303,6 +335,7 @@ app.py                       Streamlit dashboard (streamlit run app.py)
   budget.py                  decisions vs training executions, separately capped
   evidence.py                PRELIMINARY / CONFIRMED / REJECTED, from how it was measured
   confirm.py                 paired multi-seed experiments, executed
+  ensemble_experiment.py     ensembling as an agent action, not a human step
   experiment_spec.py         an experiment the system runs, not describes
   knowledge.py               scoped claims with counterevidence
   allocator.py               transparent utility over experiment families

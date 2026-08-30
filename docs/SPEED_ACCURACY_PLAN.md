@@ -89,8 +89,8 @@ and completed the same scientific loop under a defined resource budget."
 
 ## Implementation Order
 
-Implement and test each phase before proceeding. Do not start the optional
-transfer work until the Pure workflow and artifacts are stable.
+Implement and test each phase before proceeding. This plan is intentionally
+limited to KuaiRand-Pure; bonus-dataset transfer is not part of this build.
 
 ### Phase 1: Deterministic Path A Execution
 
@@ -351,21 +351,6 @@ end-to-end claim without controlled parallelism would not be credible.
 7. Re-run `verify_incumbent` and the harness. Only after these checks and a
    deliberate team decision should `--final-test-eval` be invoked once.
 
-## Optional 1K / 27K Transfer
-
-This is a bonus lever, not a prerequisite for a strong Pure submission. Attempt
-it only after the Pure performance scorecard is stable and the data is actually
-available.
-
-- Follow `docs/TRANSFER_PLAN.md` exactly: explicit profile routing, hard
-  `date <= 2022-04-21` auxiliary cutoff, label redaction, embeddings-only
-  pretraining, Pure-only fine-tuning/evaluation, and paired confirmation.
-- Test 1K first. A confirmed null makes 27K hard to justify.
-- Chunk/cache auxiliary data by dataset fingerprint. Never auto-discover a data
-  directory and silently include it in a Pure run.
-- Give transfer a separate resource budget and report it independently so it
-  cannot obscure the Pure feasibility story.
-
 ## Explicitly Out of Scope Until This Plan Passes
 
 - Adding more model families or random hyperparameter axes.
@@ -373,7 +358,8 @@ available.
   selecting a cached best run as new evidence.
 - Changing the evaluator, split dates, labels, or hidden-test boundary.
 - Enabling high parallelism without the hardware profile.
-- Claiming an unexecuted 1K/27K transfer result.
+- KuaiRand-1K and KuaiRand-27K transfer work. They are bonus datasets and are
+  explicitly deferred so they cannot dilute the Pure benchmark submission.
 
 ## Definition of Done
 
@@ -389,4 +375,3 @@ The work is ready to present when all of the following are true:
 5. The live view/static tree/report explain the agent's autonomous decisions,
    recoveries, evidence states, budgets, and final reproducibility in a form a
    judge can understand in a few minutes.
-

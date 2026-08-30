@@ -131,6 +131,11 @@ class AgentLoop:
         # whose confirmation came back UNCONFIRMED is answered, not
         # unanswered -- asking again buys nothing and costs six runs.
         self._confirmed_nodes = set()
+        # Ensembling is an ACTION the agent can take, not a human
+        # post-process. Once per run: it is k training runs and the
+        # result is deterministic, so repeating it buys nothing.
+        self._ensemble_done = False
+        self._ensemble_k = 8
         # Training executions are a SEPARATE budget from outer-loop decisions.
         # A paired 3-seed confirmation is 1 node and 6 training runs; conflating
         # them under-counts compute six-fold. See agent.budget.COUNTING_NOTE.
@@ -342,6 +347,7 @@ class AgentLoop:
             # experiment that could actually settle it. This is the link that
             # turns "confirmation" from a prompt category into a run.
             self._maybe_queue_confirmation(nodes, d, events, left)
+            self._maybe_queue_ensemble(nodes, events, left)
             self._current_objective = d["category"]
             print(f"  [research policy] objective={d['category']} "
                   f"({d['reason']})", flush=True)
@@ -599,6 +605,61 @@ class AgentLoop:
             events.append({"type": "confirmation_queue_failed",
                            "error": f"{type(e).__name__}: {str(e)[:200]}"})
 
+    def _maybe_queue_ensemble(self, nodes: list, events: list,
+                             budget_left: int) -> None:
+        """Decide to ensemble, once there is something worth ensembling.
+
+        Fires when a configuration has been CONFIRMED by a paired experiment --
+        or, failing that, when the same configuration has scored repeatedly --
+        because averaging seeds of a configuration that is not actually good
+        just buys a precise estimate of a mediocre number.
+
+        This is the step that used to be a human running
+        `agent.final_ensemble --seeds 16` after the agent had stopped. It is the
+        largest single measured gain available (about 1 sigma) and it now sits
+        inside the agent's action space rather than outside it.
+        """
+        if self._confirmation_queue or self._ensemble_done:
+            return
+        from . import ensemble_experiment as EE
+        k = self._ensemble_k
+        led = getattr(self, "ledger", None)
+        if budget_left < 1 or (led and not led.can_afford(k)):
+            return
+
+        scored = [n for n in nodes
+                  if n.get("status") == "success" and n.get("metrics")]
+        if not scored:
+            return
+
+        # Prefer a configuration a paired confirmation has actually backed.
+        target, why = None, ""
+        for n in nodes:
+            for e in (n.get("events") or []):
+                if (e.get("type") == "paired_result"
+                        and (e.get("evidence") or {}).get("state") == "CONFIRMED"):
+                    target = n.get("menu_choices")
+                    why = f"node {n.get('iteration_id')} was CONFIRMED"
+        if target is None:
+            best = max(scored, key=lambda n: n["metrics"]["primary"])
+            sig = json.dumps(best.get("menu_choices") or {}, sort_keys=True)
+            repeats = sum(1 for n in scored
+                          if json.dumps(n.get("menu_choices") or {},
+                                        sort_keys=True) == sig)
+            if repeats < 2:
+                return          # one draw of one config is not worth k runs
+            target = best.get("menu_choices")
+            why = (f"node {best.get('iteration_id')} at "
+                   f"{best['metrics']['primary']:.5f}, reproduced {repeats}x")
+        if not target:
+            return
+
+        spec = EE.spec_for(target, k=k, timeout_s=self.exec_timeout_s)
+        self.queue_confirmation(spec)
+        self._ensemble_done = True
+        events.append({"type": "ensemble_queued", "k": k, "reason": why})
+        print(f"  [ensemble] queued {k}-member ensemble — {why}", flush=True)
+
     def queue_confirmation(self, spec) -> None:
         """Schedule a paired multi-seed experiment for the next iteration."""
         self._confirmation_queue.append(spec)
@@ -624,6 +685,63 @@ class AgentLoop:
                   f"{led.why_not(spec.n_runs)}", flush=True)
             return None
         return q.pop(0)
+
+    def _run_ensemble_node(self, it: int, spec) -> Node:
+        """Train k members, combine them, and journal it as a real node.
+
+        Ensembling used to be a human step run after the agent finished, which
+        made the submitted number only partly the agent's. It is an action now.
+        """
+        from . import ensemble_experiment as EE
+
+        events = [{"type": "research_category", "category": "integration",
+                   "reason": "removing seed variance from the submitted score"},
+                  {"type": "experiment_spec", "spec": spec.to_dict()}]
+        k = len(spec.seeds)
+        print(f"[iter {it}] action=ensemble — {k} members of the best "
+              f"configuration", flush=True)
+        t0 = now()
+        work = os.path.join(self.log_dir, "ensemble_exp", f"node_{it:03d}")
+        try:
+            out = EE.run(spec.treatment, spec.seeds, work,
+                         timeout_s=self.exec_timeout_s)
+        except Exception as e:                      # noqa: BLE001
+            events.append({"type": "execution_error", "failure_class": "unknown",
+                           "error_head": f"{type(e).__name__}: {str(e)[:300]}"})
+            node = Node(iteration_id=it, parent_id=spec.parent_node,
+                        action="ensemble", menu_choices=spec.treatment,
+                        hypothesis=spec.hypothesis, status="error", metrics=None,
+                        error_trace=f"{type(e).__name__}: {e}", tokens_used=0,
+                        wall_clock_seconds=now() - t0, timestamp=time.time(),
+                        code_path="", events=events,
+                        research_category="integration", implementation_path="A")
+            self.tree.add(node)
+            return node
+
+        res, ev = out["result"], out["evidence"]
+        trained = len(out["members"])
+        if getattr(self, "ledger", None):
+            self.ledger.record_training(trained, crashed=max(0, k - trained))
+        events.append({"type": "ensemble_result", "result": res,
+                       "evidence": ev, "promote": out["promote"]})
+
+        metrics = res.get("ensemble") if res.get("usable") else None
+        node = Node(iteration_id=it, parent_id=spec.parent_node,
+                    action="ensemble", menu_choices=spec.treatment,
+                    hypothesis=spec.hypothesis,
+                    status="success" if metrics else "error", metrics=metrics,
+                    error_trace=None if metrics else "too few members combined",
+                    tokens_used=0, wall_clock_seconds=now() - t0,
+                    timestamp=time.time(), code_path="", events=events,
+                    decide_reason="queued ensemble construction",
+                    research_category="integration", implementation_path="A")
+        self.tree.add(node)
+        if metrics:
+            print(f"[iter {it}] ENSEMBLE {ev['state']} primary "
+                  f"{metrics['primary']:.5f} (gain "
+                  f"{res['gain_over_mean_member']:+.5f} over the mean member)",
+                  flush=True)
+        return node
 
     def _run_confirmation_node(self, it: int, spec) -> Node:
         """Execute a paired spec and journal it as a first-class node."""
@@ -737,6 +855,9 @@ class AgentLoop:
         # seed 0.
         queued = self._dequeue_confirmation()
         if queued is not None:
+            from . import experiment_spec as _XS
+            if queued.experiment_type == _XS.ENSEMBLE_CONSTRUCTION:
+                return self._run_ensemble_node(it, queued)
             return self._run_confirmation_node(it, queued)
 
         action, target, reason = decide_action(self.tree,

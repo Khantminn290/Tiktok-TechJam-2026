@@ -1589,12 +1589,21 @@ def test_stage_b_path_freedom():
 
     # prompt framing + menu compression
     psrc = open(os.path.join(_ROOT, "agent", "prompts.py")).read()
-    check("Path A is no longer described as the default/simplest",
+    # Normalise whitespace: these assert CONTENT, and the prompt is reflowed
+    # whenever it is edited. A line break should not fail a content check.
+    pflat = " ".join(psrc.split())
+    check("configuring is no longer described as the default/simplest",
           "The simplest valid script is seed_solution.py" not in psrc)
-    check("path choice is framed as hypothesis-driven",
-          "decide from your HYPOTHESIS" in psrc)
-    check("Path B is explicitly warned against gratuitous complexity",
-          "what is the SIMPLEST experiment" in psrc)
+    check("the choice is framed as hypothesis-driven",
+          "decide from your HYPOTHESIS" in pflat
+          or "Neither is the default" in pflat)
+    check("implementing is explicitly warned against gratuitous complexity",
+          "what is the SIMPLEST experiment" in pflat)
+    check("the action space is presented as one list, not two tiers",
+          "One action space, not two tiers" in pflat)
+    check("ensembling is described as an action the agent can expect",
+          "ENSEMBLE — train k seeds" in pflat,
+          "it was outside the agent's reach until now")
     m = Menu(MENU_PATH)
     full, comp = m.render_for_prompt(), m.render_compact() + m.render_dead_ends()
     check("every dead end survives compaction (none silently dropped)",
@@ -3051,6 +3060,78 @@ def _profile_args(**kw):
     for k, v in kw.items():
         setattr(ns, k, v)
     return ns
+
+
+def test_ensembling_is_an_agent_action():
+    """Ensembling must be something the agent can DO, not a human post-process.
+
+    The gap this closes: the submitted 0.60541 is a 16-seed ensemble, but the
+    agent's ten menu axes contained no ensembling, so the single largest
+    measured gain available (+0.00078, about 1 sigma) sat permanently outside
+    its reach and a human had to run `agent.final_ensemble --seeds 16`.
+    """
+    print("\n[ensembling as an action]")
+    from agent import capabilities as C
+    from agent import ensemble_experiment as EE
+    from agent import evidence as EV
+    from agent import experiment_spec as XS
+
+    check("ensembling is a registered capability",
+          C.get("ensemble_construction") is not None)
+    cap = C.get("ensemble_construction")
+    check("...and its validation warns against measuring off the BEST member",
+          "best" in cap.validation.lower() and "mean" in cap.validation.lower(),
+          "the best of k draws beats the mean by construction")
+
+    spec = EE.spec_for({"model": "fm_numpy"}, k=8)
+    check("an ensemble is a first-class experiment spec",
+          spec.experiment_type == XS.ENSEMBLE_CONSTRUCTION)
+    check("...costing k training runs", len(spec.seeds) == 8)
+
+    # The gain must be measured against the MEAN member, never the best.
+    members = {s: {"metrics": {"primary": p}, "dir": ""} for s, p in
+               enumerate([0.6040, 0.6046, 0.6050, 0.6044, 0.6048])}
+    singles = [m["metrics"]["primary"] for m in members.values()]
+    fake = {"usable": True, "k": 5, "primary": 0.6054,
+            "mean_member": round(sum(singles) / len(singles), 5),
+            "best_member": max(singles),
+            "gain_over_mean_member": round(0.6054 - sum(singles) / len(singles), 5),
+            "gain_over_best_member": round(0.6054 - max(singles), 5)}
+    check("the headline gain is measured against the mean member",
+          fake["gain_over_mean_member"] > fake["gain_over_best_member"],
+          "reporting against the best member would understate a real gain and "
+          "flatter a fake one")
+    fake["gain_sigma"] = round(fake["gain_over_mean_member"] / EV.NOISE, 2)
+    check("a real ensemble gain reaches CONFIRMED",
+          EE.grade(fake)["state"] == EV.CONFIRMED)
+
+    thin = dict(fake, k=3)
+    check("too few members is PRELIMINARY, not confirmed",
+          EE.grade(thin)["state"] == EV.PRELIMINARY,
+          "the average of a handful of seeds is itself noisy")
+
+    null = dict(fake, primary=0.60455, gain_over_mean_member=0.00001,
+                gain_sigma=0.01)
+    check("an ensemble that buys nothing is REJECTED",
+          EE.grade(null)["state"] == EV.REJECTED)
+    check("...and is not actionable", not EE.grade(null)["actionable"])
+
+    check("too few members to combine is unusable, not a score",
+          EE.combine({0: {"metrics": {"primary": 0.6}, "dir": ""}})["usable"]
+          is False)
+
+    # The loop must be able to schedule and execute it.
+    src = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the loop schedules ensembling itself",
+          "_maybe_queue_ensemble" in src)
+    check("...and executes it as a journalled node",
+          "_run_ensemble_node" in src and 'action="ensemble"' in src)
+    check("it will not ensemble a configuration seen only once",
+          "repeats < 2" in src,
+          "averaging seeds of a config that is not good buys a precise "
+          "estimate of a mediocre number")
+    check("it charges every member to the training-run budget",
+          "record_training(trained" in src)
 
 
 def test_streamlit_dashboard_executes():
@@ -4668,6 +4749,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_ensembling_is_an_agent_action,
               test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,
               test_results_report_is_generated_not_retyped,

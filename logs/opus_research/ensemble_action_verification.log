@@ -1,0 +1,35 @@
+  [ensemble] training 6 members
+    [member] seed 0  primary 0.60497  72s
+    [member] seed 1  primary 0.60393  58s
+    [member] seed 2  primary 0.60449  68s
+    [member] seed 3  primary 0.60424  50s
+    [member] seed 4  primary 0.60479  65s
+    [member] seed 5  primary 0.60516  62s
+  [ensemble] k=6  members 0.60460 +/- 0.00042  ->  ensemble 0.60541  (gain +0.00081, +1.02σ)
+  [ensemble] CONFIRMED — +0.00081 (+1.02 sigma) over the mean of 6 members; reproducible by re-aggregating the stored predictions
+
+PROMOTE: True
+{
+  "usable": true,
+  "k": 6,
+  "seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "ensemble": {
+    "GAUC": 0.67231,
+    "nDCG@5": 0.53851,
+    "primary": 0.60541
+  },
+  "primary": 0.60541,
+  "mean_member": 0.6046,
+  "sd_member": 0.00042,
+  "best_member": 0.60516,
+  "gain_over_mean_member": 0.00081,
+  "gain_sigma": 1.02,
+  "gain_over_best_member": 0.00025
+}

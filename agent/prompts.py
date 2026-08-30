@@ -22,7 +22,7 @@ CANDIDATE_SECTION = (
     "scored deterministically by the harness and ONE is selected; you are "
     "generating the option set, not the final answer, so genuinely different "
     "ideas are worth more than {n} variations of the same one.\n"
-    "At least one candidate MUST use implementation_path 'B' (a mechanism the "
+    "At least one candidate MUST use implementation_path 'B' -- IMPLEMENT: a mechanism the "
     "menu cannot express) IF you can state a real mechanism for it. If you "
     "honestly cannot, say so in that candidate's hypothesis and mark it path "
     "'A' -- a fabricated Path B idea is worse than an honest Path A one, and "
@@ -142,21 +142,38 @@ SOLUTION SCRIPT CONTRACT (your "code" must satisfy all of this):
 CHOOSING AN IMPLEMENTATION PATH — decide from your HYPOTHESIS, not from which
 path looks safer or more normal. Neither is the default; they are different
 tools.
-- Path A (implementation_path "A"): the hypothesis is about a mechanism the
-  existing primitives ALREADY express — a hyperparameter, a regularization
-  strength, an implemented loss or architecture, an ablation of a component,
-  or a combination of validated components. Give menu_choices; your script can
-  simply call train_lib.run(menu_choices, output_dir, seed).
-- Path B (implementation_path "B"): the hypothesis needs a mechanism the menu
-  CANNOT express — a new training objective, a new data representation, a new
-  feature transformation, a different way of forming training examples, a new
-  ensembling or ranking strategy. Give code_summary instead of menu_choices,
-  and implement the mechanism in your script using the train_lib building
-  blocks (load_cache, encode_features, RankFM, evaluate, ...).
-  Path B does NOT mean "write complicated code because I can". Always ask:
-  what is the SIMPLEST experiment that could test this hypothesis? If a menu
-  option already tests it, that is Path A and Path A is the right answer.
-  Choosing Path B for an idea the menu already covers wastes an iteration.
+WHAT YOU CAN DO. One action space, not two tiers. Every experiment is one of
+these, and `implementation_path` only records HOW you implemented it:
+
+- CONFIGURE (implementation_path "A") — the hypothesis is about a mechanism the
+  pipeline ALREADY expresses: a loss, an architecture, a history mechanism, a
+  hyperparameter, an ablation, or a combination of validated components. Give
+  menu_choices; your script can simply call
+  train_lib.run(menu_choices, output_dir, seed).
+
+- IMPLEMENT (implementation_path "B") — the hypothesis needs a mechanism the
+  menu CANNOT express: a new training objective, a new data representation, a
+  new feature transformation, a different way of forming training examples, a
+  new ranking or aggregation strategy. Give code_summary instead of
+  menu_choices and build it from train_lib primitives (load_cache,
+  encode_features, RankFM, evaluate, ...).
+
+Neither is the default and neither is braver. Choosing IMPLEMENT for something
+the menu already covers wastes an iteration; refusing to implement a mechanism
+the menu cannot express means the question never gets asked. Always ask: what is
+the SIMPLEST experiment that could test this hypothesis?
+
+Two further actions are scheduled FOR you when the evidence calls for them, so
+you do not implement them yourself -- but you should say in your hypothesis when
+you think one is due:
+
+- CONFIRM — a paired multi-seed experiment. A single-seed result is
+  PRELIMINARY at any effect size, and this is the only thing that can make it
+  CONFIRMED.
+- ENSEMBLE — train k seeds of a confirmed configuration and average their
+  rank-normalised predictions. This does not make any model better; it removes
+  seed variance from the number we submit. Its value is measured against the
+  MEAN member, never the best one.
 """
 
 
