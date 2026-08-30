@@ -118,7 +118,7 @@ which applies the same definitions to both sets of journals.
 | experiments crashed | 5 | 10 | worse |
 | Path B attempts | 7 | 13 | |
 | Path B crashes | 5 | 12 | |
-| **Path B crash rate** | **0.714** | **0.923** | **worse** |
+| **Path B crash rate** (of attempts reaching training) | **0.714** | **0.909** | **worse** |
 | **orchestration-only misuse** | **1** | **0** | **fixed** |
 | preflight rejections (free) | 0 | 3 | new |
 | repeated identical failures | 1 | 0 | fixed |
@@ -173,6 +173,12 @@ verified at run level.** Running a fourth evaluation to show the improved number
 would be adding runs after seeing results, which this protocol forbids. The
 honest status is: the diagnosis is solid, the fix is tested, its effect on the
 crash rate is unmeasured.
+
+**Metric correction (2026-08-31):** these rates originally counted preflight
+rejections as crashes, which penalises preflight for working. They are now
+taken over attempts that actually reached training. The pre/post figures above
+barely move (0.714 / 0.909) because those runs had few rejections, but later
+runs do, and `HANDOVER_FOR_CODEX.md` carries the corrected series.
 
 ### The deeper lesson
 

@@ -77,6 +77,35 @@ preflight now catches name, arity, return-shape, keyword and direct rule-type
 mistakes, but cannot prove a dynamically constructed argument has the intended
 meaning. Keep claims bounded accordingly.
 
+
+## Correction to the Path B crash-rate figure (2026-08-31)
+
+`agent/run_metrics.py` was counting **preflight rejections as crashes**. That is
+backwards: a preflight rejection is the system refusing to spend compute on a
+script it can already see is broken, so the better preflight gets at catching
+things early, the worse a conflated "crash rate" looks. Codex's run made this
+visible — 2 of its 7 Path B "crashes" were 0-second rejections that never
+reached training.
+
+Fixed: `path_b_preflight_rejected` and `path_b_reached_training` are reported
+separately, and the rate is taken over attempts that actually reached training.
+Recomputed across every recorded run:
+
+| run | attempts | preflight | trained | crashed | rate (of trained) |
+|---|---|---|---|---|---|
+| PRE-architecture (3 runs) | 7 | 0 | 7 | 5 | 71% |
+| POST-architecture (3 runs) | 13 | 2 | 11 | 10 | 91% |
+| Phase 4 (return shapes) | 6 | 0 | 6 | 3 | **50%** |
+| Codex run (+arity/keyword) | 7 | 2 | 5 | 3 | **60%** |
+
+**Do not over-read the last two rows.** Training crashes have been stuck at
+exactly **3 per run** across both, while attempts varied. At n=5–6 the
+difference between 50% and 60% is one attempt and is not a meaningful change in
+either direction. What is defensible: the rate is clearly below the 91%
+post-architecture regression, and preflight is now catching attempts that
+previously would have burned a training run. What is not yet defensible: that
+Path B reliability is trending in a particular direction run-to-run.
+
 **Safety constraints — please preserve these.**
 - Do not reset, checkout or revert user changes. `CODE_REVIEW.md` and
   `QUICK_IMPLEMENTATION.md` are untracked on purpose; leave them.
@@ -90,7 +119,7 @@ meaning. Keep claims bounded accordingly.
 
 | Phase | State | Evidence |
 |---|---|---|
-| 1 — Path B reliability | **complete** | live Path B smoke succeeded; crash rate 71%→50% |
+| 1 — Path B reliability | **partly effective** | live Path B smoke succeeded; crash rate 71%→50/60%, see caveat |
 | 2 — Competition profile | **complete** | `--competition`; resolved config printed; unsafe combos refused |
 | 3 — Budget accounting | **complete** | `budget.Ledger`; 11 nodes vs 16 training runs in the live run |
 | 4 — Clean benchmark run | **complete** | `logs/opus_research/phase4_competition_run.jsonl`, `RESULTS.md` |
@@ -172,7 +201,7 @@ iteration 10: the running best gained **0.00000** over 3 scored iterations.
 | outer-loop nodes / iterations consumed | 11 / 11 |
 | **training runs used** | **16 of 90** (the confirmation was 6) |
 | experiments completed / crashed | 8 / 3 |
-| **Path B crash rate** | **50%** (71% pre-architecture, 92% prior run) |
+| **Path B crash rate** | **50%** of attempts that reached training (see correction above) |
 | orchestration-only misuse | 0 |
 | paired confirmations run / promoted | 1 / **0** (UNCONFIRMED, t=1.86) |
 | automatic repairs attempted / recovered | 2 / **1** |

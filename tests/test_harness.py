@@ -3784,6 +3784,28 @@ def test_run_metrics_and_demo():
         check("a crash rate is reported as a rate, not a count",
               m["path_b_crash_rate"] == 1.0)
 
+    # A preflight rejection must not be counted as a CRASH. Conflating them
+    # penalises preflight for working: the better it gets at catching broken
+    # scripts before training, the worse the crash rate looks. Found by reading
+    # a live run where 2 of 7 Path B "crashes" were 0-second preflight
+    # rejections that never reached training.
+    mixed = [
+        {"iteration_id": 0, "status": "error", "implementation_path": "B",
+         "wall_clock_seconds": 0.0, "events": [],
+         "error_trace": "PREFLIGHT REJECTED THIS SCRIPT — never executed"},
+        {"iteration_id": 1, "status": "error", "implementation_path": "B",
+         "wall_clock_seconds": 71.0, "events": [], "error_trace": "TypeError: boom"},
+        {"iteration_id": 2, "status": "success", "implementation_path": "B",
+         "wall_clock_seconds": 60.0, "metrics": {"primary": 0.604}, "events": []},
+    ]
+    m = RM.compute(mixed, "mixed")
+    check("a preflight rejection is not counted as a Path B crash",
+          m["path_b_crashes"] == 1 and m["path_b_preflight_rejected"] == 1,
+          "the better preflight gets, the worse a conflated rate would look")
+    check("the crash rate is taken over attempts that REACHED training",
+          m["path_b_reached_training"] == 2 and m["path_b_crash_rate"] == 0.5,
+          "1 crash of 2 trained, not 2 of 3 attempted")
+
     # A preflight rejection must show up as free, not as a spent experiment.
     synthetic = [{"iteration_id": 0, "status": "error", "wall_clock_seconds": 0.0,
                   "error_trace": "PREFLIGHT REJECTED THIS SCRIPT\n"

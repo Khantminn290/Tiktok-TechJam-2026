@@ -80,7 +80,16 @@ def compute(nodes: list, label: str = "") -> dict:
 
     path_b = [n for n in nodes
               if (n.get("implementation_path") or "").upper() == "B"]
-    path_b_crash = [n for n in path_b if n.get("status") != "success"]
+    # A preflight rejection is NOT a crash. It is the system refusing to spend
+    # compute on a script it can already see is broken, and lumping the two
+    # together penalises preflight for working: the better it gets at catching
+    # scripts early, the worse the "crash rate" looks. Counted separately, and
+    # the rate is taken over attempts that actually REACHED training.
+    path_b_preflight = [n for n in path_b
+                        if PREFLIGHT_MARKER in (n.get("error_trace") or "")]
+    path_b_reached_training = [n for n in path_b if n not in path_b_preflight]
+    path_b_crash = [n for n in path_b_reached_training
+                    if n.get("status") != "success"]
 
     # Failure classes, and specifically the misuse the contract exists to stop.
     classes: dict = {}
@@ -185,9 +194,11 @@ def compute(nodes: list, label: str = "") -> dict:
         "experiments_crashed": b["experiments_crashed"],
         "training_wall_clock_s": b["training_wall_clock_s"],
         "path_b_attempts": len(path_b),
+        "path_b_preflight_rejected": len(path_b_preflight),
+        "path_b_reached_training": len(path_b_reached_training),
         "path_b_crashes": len(path_b_crash),
-        "path_b_crash_rate": (round(len(path_b_crash) / len(path_b), 3)
-                              if path_b else None),
+        "path_b_crash_rate": (round(len(path_b_crash) / len(path_b_reached_training), 3)
+                              if path_b_reached_training else None),
         "orchestration_only_misuse": orch_misuse,
         "repeated_identical_failures": repeats,
         "failure_classes": classes,
@@ -224,8 +235,10 @@ def render(rows: list) -> str:
     line("experiments completed", "experiments_completed")
     line("experiments crashed", "experiments_crashed")
     line("Path B attempts", "path_b_attempts")
-    line("Path B crashes", "path_b_crashes")
-    line("Path B crash rate", "path_b_crash_rate", "{:.0%}")
+    line("  ...rejected by preflight", "path_b_preflight_rejected")
+    line("  ...reached training", "path_b_reached_training")
+    line("  ...crashed in training", "path_b_crashes")
+    line("Path B crash rate (of trained)", "path_b_crash_rate", "{:.0%}")
     line("orchestration-only misuse", "orchestration_only_misuse")
     line("preflight rejections (free)", "preflight_rejections")
     line("repeated identical failures", "repeated_identical_failures")
