@@ -54,6 +54,24 @@
     "explicitly_not_a_criterion": "Beating 0.60541. The benchmark has plateaued; a score change is not what this protocol is testing, and the incumbent is protected."
   },
 
+  "aborted_attempts_disclosed": [
+    {
+      "attempt": 1,
+      "outcome": "stopped by the operator during run 1",
+      "reason": "Discovered that --fresh was archiving logs/research_memory.jsonl, so the research-memory subsystem was inert in the very runs meant to evaluate it.",
+      "results_examined_before_stopping": "none — no journal was read",
+      "action": "fixed run_agent.SUBMISSION_ARTIFACTS, added a regression test, restarted the whole protocol from run 1"
+    },
+    {
+      "attempt": 2,
+      "outcome": "runs 1 and 2 died with PermissionError",
+      "reason": "ENVIRONMENT FAULT CAUSED BY THE OPERATOR, not agent behaviour. The kill that ended attempt 1 interrupted executor.restricted_access, which chmods protected paths read-only for the duration of a subprocess. config/ and agent/experience.md were left read-only, and the agent aborted when it tried to write its experience notes.",
+      "results_examined_before_stopping": "run 1's metrics were computed and showed 1 node; the run had crashed on the environment fault, so no behavioural conclusion was drawn from it",
+      "action": "restored permissions, made restricted_access restore on SIGTERM, made the experience write non-fatal, restarted the whole protocol from run 1"
+    }
+  ],
+  "restart_integrity_note": "No attempt was abandoned because its results were unfavourable. Both aborts were defects in the harness or the environment, found and fixed rather than worked around. The reported evaluation is the first attempt to run to completion, and all three of its runs are reported.",
+
   "environment_frozen_at": "commit recorded in each run's provenance stamp",
   "incumbent_protection": "verify_incumbent must recompute 0.60541 exactly, before and after.",
   "dataset_scope": "KuaiRand-Pure only.",

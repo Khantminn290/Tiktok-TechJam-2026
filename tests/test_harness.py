@@ -3039,6 +3039,26 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_experience_write_is_not_fatal():
+    """A note that cannot be written must not end a research run."""
+    print("\n[experience robustness]")
+    from agent.experience import append_entry
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "experience.md")
+        append_entry(0, "IMPROVED", "first", "body", path=p)
+        check("a normal append writes the file", os.path.exists(p))
+        os.chmod(p, 0o444)
+        try:
+            append_entry(1, "IMPROVED", "second", "body", path=p)
+            survived = True
+        except OSError:
+            survived = False
+        finally:
+            os.chmod(p, 0o644)
+        check("a read-only experience file does not abort the run", survived,
+              "the journal is the authoritative record; this file is a cache")
+
+
 def test_run_metrics_and_demo():
     """The reported metrics must be computable, and the demo must not invent."""
     print("\n[run metrics + demo trace]")
@@ -3689,7 +3709,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
-              test_run_metrics_and_demo,
+              test_experience_write_is_not_fatal, test_run_metrics_and_demo,
               test_capability_contract, test_preflight, test_budget_accounting,
               test_evidence_states, test_research_memory,
               test_redundancy_reasoning, test_failure_repeat_detection,

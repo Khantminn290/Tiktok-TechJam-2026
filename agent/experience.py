@@ -92,8 +92,19 @@ def append_entry(iteration_id: int, outcome: str, title: str, body: str,
     text += format_entry(iteration_id, outcome, title, body)
     text = compact(text, char_budget)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fh:
-        fh.write(text)
+    try:
+        with open(path, "w") as fh:
+            fh.write(text)
+    except OSError as e:
+        # Losing a note is not a reason to lose the run. This file is a
+        # convenience -- the journal is the authoritative record, and every
+        # lesson here is derived from it. An earlier run died outright with
+        # PermissionError here because an interrupted experiment had left the
+        # file read-only, throwing away five usable iterations to protect a
+        # cache of something already stored elsewhere.
+        print(f"  [experience] WARNING: could not write {path} "
+              f"({type(e).__name__}: {e}); continuing — the journal still has "
+              f"this iteration", flush=True)
 
 
 def render_for_prompt(path: str = EXPERIENCE_PATH) -> str:
