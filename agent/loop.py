@@ -120,6 +120,12 @@ class AgentLoop:
         self._last_state_block = ""
         self._last_error_block = ""
         self._pending_feature = None
+        # Paired multi-seed experiments waiting to run. Populated by feature
+        # discovery and by the promising-result gate; drained at the top of
+        # iterate(). Before this existed, `_pending_feature` was written and
+        # never read, and `feature_source` appeared in no journal ever recorded.
+        self._confirmation_queue = []
+        self._confirm_seeds = (0, 1, 2)
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -293,6 +299,31 @@ class AgentLoop:
             d = decide_category(st, nodes, iteration_budget_left=left)
             events.append({"type": "research_category", "category": d["category"],
                            "scores": d["scores"], "reason": d["reason"]})
+
+            # Transparent utility allocation over experiment families. Recorded
+            # as an event so the choice is auditable after the fact, and
+            # rendered into the prompt so the agent sees the same reasoning.
+            alloc_block = ""
+            try:
+                from . import allocator as AL
+                alloc = AL.allocate(nodes, budget_left=left)
+                events.append({"type": "allocation",
+                               "choice": alloc["choice"],
+                               "ranked": [{k: r[k] for k in
+                                           ("family", "utility", "p_success",
+                                            "expected_gain_sigma")}
+                                          for r in alloc["ranked"][:4]]})
+                alloc_block = AL.render(alloc)
+                print(f"  [allocator] {alloc['choice']} "
+                      f"(utility {alloc['ranked'][0]['utility']:.3f})", flush=True)
+            except Exception as e:                  # noqa: BLE001
+                events.append({"type": "allocation_skipped",
+                               "error": f"{type(e).__name__}: {str(e)[:160]}"})
+
+            # If what we believe rests on a single seed, schedule the paired
+            # experiment that could actually settle it. This is the link that
+            # turns "confirmation" from a prompt category into a run.
+            self._maybe_queue_confirmation(nodes, d, events, left)
             self._current_objective = d["category"]
             print(f"  [research policy] objective={d['category']} "
                   f"({d['reason']})", flush=True)
@@ -303,6 +334,8 @@ class AgentLoop:
             # lead, and capped so it cannot crowd out the decision itself.
             self._last_state_block = st.render()
             blocks = [self._last_state_block, render_decision(d)]
+            if alloc_block:
+                blocks.append(alloc_block)
             try:
                 from .frontier import from_root as _frontier
                 blocks.insert(1, _frontier(self.root).render(limit=22))
@@ -462,7 +495,171 @@ class AgentLoop:
         print(f"  [FEATURE DISCOVERY] {obj.get('name')} -> {res['status']} "
               f"({res.get('reason', '')[:80]})", flush=True)
         self._pending_feature = (obj if res["status"] == FL.PROMISING else None)
+
+        # A cleared probe becomes an EXECUTABLE follow-up, automatically. The
+        # treatment carries the exact stored source, so what gets retrained is
+        # provably what was probed rather than whatever the model retypes next
+        # iteration -- which, on the record, it never did once.
+        if self._pending_feature is not None:
+            try:
+                from . import confirm as CF
+                from . import feature_store as FS
+                stored = FS.record_discovery(obj, res, node_id=len(self.tree.nodes))
+                control = CF.incumbent_choices() or self.menu.default_choices()
+                spec = FS.followup_spec(stored, control, seeds=self._confirm_seeds,
+                                        timeout_s=self.exec_timeout_s)
+                self.queue_confirmation(spec)
+                events.append({"type": "feature_followup_queued",
+                               "sha": stored["sha"], "name": stored.get("name"),
+                               "n_runs": spec.n_runs})
+                print(f"  [FEATURE] queued paired confirmation for "
+                      f"{stored.get('name')} (sha {stored['sha']}, "
+                      f"{spec.n_runs} runs)", flush=True)
+            except Exception as e:                  # noqa: BLE001
+                events.append({"type": "feature_followup_failed",
+                               "error": f"{type(e).__name__}: {str(e)[:200]}"})
         return FL.render_probe_for_prompt(res)
+
+    # ---------- executable paired confirmation ----------
+    def _maybe_queue_confirmation(self, nodes: list, decision: dict,
+                                  events: list, budget_left: int) -> None:
+        """Turn a promising single-seed result into a paired experiment.
+
+        Fires only when the best result is genuinely worth the runs: above half
+        the noise floor, still PRELIMINARY, not already queued, and with enough
+        budget left to finish. Confirming noise wastes as much of the budget as
+        believing it does.
+        """
+        if self._confirmation_queue or budget_left < 1:
+            return
+        scored = [n for n in nodes
+                  if n.get("status") == "success" and n.get("metrics")]
+        if not scored:
+            return
+        best = max(scored, key=lambda n: n["metrics"]["primary"])
+        # A node produced BY a confirmation is already multi-seed; re-confirming
+        # it would just spend runs re-measuring what is already measured.
+        if (best.get("action") or "") == "confirm":
+            return
+        delta = best["metrics"]["primary"] - BASELINE_VALID_PRIMARY
+        if delta < BASELINE_SEED_STD / 2:
+            return
+        try:
+            from . import confirm as CF
+            from . import experiment_spec as XS
+            control = CF.incumbent_choices() or self.menu.default_choices()
+            treatment = dict(best.get("menu_choices") or {})
+            if not treatment or treatment == control:
+                return
+            spec = XS.ExperimentSpec(
+                hypothesis=(f"Node {best.get('iteration_id')} scored "
+                            f"{best['metrics']['primary']:.5f} on ONE seed "
+                            f"({delta / BASELINE_SEED_STD:+.2f} sigma over "
+                            f"baseline). Does it hold against the incumbent "
+                            f"when both arms run the same seeds?"),
+                experiment_type=XS.MULTI_SEED_REPLICATION,
+                control=control, treatment=treatment,
+                seeds=self._confirm_seeds,
+                parent_node=best.get("iteration_id"),
+                expected_primary_effect=delta,
+                runtime_budget_s=self.exec_timeout_s)
+            self.queue_confirmation(spec)
+            events.append({"type": "confirmation_queued",
+                           "parent_node": best.get("iteration_id"),
+                           "n_runs": spec.n_runs, "seeds": list(spec.seeds)})
+            print(f"  [confirm] queued paired confirmation of node "
+                  f"{best.get('iteration_id')} ({spec.n_runs} runs)", flush=True)
+        except Exception as e:                      # noqa: BLE001
+            events.append({"type": "confirmation_queue_failed",
+                           "error": f"{type(e).__name__}: {str(e)[:200]}"})
+
+    def queue_confirmation(self, spec) -> None:
+        """Schedule a paired multi-seed experiment for the next iteration."""
+        self._confirmation_queue.append(spec)
+
+    def _dequeue_confirmation(self):
+        q = getattr(self, "_confirmation_queue", None)
+        if not q:
+            return None
+        # Only run one if the remaining budget can actually pay for it: a
+        # confirmation is n_runs training runs, and starting one it cannot
+        # finish would spend the budget and answer nothing.
+        spec = q[0]
+        left = max(0, self.max_iterations
+                   - sum(1 for n in self.tree.nodes if budget.consumes_budget(n)))
+        if left < 1:
+            return None
+        return q.pop(0)
+
+    def _run_confirmation_node(self, it: int, spec) -> Node:
+        """Execute a paired spec and journal it as a first-class node."""
+        from . import confirm as CF
+        from . import experiment_spec as XS
+        from . import feature_store as FS
+
+        events = [{"type": "research_category", "category": "confirmation",
+                   "reason": "executing a queued paired multi-seed experiment"},
+                  {"type": "experiment_spec", "spec": spec.to_dict()}]
+        print(f"[iter {it}] action=confirm — paired {spec.experiment_type}, "
+              f"{spec.n_runs} runs over seeds {list(spec.seeds)}", flush=True)
+        print(spec.render(), flush=True)
+
+        t0 = now()
+        work = os.path.join(self.log_dir, "confirm", f"node_{it:03d}")
+        try:
+            out = CF.run_spec(spec, work_dir=work, timeout_s=self.exec_timeout_s)
+        except Exception as e:                      # noqa: BLE001
+            events.append({"type": "execution_error", "failure_class": "unknown",
+                           "error_head": f"{type(e).__name__}: {str(e)[:300]}"})
+            node = Node(iteration_id=it, parent_id=spec.parent_node,
+                        action="confirm", menu_choices=spec.treatment,
+                        hypothesis=spec.hypothesis, status="error",
+                        metrics=None,
+                        error_trace=f"{type(e).__name__}: {e}", tokens_used=0,
+                        wall_clock_seconds=now() - t0, timestamp=time.time(),
+                        code_path="", events=events,
+                        research_category="confirmation",
+                        implementation_path="A")
+            self.tree.add(node)
+            return node
+
+        res, ev = out["paired"], out["evidence"]
+        events.append({"type": "paired_result", "result": res,
+                       "evidence": {k: v for k, v in ev.items() if k != "paired"},
+                       "promote": out["promote"]})
+
+        # The treatment arm's own mean is the node's score. It is a real
+        # measurement of the treatment, and unlike a single draw it is an
+        # average over seeds -- so it is comparable to other nodes without
+        # overstating what was learned.
+        metrics = None
+        if res.get("usable"):
+            tre = out["treatment"]
+            seeds = res["seeds"]
+            metrics = {k: sum(tre[s][k] for s in seeds) / len(seeds)
+                       for k in ("GAUC", "nDCG@5", "primary")}
+
+        if spec.feature_lineage.get("sha"):
+            FS.update_outcome(spec.feature_lineage["sha"], res, ev,
+                              runtime_s=now() - t0, config=spec.treatment)
+
+        node = Node(iteration_id=it, parent_id=spec.parent_node,
+                    action="confirm", menu_choices=spec.treatment,
+                    hypothesis=spec.hypothesis,
+                    status="success" if metrics else "error",
+                    metrics=metrics,
+                    error_trace=None if metrics else "confirmation produced too "
+                                                     "few completed seeds to pair",
+                    tokens_used=0, wall_clock_seconds=now() - t0,
+                    timestamp=time.time(), code_path="", events=events,
+                    expected_effect=f"{spec.expected_primary_effect:+.5f}",
+                    decide_reason="queued paired confirmation",
+                    research_category="confirmation", implementation_path="A")
+        self.tree.add(node)
+        print(f"[iter {it}] CONFIRM {ev['state']}"
+              + (f" primary {metrics['primary']:.5f}" if metrics else "")
+              + f" | promote={out['promote']}", flush=True)
+        return node
 
     def _incumbent_valid_scores(self):
         """Rank-averaged validation scores of the submitted ensemble, if built.
@@ -489,6 +686,17 @@ class AgentLoop:
     # ---------- one iteration ----------
     def iterate(self) -> Node:
         it = self.tree.next_id()
+
+        # A queued paired confirmation outranks anything the planner would pick.
+        # This is the only code path that can produce more than one seed, and
+        # without it the agent can form a hypothesis, measure it, correctly
+        # report that one seed proves nothing, and then do nothing about it
+        # forever. Every one of the 37 nodes recorded before this existed ran
+        # seed 0.
+        queued = self._dequeue_confirmation()
+        if queued is not None:
+            return self._run_confirmation_node(it, queued)
+
         action, target, reason = decide_action(self.tree,
                                                draft_count=self.draft_count)
         # a node that failed before any code existed (LLM failure) can't be debugged

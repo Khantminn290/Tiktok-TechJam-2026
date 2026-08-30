@@ -3039,6 +3039,186 @@ def test_policy_replay():
           "metrics" not in src.split("# --------------------------------------------------------------- policies ---")[1].split("def replay")[0])
 
 
+def test_experiment_spec():
+    """An experiment the system executes, not a paragraph it writes."""
+    print("\n[experiment spec]")
+    from agent import evidence as EV
+    from agent import experiment_spec as XS
+
+    spec = XS.ExperimentSpec(
+        hypothesis="h", experiment_type=XS.MULTI_SEED_REPLICATION,
+        control={"model": "fm_numpy"}, treatment={"model": "deepfm_mlp"},
+        seeds=(0, 1, 2))
+    check("a paired spec knows it is paired", spec.is_paired)
+    check("it costs both arms at every seed", spec.n_runs == 6)
+    check("an unset acceptance threshold defaults to half the noise floor",
+          abs(spec.acceptance_threshold - EV.NOISE / 2) < 1e-12)
+
+    try:
+        XS.ExperimentSpec(hypothesis="h",
+                          experiment_type=XS.MULTI_SEED_REPLICATION,
+                          control={"a": 1}, treatment={"a": 2}, seeds=(0, 1))
+        thin = True
+    except ValueError:
+        thin = False
+    check("a confirmatory spec refuses to run on two seeds", not thin,
+          "two points estimate spread from a single difference")
+
+    try:
+        XS.ExperimentSpec(hypothesis="h", experiment_type="nonsense",
+                          control={}, treatment={})
+        bad = True
+    except ValueError:
+        bad = False
+    check("an unknown experiment type is rejected", not bad)
+
+    # Pairing arithmetic, including the case that actually happened.
+    ctrl = {0: {"primary": 0.60497}, 1: {"primary": 0.60393}, 2: {"primary": 0.60449}}
+    treat = {0: {"primary": 0.60499}, 1: {"primary": 0.60393}, 2: {"primary": 0.60450}}
+    res = XS.paired_result(ctrl, treat)
+    check("paired result uses per-seed differences",
+          res["usable"] and res["n"] == 3 and res["per_seed"][0] == 2e-05)
+    ev = XS.grade(spec, res)
+    # These are the real numbers from a live 6-run paired confirmation (rounded
+    # to the 5dp the metrics are reported at, which is why one seed's delta is
+    # 0.0 here and the live run counted 3/3 rather than 2/3).
+    check("a tiny effect is REJECTED even when t>2 and most seeds 'win'",
+          ev["state"] == EV.REJECTED and res["wins"] >= 2 and res["t"] > 2,
+          f"t={res['t']} delta={res['delta']} wins={res['wins']} -> {ev['state']}")
+    check("...and is therefore not promoted", not ev["promote"],
+          "significance is not magnitude")
+
+    big_t = {s: {"primary": ctrl[s]["primary"] + 0.0015} for s in ctrl}
+    ev2 = XS.grade(spec, XS.paired_result(ctrl, big_t))
+    check("a real, repeatable effect does reach CONFIRMED and promotes",
+          ev2["state"] == EV.CONFIRMED and ev2["promote"])
+
+    # Arms must be compared on the SAME seeds.
+    res3 = XS.paired_result({0: {"primary": 0.6}}, {1: {"primary": 0.7}})
+    check("arms sharing no seeds are unusable, not a 0.1 improvement",
+          not res3["usable"])
+
+
+def test_feature_store():
+    """Path B discoveries must accumulate, not evaporate."""
+    print("\n[feature store]")
+    from agent import evidence as EV
+    from agent import feature_store as FS
+
+    with tempfile.TemporaryDirectory() as td:
+        store = os.path.join(td, "fs.jsonl")
+        src = "def build_features(splits, meta):\n    return {}\n"
+        feat = {"name": "f1", "mechanism": "m", "hypothesis": "h",
+                "source": src, "source_columns": ["a"], "leakage_check": "ok"}
+        probe = {"status": "PROMISING", "best_incremental_sigma": 1.4}
+        e = FS.record_discovery(feat, probe, node_id=3, path=store)
+        check("a discovery stores the exact source and its hash",
+              e["source"] == src and len(e["sha"]) == 16)
+        check("it starts at PROBED, not confirmed",
+              e["evidence_tier"] == EV.PROBED and e["training"] is None,
+              "a probe is not a training result")
+
+        # Renaming a mechanism must not make it look new.
+        renamed = dict(feat, name="f1_v2",
+                       source="# a comment\n" + src.replace("  ", " "))
+        check("the same mechanism under a new name is recognised",
+              FS.already_known(renamed["source"], path=store) is not None)
+        check("a genuinely different mechanism is not",
+              FS.already_known("def build_features(s, m):\n    return {'x': 1}\n",
+                               path=store) is None)
+
+        # The follow-up must carry the exact source, deterministically.
+        control = {"model": "fm_numpy", "loss": "bpr_pairwise"}
+        spec = FS.followup_spec(e, control, seeds=(0, 1, 2))
+        check("a cleared probe produces a paired follow-up automatically",
+              spec.experiment_type.endswith("confirmation") and spec.is_paired)
+        check("the treatment carries the EXACT stored source",
+              spec.treatment["feature_source"] == src,
+              "retraining a paraphrase would measure a different feature")
+        check("the control is the incumbent, unmodified",
+              "feature_source" not in spec.control)
+        check("the follow-up records the feature lineage",
+              spec.feature_lineage["sha"] == e["sha"])
+
+        # Variations only after CONFIRMED.
+        check("no variation family is spawned from an unconfirmed feature",
+              FS.variations(e, control) == [],
+              "generating follow-ups around noise wastes the budget")
+        e["evidence_tier"] = EV.CONFIRMED
+        e["suggested_generalizations"] = ["wider window"]
+        check("variations appear once it is confirmed",
+              len(FS.variations(e, control)) == 1)
+
+        # Outcomes attach back to the stored feature.
+        paired = {"usable": True, "delta": 0.0012, "sd": 0.0003, "n": 3}
+        FS.update_outcome(e["sha"], paired, {"state": EV.CONFIRMED},
+                          runtime_s=120.0, config=control, path=store)
+        back = [x for x in FS.load(store) if x["sha"] == e["sha"]][0]
+        check("the measured training outcome is written back",
+              back["primary_change"] == 0.0012
+              and back["evidence_tier"] == EV.CONFIRMED)
+        check("a confirmed feature records the config it worked in",
+              back["compatible_configs"] == [control])
+
+
+def test_allocator():
+    """A transparent utility, not a black box."""
+    print("\n[allocator]")
+    from agent import allocator as AL
+    from agent import experiment_spec as XS
+
+    def node(i, status="success", primary=None, cat="exploration", path="A",
+             action="draft"):
+        return {"iteration_id": i, "status": status,
+                "metrics": {"primary": primary} if primary else None,
+                "research_category": cat, "implementation_path": path,
+                "action": action, "events": []}
+
+    # The bug this caught on first run: the first scored node was credited with
+    # its whole score as a "gain", making its family look infinitely good.
+    st = AL.observe([node(0, primary=0.604)])
+    check("the first scored node is not credited with a 755-sigma gain",
+          st["per_family"][XS.EXPLORATION]["gains"] == [],
+          "gain means improvement to the running best, undefined for the first")
+    st2 = AL.observe([node(0, primary=0.604), node(1, primary=0.605)])
+    check("a genuine improvement IS recorded as a gain",
+          len(st2["per_family"][XS.EXPLORATION]["gains"]) == 1)
+
+    nodes = [node(0, primary=0.6040), node(1, "error"),
+             node(2, "error", path="B"), node(3, primary=0.6041)]
+    a = AL.allocate(nodes, budget_left=3)
+    check("every family is scored", len(a["ranked"]) == len(AL.FAMILIES))
+    check("utilities are ordered", all(
+        a["ranked"][i]["utility"] >= a["ranked"][i + 1]["utility"]
+        for i in range(len(a["ranked"]) - 1)))
+    top = a["ranked"][0]
+    check("the winning family exposes every utility term",
+          all(k in top for k in ("expected_gain_sigma", "p_success",
+                                 "generalization_confidence", "runtime_cost",
+                                 "failure_cost", "redundancy_penalty")),
+          "an allocation nobody can audit is not transparent")
+
+    check("with nothing confirmed, confirmation is preferred",
+          a["choice"] == XS.MULTI_SEED_REPLICATION,
+          "no result can be acted on until something is confirmed")
+
+    # Success rates must be shrunk, not taken from one attempt.
+    one_win = AL.score_family(XS.PATH_B_DISCOVERY,
+                              AL.observe([node(0, primary=0.61, path="B")]), 5)
+    check("one success does not become a 100% success rate",
+          one_win["p_success"] < 0.6, f"got {one_win['p_success']}")
+
+    # Repeatedly running a family that yields nothing must be penalised.
+    barren = [node(i, primary=0.6040) for i in range(4)]
+    r = AL.score_family(XS.EXPLORATION, AL.observe(barren), 5)
+    check("a family re-run with no gains accrues a redundancy penalty",
+          r["redundancy_penalty"] > 0)
+
+    txt = AL.render(a)
+    check("the rendering states the choice and a reason",
+          "CHOICE:" in txt and "runner-up" in txt)
+
+
 def test_complete_cfg_is_obtainable():
     """The failure mode the post-architecture evaluation exposed.
 
@@ -3768,6 +3948,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_experiment_spec, test_feature_store, test_allocator,
               test_complete_cfg_is_obtainable,
               test_experience_write_is_not_fatal, test_run_metrics_and_demo,
               test_capability_contract, test_preflight, test_budget_accounting,
