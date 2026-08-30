@@ -3109,9 +3109,11 @@ def test_streamlit_dashboard_executes():
     import subprocess as _sp
     r = _sp.run([sys.executable, "-c", stub], capture_output=True,
                 text=True, cwd=_ROOT, timeout=300)
-    # A run costs money and holds the dataset lock. Starting one must take two
-    # deliberate actions, so nothing incidental -- a rerun, a stray truthy
-    # widget -- can launch a billed run.
+    # A run costs money and holds the dataset lock for its duration, and a
+    # dashboard is exactly the kind of surface where one stray click starts one.
+    # Two deliberate actions to launch, and a timestamped launch log so it is
+    # always clear who started what -- useful whenever more than one person (or
+    # process) can drive the agent.
     run_tab = src.split("Start a run")[-1]
     check("starting a run requires an explicit arming checkbox",
           "arm_run" in run_tab and "armed" in run_tab)
@@ -3119,7 +3121,7 @@ def test_streamlit_dashboard_executes():
           "if go and armed and not running:" in run_tab)
     check("...and every launch is written to a log with a timestamp",
           "launched from the dashboard at" in run_tab,
-          "an unattributable run is the thing to avoid")
+          "so it is always clear who started a given run")
 
     check("the dashboard executes top to bottom without error",
           r.stdout.strip().endswith("OK"),
