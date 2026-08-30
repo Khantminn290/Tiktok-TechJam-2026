@@ -62,10 +62,17 @@ STAGES = (SYNTAX, IMPORTS, CAPABILITY, CALL_ARITY, RETURN_SHAPE,
 
 # Modules generated code may import: the contract's own list, plus the ordinary
 # scientific-Python surface any experiment needs.
+# Generous on purpose. This list exists to catch "you imported something that
+# does not exist in the experiment environment", NOT to sandbox the script --
+# the data boundary is enforced with file permissions, not with an import list.
+# A false rejection here costs the agent an attempt for nothing, which is
+# exactly what happened when a script was rejected for importing `traceback`.
 _STDLIB_OK = {
-    "argparse", "json", "os", "sys", "math", "time", "random", "itertools",
-    "collections", "statistics", "dataclasses", "functools", "typing", "re",
-    "copy", "warnings", "pathlib", "heapq", "bisect", "hashlib",
+    "abc", "argparse", "bisect", "collections", "contextlib", "copy", "csv",
+    "dataclasses", "datetime", "decimal", "enum", "functools", "gzip", "hashlib",
+    "heapq", "io", "itertools", "json", "logging", "math", "operator", "os",
+    "pathlib", "pprint", "random", "re", "shutil", "statistics", "string", "sys",
+    "textwrap", "time", "traceback", "typing", "uuid", "warnings",
 }
 _THIRD_PARTY_OK = {"numpy", "np", "scipy", "pandas"}
 
@@ -347,6 +354,55 @@ def check_return_shapes(tree: ast.AST) -> list:
     return issues
 
 
+def _is_capture_expr(node: ast.AST) -> bool:
+    """Does this expression evaluate to the raw capture list?"""
+    if isinstance(node, ast.Subscript):
+        sl = node.slice
+        if isinstance(sl, ast.Constant) and sl.value == "capture_epoch_scores":
+            return True
+    if isinstance(node, ast.Name) and "capture" in node.id.lower():
+        return True
+    if isinstance(node, ast.Attribute) and "capture" in node.attr.lower():
+        return True
+    return False
+
+
+def check_capture_misuse(tree: ast.AST) -> list:
+    """Passing the raw capture list straight into selection_rule_test.
+
+    Observed live, and it costs a full training run every time: the capture
+    payload is a LIST of (epoch, primary, scores) tuples, while
+    selection_rule_test wants a 3-D (seeds, epochs, rows) array. Handing one to
+    the other raises deep inside numpy --
+
+        ValueError: setting an array element with a sequence. The requested
+        array has an inhomogeneous shape after 2 dimensions
+
+    -- which is a long way from the actual mistake. `capture_selection_rule_test`
+    exists precisely to bridge the two, so this points at it rather than asking
+    the agent to reshape by hand.
+    """
+    issues = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if _called_capability(node) != "selection_rule_test":
+            continue
+        if not node.args or not _is_capture_expr(node.args[0]):
+            continue
+        issues.append(Issue(
+            RETURN_SHAPE,
+            "selection_rule_test's first argument must be a 3-D array of shape "
+            "(seeds, epochs, rows); this passes the raw capture list, which is "
+            "a list of (epoch, valid_primary, scores) tuples",
+            node.lineno,
+            "Use the adapter that already does this conversion:\n"
+            "    from research_tools import capture_selection_rule_test\n"
+            "    out = capture_selection_rule_test("
+            "cfg['capture_epoch_scores'], users, labels)"))
+    return issues
+
+
 def _iterates_capture(node: ast.AST) -> bool:
     """Is this iterating cfg['capture_epoch_scores'] (or a plain alias)?"""
     if isinstance(node, ast.Subscript):
@@ -495,7 +551,7 @@ def preflight(code_path: str, menu_choices: dict | None = None, menu=None,
         elif stage == CALL_ARITY:
             issues = check_call_arity(tree)
         elif stage == RETURN_SHAPE:
-            issues = check_return_shapes(tree)
+            issues = check_return_shapes(tree) + check_capture_misuse(tree)
         elif stage == CONFIG:
             issues = check_config(menu_choices, menu)
         elif stage == LEAKAGE:

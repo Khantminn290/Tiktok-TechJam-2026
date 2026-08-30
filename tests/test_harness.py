@@ -3617,6 +3617,18 @@ def test_return_shape_contract():
                          "from research_tools import incumbent_cfg\n" + body)
             return p
 
+        # A false rejection costs the agent an attempt for nothing. Observed
+        # live: a script was rejected for importing `traceback`, which is
+        # harmless stdlib. The allow-list exists to catch imports that do not
+        # EXIST in the experiment environment, not to sandbox the script -- the
+        # data boundary is enforced with file permissions.
+        for mod in ("traceback", "logging", "contextlib", "io", "datetime",
+                    "csv", "textwrap", "enum"):
+            r = P.preflight(write(f"imp_{mod}.py", f"import {mod}\n"))
+            check(f"importing stdlib `{mod}` is not rejected",
+                  r["failed_stage"] != P.IMPORTS,
+                  json.dumps(r["issues"])[:110])
+
         # FAILURE 1: dict destructured as a tuple.
         r = P.preflight(write("a.py",
                               "cfg, enc = incumbent_cfg(s, m)\n"
@@ -3643,6 +3655,26 @@ def test_return_shape_contract():
         check("...and says where test predictions actually live",
               "scores_test" in json.dumps(r["issues"]),
               "rejecting without redirecting just wastes the next attempt too")
+
+        # Passing the raw capture list into selection_rule_test. Observed live:
+        # it costs a full training run and then raises deep inside numpy, a long
+        # way from the actual mistake.
+        r = P.preflight(write("cap.py",
+                              "from research_tools import selection_rule_test\n"
+                              "out = selection_rule_test("
+                              "cfg['capture_epoch_scores'], u, l, rules)\n"))
+        check("passing the raw capture list is caught before training",
+              not r["ok"] and r["failed_stage"] == P.RETURN_SHAPE)
+        check("...and it points at the adapter that does the conversion",
+              "capture_selection_rule_test" in r["feedback"],
+              "telling it the shape is wrong without naming the fix wastes the "
+              "next attempt too")
+        r = P.preflight(write("cap_ok.py",
+                              "from research_tools import capture_selection_rule_test\n"
+                              "out = capture_selection_rule_test("
+                              "cfg['capture_epoch_scores'], u, l)\n"))
+        check("the adapter itself is not flagged",
+              r["failed_stage"] != P.RETURN_SHAPE)
 
         # A correctly-shaped tuple return must NOT be flagged.
         r = P.preflight(write("c.py", "cfg, enc = incumbent_cfg(s, m)\n"))
