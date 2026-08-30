@@ -221,6 +221,12 @@ class AgentLoop:
                                       objective=objective, frontier=fr)
             winner, ranked = cand_mod.select(cands)
             trace = cand_mod.render_trace(winner, ranked, objective, st, left)
+            if isinstance(obj.get("inquiry"), dict):
+                events.append({"type": "inquiry", **{
+                    k: str(v)[:400] for k, v in obj["inquiry"].items()}})
+                _q = obj["inquiry"].get("question", "")
+                if _q:
+                    print(f"  [inquiry] {str(_q)[:100]}", flush=True)
             events.append({"type": "candidate_selection",
                            "n_candidates": len(ranked),
                            "n_path_b": sum(1 for c in ranked if c.path == "B"),

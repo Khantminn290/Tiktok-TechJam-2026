@@ -2138,6 +2138,31 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_inquiry_layer():
+    """Observation -> question -> competing hypotheses -> discriminating
+    measurement. Added because a clean-run trace showed the agent forming a
+    good question and then being unable to act on it."""
+    print("\n[observation -> question layer]")
+    from agent.prompts import CANDIDATE_SECTION as C
+
+    for field in ("observation", "question", "hypotheses",
+                  "discriminating_measurement", "resolves_uncertainty"):
+        check(f"the inquiry schema requires {field}", field in C)
+    check("competing explanations are required, not one",
+          "at least two competing hypotheses" in C)
+    check("it prioritises information value over expected score",
+          "most change what you do next" in C
+          and "NOT always the experiment with the" in C)
+    check("a question that changes nothing is called out as the wrong question",
+          "if nothing, this is the wrong question" in C)
+    check("the inquiry section leaks no teacher answer",
+          not any(w in C.lower() for w in ("checkpoint", "snapshot", "0.87")))
+
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the inquiry is journalled so the trajectory is auditable",
+          '"type": "inquiry"' in lsrc)
+
+
 def test_diagnostics_are_invocable():
     """The clean autonomy test failed for a diagnosable reason: the
     capabilities were DESCRIBED in the prompt but there was no way to CALL
@@ -2148,7 +2173,18 @@ def test_diagnostics_are_invocable():
 
     check("diagnostics are registered as callable tools",
           {"training_dynamics", "hardcoded_constants", "selection_pressure",
-           "audit_comparison"} <= set(I.DIAGNOSTIC_TOOLS))
+           "audit_comparison", "selection_rule_test",
+           "free_recombination"} <= set(I.DIAGNOSTIC_TOOLS))
+    # A clean-run trace showed the agent naming selection_rule_test as the
+    # measurement it wanted and being unable to call it. Nothing described to
+    # the agent may be uncallable.
+    import re as _re
+    from agent import pipeline_lab as _PL
+    described = set(_re.findall(r"- (\w+)\(",
+                                _PL.render_for_prompt() + I.describe_diagnostics()))
+    check("everything described to the agent is actually callable",
+          not (described - set(I.DIAGNOSTIC_TOOLS)),
+          f"uncallable: {sorted(described - set(I.DIAGNOSTIC_TOOLS))}")
     check("they are advertised to the agent alongside the data tools",
           "training_dynamics" in I.describe_diagnostics()
           and "EXPENSIVE" in I.describe_diagnostics())
@@ -3007,7 +3043,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
-              test_diagnostics_are_invocable,
+              test_inquiry_layer, test_diagnostics_are_invocable,
               test_validity_auditor, test_pipeline_lab,
               test_feature_discovery,
               test_mechanism_audit, test_residual_screen_reporting,

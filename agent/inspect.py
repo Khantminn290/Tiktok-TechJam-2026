@@ -141,13 +141,97 @@ def _tool_training_dynamics(max_epochs: int = 40, **_kw):
             "curve_tail": (s.get("curve") or [])[-8:]}
 
 
+def _tool_selection_rule_test(max_epochs: int = 40, **_kw):
+    """EXPENSIVE: does the way we CHOOSE a checkpoint generalise?
+
+    Registered because a clean-run trace showed the agent forming exactly this
+    question -- "the pipeline chooses the best checkpoint using the same
+    validation users it reports on" -- naming this tool as the discriminating
+    measurement, and then being unable to call it. It fell back to an ordinary
+    training run, which cannot answer the question. The reasoning was sound;
+    the plumbing was missing.
+
+    Compares GENERAL choosing rules. Which rule wins is measured here, not
+    assumed.
+    """
+    import numpy as np
+    from .pipeline_lab import selection_rule_test
+    from .ensemble import load_valid_targets
+    from agent import research_run as RR
+    import train_lib
+
+    splits, meta = train_lib.load_cache()
+    base, enc = RR.incumbent_cfg(splits, meta)
+    cfg = dict(base)
+    cfg.update(seed=0, epochs=int(max_epochs), patience=int(max_epochs))
+    cap: list = []
+    cfg["capture_epoch_scores"] = cap
+    train_lib.train_numpy_fm(cfg, enc, splits, meta, lambda *a, **k: None)
+    if len(cap) < 5:
+        return {"error": "not enough epochs captured"}
+    E = np.asarray([[sv for _e, _p, sv in cap]])          # 1 seed x epochs x rows
+    users, labels = load_valid_targets()
+
+    def _rank(x):
+        o = np.argsort(x, kind="stable")
+        r = np.empty(len(x), dtype=np.float64)
+        r[o] = np.arange(len(x), dtype=np.float64)
+        return r / max(1, len(x) - 1)
+
+    rules = {
+        "argmax": lambda p, e: e[int(np.argmax(p))],
+        "avg_top3": lambda p, e: np.mean([_rank(e[i]) for i in np.argsort(-p)[:3]], axis=0),
+        "avg_top5": lambda p, e: np.mean([_rank(e[i]) for i in np.argsort(-p)[:5]], axis=0),
+        "median_top5": lambda p, e: np.median([_rank(e[i]) for i in np.argsort(-p)[:5]], axis=0),
+    }
+    r = selection_rule_test(E, users, labels, rules, n_splits=3)
+    return {"reference_rule": r["reference_rule"],
+            "held_out_evaluations": r["n_evaluations"],
+            "rules": r["rules"],
+            "note": "positive sigma means the rule generalises BETTER than the "
+                    "reference on users it was not chosen on"}
+
+
+def _tool_free_recombination(n_subsets: int = 12, **_kw):
+    """FREE: compare ways of combining the stored ensemble members.
+
+    No training. Resamples member subsets so a rule must win repeatedly.
+    """
+    import json as _json
+    import numpy as np
+    from .pipeline_lab import free_recombination
+    from .ensemble import load_valid_targets, rank_normalise
+
+    res_p = os.path.join(ROOT, "logs", "ensemble_results.json")
+    if not os.path.exists(res_p):
+        return {"error": "no stored ensemble to recombine"}
+    res = _json.load(open(res_p))
+    mdir = os.path.join(ROOT, res.get("members_dir", ""))
+    M = []
+    for i in res.get("seeds_used", []):
+        f = os.path.join(mdir, f"seed_{i:02d}", "scores_valid.npy")
+        if os.path.exists(f):
+            M.append(rank_normalise(np.load(f)))
+    if len(M) < 4:
+        return {"error": f"only {len(M)} members available"}
+    users, labels = load_valid_targets()
+    return free_recombination(
+        np.stack(M), users, labels,
+        {"mean": lambda m: m.mean(axis=0),
+         "median": lambda m: np.median(m, axis=0),
+         "trimmed_mean": lambda m: np.sort(m, axis=0)[1:-1].mean(axis=0)},
+        n_subsets=int(n_subsets), subset=min(8, len(M)))
+
+
 DIAGNOSTIC_TOOLS = {
+    "selection_rule_test": _tool_selection_rule_test,
+    "free_recombination": _tool_free_recombination,
     "hardcoded_constants": _tool_hardcoded_constants,
     "selection_pressure": _tool_selection_pressure,
     "audit_comparison": _tool_audit_comparison,
     "training_dynamics": _tool_training_dynamics,
 }
-EXPENSIVE_TOOLS = {"training_dynamics"}
+EXPENSIVE_TOOLS = {"training_dynamics", "selection_rule_test"}
 
 
 def describe_diagnostics() -> str:
@@ -159,6 +243,12 @@ def describe_diagnostics() -> str:
         "EXPENSIVE (~1 training run); allowed at most once per run.\n"
         "- hardcoded_constants(): modelling constants written into the training "
         "library that no menu option can reach, and whether you can set each.\n"
+        "- selection_rule_test(max_epochs=40): trains once capturing every "
+        "epoch, then compares CHOOSING rules by selecting on one half of the "
+        "validation users and scoring on the other. Use it whenever a choice is "
+        "being made using the same data it will be judged on. EXPENSIVE.\n"
+        "- free_recombination(n_subsets=12): compares ways of combining the "
+        "stored ensemble members by resampling subsets. FREE, no training.\n"
         "- selection_pressure(n): how large an apparent gain appears purely from "
         "picking the best of n noisy comparisons.\n"
         "- audit_comparison(delta, n_seeds, paired, n_candidates_compared, "
