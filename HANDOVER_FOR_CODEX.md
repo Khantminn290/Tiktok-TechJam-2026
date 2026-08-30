@@ -1,193 +1,225 @@
 # Handover for Codex
 
-Working branch: `opus-research-agent`. **Do not reset or checkout user changes.**
-**Do not overwrite the verified incumbent.** **Do not bypass the one-time
-hidden-test guard.**
+Working branch: `opus-research-agent`, pushed at `e36a492`.
 
-## Status at a glance
+**Safety constraints — please preserve these.**
+- Do not reset, checkout or revert user changes. `CODE_REVIEW.md` and
+  `QUICK_IMPLEMENTATION.md` are untracked on purpose; leave them.
+- Do not overwrite the verified incumbent (`logs/final_ensemble/`,
+  `logs/ensemble_results.json`).
+- Do not bypass the one-time hidden-test guard. No
+  `results/final_evaluation.lock` exists and the hidden test has never been read.
+- `main` is untouched (`b13d632`) and should stay that way.
+
+## Status
 
 | Phase | State | Evidence |
 |---|---|---|
-| 1 — Path B reliability | **complete** | 749→778 tests; live Path B smoke succeeded |
-| 2 — Competition profile | **complete** | `--competition`, resolved config printed, unsafe combos refused |
-| 3 — Budget accounting | **complete** | `budget.Ledger`, training-runs cap, confirmation affordability |
+| 1 — Path B reliability | **complete** | live Path B smoke succeeded; crash rate 71%→50% |
+| 2 — Competition profile | **complete** | `--competition`; resolved config printed; unsafe combos refused |
+| 3 — Budget accounting | **complete** | `budget.Ledger`; 11 nodes vs 16 training runs in the live run |
 | 4 — Clean benchmark run | **complete** | `logs/opus_research/phase4_competition_run.jsonl`, `RESULTS.md` |
-| 5 — Generated documentation | **complete** | `python3 -m agent.results_report` |
-| 6 — 1K/27K transfer | **blocked, plan written** | `TRANSFER_PLAN.md` — datasets not on disk |
+| 5 — Generated documentation | **complete** | `python3 -m agent.results_report --run-tests` |
+| 6 — 1K/27K transfer | **blocked, plan written** | `TRANSFER_PLAN.md`; datasets not on disk |
 
-### Phase 4 note — the run predates two commits
+Verified at handover time:
 
-The competition run was launched at `d7e97c1`. While it ran it exposed the next
-failure layer (`selection_rule_test() missing 1 required positional argument`),
-and the `call_arity` preflight stage that prevents it was committed *after* the
-run started. So the Phase 4 journal reflects `d7e97c1`, not HEAD. Re-run to see
-the arity stage in effect.
+- `python3 tests/test_harness.py` → **796 passed, 0 failed**
+- `python3 -m agent.verify_incumbent` → **0.60541** / 0.67212 / 0.53870, exact match
+- Hidden test: never evaluated
 
-- Tests: **796 passed, 0 failed** (`python3 tests/test_harness.py`)
-- Incumbent: **0.60541** verified (`python3 -m agent.verify_incumbent`)
-- Hidden test: untouched, no `results/final_evaluation.lock`
+**The submitted score did not improve.** It is still 0.60541. Read §"What did
+not work" before anything else.
 
-## Phase 1 — Path B reliability (complete)
+---
 
-**Problem.** Every Path B crash in the last real run was a call site
-disagreeing with a return shape: `train_numpy_fm` returns a **dict**, not a
-2-tuple; each `capture_epoch_scores` entry is a **3-tuple, valid split only**,
-with no per-epoch test vector. Four crashes cost 42s, 42s, 71s and 983s of
-compute to learn facts that were already written down.
+## Phase 1 — Path B reliability
+
+**Problem.** Every Path B crash in the previous run was a call site disagreeing
+with a return shape the contract already knew: `train_numpy_fm` returns a
+**dict**, not a 2-tuple; each `capture_epoch_scores` entry is a **3-tuple,
+valid split only**, with no per-epoch test vector. Those cost 42s, 42s, 71s and
+983s of training to discover facts already written down.
 
 **Fix.**
-- `Capability.returns` is now a machine-readable shape
-  (`{"kind": "dict"|"tuple"|"list_of_tuple", ...}`) plus a copy-pasteable
-  `example`. Prose was demonstrably not enough.
-- New preflight stage **`return_shape`** (stages are now syntax → imports →
-  capability → return_shape → config → leakage → smoke) rejects a call site that
-  destructures a dict, uses the wrong tuple arity, or unpacks a capture entry
-  with the wrong number of names — before any training.
-- `agent/capabilities.export_contract()` writes
-  `runtime/capability_contract.json`, so **generated code can read the contract
-  at runtime**: `from research_tools import contract, describe`. It carries no
-  data, labels or scores — a test asserts that.
-- The prompt now shows return shapes and worked examples for the two
-  capabilities that caused every failure.
+- `Capability.returns` and `Capability.params` are machine-readable
+  (`{"kind": "dict"|"tuple"|"list_of_tuple"}`, `{"required": [...]}`), plus a
+  copy-pasteable `example`. Prose was demonstrably not enough — the agent read
+  `"{'scores_valid': ...}"` and still destructured it.
+- Preflight stages are now: syntax → imports → capability → **call_arity** →
+  **return_shape** → config → leakage → smoke.
+- `runtime/capability_contract.json` is generated from the registry so
+  **generated code can read the contract at runtime**
+  (`from research_tools import contract, describe`). It carries no data, labels
+  or scores; a test asserts that.
 
-**Verified by a live run, not just tests:** a Path B script that captures the
-epoch curve and runs `selection_rule_test` on held-out users executed
-successfully — `ok: True`, primary **0.60347**, 36.8s, producing
-`metrics.json`, `scores_valid.npy`, `scores_test.npy` and
-`selection_rule_test.json` (`mean_top3` +0.00011, 0.14σ, `generalises: false`
-— correctly rejected).
+**Verified live:** a Path B script that captures its own epoch curve and runs
+`selection_rule_test` on held-out users executed successfully — `ok: True`,
+primary **0.60347**, 36.8s, producing `metrics.json`, both score vectors and
+`selection_rule_test.json` (`mean_top3` +0.00011, 0.14σ, `generalises: false`).
 
-## Phase 2 — Competition profile (complete)
+## Phase 2 — Competition profile
 
-`python3 run_agent.py --competition` enables research state, data tools,
-feature discovery, multi-candidate planning (4) and branching (3), with
-conservative caps: 12 iterations, **90 training runs**, 4h wall clock, $6 spend,
-1800s exec timeout.
+`python3 run_agent.py --competition` enables research state, data tools, feature
+discovery, 4-candidate planning and branching, with conservative caps: 12
+iterations, **90 training runs**, 4h wall clock, $6 spend, 1800s exec timeout.
 
-- Explicit CLI always wins; the resolved config is printed with the **source** of
-  every value (`[cli]` / `[profile]` / `[default]`).
+- Explicit CLI always wins; the resolved config prints the **source** of every
+  value (`[cli]` / `[profile]` / `[default]`).
 - Refused before any spend: `--competition` with `--allow-locked-options`,
   `--smoke`, or `--inject-error-at`; and a training-run cap below the iteration
   cap.
-- Default mode is byte-for-byte unchanged.
+- Default mode is unchanged.
 
-## Phase 3 — Budget accounting (complete)
+## Phase 3 — Budget accounting
 
-`agent.budget.Ledger` separates **outer-loop decisions** from **training
-executions**. The counting rule, applied everywhere and stated in reports
-(`budget.COUNTING_NOTE`):
+`agent.budget.Ledger` separates decisions from executions:
 
-> A paired 3-seed confirmation is **1 outer-loop node and 6 training
-> executions**. A preflight rejection is **neither** — no compute spent, no
-> decision consumed — though repeated rejections are capped.
+> An outer-loop node is one decision; a training execution is one model actually
+> trained. A paired 3-seed confirmation is **1 node and 6 training executions**.
+> A preflight rejection is **neither** — no compute spent, no decision consumed —
+> though repeated rejections are capped.
 
-- `_dequeue_confirmation` now checks `ledger.can_afford(spec.n_runs)`, not one
-  free iteration slot. Starting a 6-run confirmation with 2 runs left produces
-  unpaired arms and answers nothing, so it is deferred and stays queued.
-- An exhausted training-run budget stops the run with an explicit reason.
-- Crashed training executions are counted, not forgiven.
-- `final_summary` carries the full ledger plus the counting note.
+`_dequeue_confirmation` checks `ledger.can_afford(spec.n_runs)`, not one free
+iteration slot: a 6-run confirmation started with 2 runs left produces unpaired
+arms and answers nothing, so it defers and stays queued. An exhausted
+training-run budget stops the run with a reason. Crashed executions are counted,
+not forgiven.
 
-## Phase 5 — Generated documentation (complete)
+## Phase 4 — Clean competition run
 
-`python3 -m agent.results_report [--run-tests]` writes `RESULTS.md` from
-artifacts, never from memory: the incumbent is **recomputed** at generation
-time, the convergence threshold is read from `agent.loop`, the metric is read
-from `kuairand-starter-kit/evaluate.py`, and run counters come from the journal
-and the budget ledger.
-
-Every figure is tiered **VERIFIED / OBSERVED / OPEN** and the tiers are not
-blurred: an unexecuted harness reports OPEN rather than assuming it passes, and
-generating while a run holds the data lock degrades to OPEN rather than
-reporting the quoted incumbent as though it had been verified.
-
-Evaluator note included in the output: where the brief's prose and the starter
-kit disagree, `evaluate.py` scores the submission, so `long_view` / GAUC /
-nDCG@5 / their mean is authoritative. Benchmark code is untouched.
-
-Corrected one stale README claim the generated evidence disproves (convergence
-stated as a hard-coded 0.002; it is calibrated to 0.00048 = 0.60σ).
-
-## Phase 6 — Transfer (blocked)
-
-Only KuaiRand-Pure is on disk; 1K and 27K are not mounted anywhere. Per the
-brief, `TRANSFER_PLAN.md` is a ready-to-run design, **not** a result. The
-critical constraint recorded there: Pure's valid/test come from the
-2022-04-22..05-08 window, so auxiliary pretraining must be cut at
-`date <= 2022-04-21` or the model sees the interactions it is scored on.
-
-## Phase 4 — Clean competition run (complete)
-
-Ran `--competition --fresh --wall-clock-limit-h 2.0`. Converged legitimately at
-iteration 10: the running best gained **0.00000** over 3 scored iterations, well
-under the calibrated ε.
+`--competition --fresh --wall-clock-limit-h 2.0`. Converged legitimately at
+iteration 10: the running best gained **0.00000** over 3 scored iterations.
 
 | | |
 |---|---|
 | best single run | **0.60497** (= the incumbent's own single-seed level) |
 | outer-loop nodes / iterations consumed | 11 / 11 |
-| **training runs used** | **16 of 90** (the confirmation was 6 of them) |
+| **training runs used** | **16 of 90** (the confirmation was 6) |
 | experiments completed / crashed | 8 / 3 |
-| **Path B crash rate** | **50%** (was 71% pre-architecture, 92% in the prior run) |
+| **Path B crash rate** | **50%** (71% pre-architecture, 92% prior run) |
 | orchestration-only misuse | 0 |
-| paired confirmations run / promoted | 1 / **0** |
+| paired confirmations run / promoted | 1 / **0** (UNCONFIRMED, t=1.86) |
 | automatic repairs attempted / recovered | 2 / **1** |
 | **manual interventions** | **0** |
 | LLM tokens / spend | 237,246 / **$1.57** of $6.00 |
 | training wall-clock | 885s, cpu |
 
-Behaviour worth noting: the profile's `min_branching_iterations` got the policy
-out of the drafting phase for the first time in this project's history — nodes
-7–10 were `improve` actions extending the best node, and node 7 reached 0.60497.
-The confirmation returned UNCONFIRMED (t=1.86) and correctly promoted nothing.
+The profile's `min_branching_iterations` got the policy out of the drafting
+phase for the first time in this project — nodes 7–10 were `improve` actions
+extending the best node.
 
-**No score improvement.** 0.60497 is a single seed and equals the incumbent's
-single-seed value; the submitted 16-seed ensemble remains 0.60541.
+**Caveat: this run predates two commits.** It launched at `d7e97c1`, then hit
+`selection_rule_test() missing 1 required positional argument` **twice**. The
+`call_arity` stage that prevents it was committed *after* the run started, so
+the journal cannot show it working. That recurrence is the evidence the stage
+targets a real class rather than a one-off.
+
+## Phase 5 — Generated documentation
+
+`python3 -m agent.results_report [--run-tests]` writes `RESULTS.md` from
+artifacts: incumbent **recomputed** at generation time, convergence threshold
+read from `agent.loop`, metric read from `kuairand-starter-kit/evaluate.py`,
+counters from the journal and ledger.
+
+Figures are tiered **VERIFIED / OBSERVED / OPEN** and the tiers are not blurred:
+an unexecuted harness reports OPEN rather than assuming it passes, and
+generating while a run holds the data lock degrades to OPEN rather than
+reporting the quoted incumbent as though verified.
+
+Evaluator note in the output: where the brief's prose and the starter kit
+disagree, `evaluate.py` scores the submission, so `long_view` / GAUC / nDCG@5 /
+their mean is authoritative. Benchmark code untouched.
+
+Corrected the one stale README claim the evidence disproves (convergence stated
+as a hard-coded 0.002; it is calibrated to 0.00048 = 0.60σ).
+
+## Phase 6 — Transfer (blocked)
+
+Only KuaiRand-Pure is on disk; 1K and 27K are not mounted anywhere
+(`find / -maxdepth 4 -iname "KuaiRand-1K" -o -iname "KuaiRand-27K"` → nothing).
+`TRANSFER_PLAN.md` is a ready-to-run design, **not a result**; no transfer
+number exists and none is claimed.
+
+Critical constraint recorded there: Pure's valid/test come from the
+2022-04-22..05-08 window, and 1K/27K cover the same period and largely the same
+catalogue, so auxiliary pretraining must be cut at `date <= 2022-04-21`. A
+data-limited model — which the learning curve says this one is (+5.12σ on the
+last doubling) — will absorb that leakage and report a large fake gain.
+
+---
+
+## What did not work
+
+1. **No score improvement.** Priority 1 of the brief. The best run was 0.60497,
+   which is a single seed and equals the incumbent's own single-seed value. The
+   submitted 16-seed ensemble is still 0.60541. Two live paired confirmations
+   both correctly declined to promote (UNCONFIRMED at t=1.86 and t=2.25).
+2. **Path B feature discovery has still never fired end to end.** 6 REJECTED,
+   2 PROBED, 0 PROMISING — no proposed feature has ever cleared the probe, so
+   the discovery→confirmation pipeline remains structurally verified but
+   untriggered. The Path B *execution* path is now demonstrated separately.
+3. **The allocator's priors are hand-set.** With ~12 iterations a family is
+   observed 1–3 times, so early allocations are mostly prior. Data overrides via
+   a Beta posterior, but slowly at this scale.
+4. **Preflight is static.** It now catches missing functions, wrong arity and
+   wrong return shapes. It cannot catch a semantically wrong but well-formed
+   call — the remaining Path B crash in Phase 4 was
+   `TypeError: 'method' object is not subscriptable`.
 
 ## Files changed
 
 ```
-agent/capabilities.py      returns/example fields, export_contract, shapes in prompt
-agent/preflight.py         new return_shape stage
-agent/profiles.py          NEW — competition profile, resolution, validation
-agent/budget.py            NEW Ledger + COUNTING_NOTE
-agent/loop.py              ledger wiring, affordability check, training accounting
-run_agent.py               --competition, --max-training-runs
-runtime/research_tools.py  contract()/describe() for generated code
-runtime/capability_contract.json  NEW — generated, machine-readable
-tests/test_harness.py      +51 tests across the three phases
+agent/capabilities.py             returns/params/example, export_contract, shapes in prompt
+agent/preflight.py                new call_arity + return_shape stages
+agent/profiles.py            NEW  competition profile: resolve, validate, render
+agent/budget.py                   Ledger + COUNTING_NOTE
+agent/loop.py                     ledger wiring, affordability check, training accounting
+agent/results_report.py      NEW  generated RESULTS.md from artifacts
+run_agent.py                      --competition, --max-training-runs
+runtime/research_tools.py         contract()/describe() readable by generated code
+runtime/capability_contract.json  NEW, generated
+tests/test_harness.py             +69 tests across the phases
+README.md                         corrected stale convergence claim
+RESULTS.md                   NEW  generated
+TRANSFER_PLAN.md             NEW  Phase 6 plan (blocked)
+logs/opus_research/phase4_*       run journal + metrics
 ```
 
-## Commands run
+## Commands run, with outcomes
 
-- `python3 tests/test_harness.py` → **778 passed, 0 failed**
-- `python3 -m agent.verify_incumbent` → 0.60541 / 0.67212 / 0.53870, exact match
-- `python3 -m agent.preflight <script>` → catches both historic failures
-- Live Path B smoke via `agent.executor.run_solution` → `ok: True`, 0.60347
+| command | outcome |
+|---|---|
+| `python3 tests/test_harness.py` | **796 passed, 0 failed** |
+| `python3 -m agent.verify_incumbent` | 0.60541 / 0.67212 / 0.53870, exact match |
+| `python3 -m agent.preflight <script>` | catches unpack, capture-arity and missing-arg failures |
+| Path B smoke via `executor.run_solution` | `ok: True`, primary 0.60347, 36.8s |
+| `run_agent.py --competition --fresh` | converged at iter 10; table above |
+| `python3 -m agent.results_report --run-tests` | wrote `RESULTS.md`, 796 VERIFIED |
 
-## Current action / next concrete step
+## Next concrete action
 
-Phase 4: a clean benchmark run under the competition profile.
+Re-run the competition profile **at HEAD**:
 
+```bash
+python3 run_agent.py --competition --fresh --wall-clock-limit-h 2.0
 ```
-python3 run_agent.py --competition --fresh --wall-clock-limit-h <fits your window>
-```
 
-`--fresh` archives previous search logs and **preserves submission artifacts**
+Both remaining Path B crashes in Phase 4 were the arity error that HEAD now
+catches statically, so this directly tests whether the crash rate drops below
+50%. It is also the cheapest way to find the next failure layer — each fix so
+far has exposed exactly one more, in order: *where does this live* → *what does
+it return* → *what arguments does it take*.
+
+`--fresh` archives previous search logs and **preserves** submission artifacts
 (`logs/final_ensemble/`, `logs/ensemble_results.json`,
-`logs/research_memory.jsonl`, `logs/opus_research/`).
+`logs/research_memory.jsonl`, `logs/feature_registry.jsonl`,
+`logs/opus_research/`).
 
-After it: Phase 5 (generated documentation command) and Phase 6 (1K/27K —
-likely blocked, datasets are not mounted; write the integration plan instead of
-fabricating results).
+## Tests still worth adding
 
-## Known risks
-
-1. **Score unchanged at 0.60541.** No confirmed improvement has been found. Two
-   live confirmations both correctly declined to promote.
-2. **Path B feature discovery has still never fired end-to-end in an agent run**
-   — no proposed feature has ever cleared the probe (6 REJECTED, 2 PROBED). The
-   discovery→confirmation pipeline is unit-tested and the Path B *execution*
-   path is now demonstrated, but that specific trigger has not occurred.
-3. The allocator's priors are hand-set; with ~12 iterations a family is observed
-   1–3 times, so early allocations are mostly prior.
+- An end-to-end Path B feature test that forces a probe to PROMISING, so the
+  discovery→confirmation pipeline is exercised rather than only unit-tested.
+- A test that a semantically-wrong-but-well-formed call is *not* falsely
+  rejected by `call_arity` (currently covered only for `*args`/`**kwargs`).
+- Coverage for `results_report` when `logs/journal.jsonl` is absent entirely.
