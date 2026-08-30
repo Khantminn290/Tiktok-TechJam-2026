@@ -45,7 +45,7 @@ def build_inspect_prompt(menu, tree, experience_text: str) -> str:
         "These read-only measurements run against the sandboxed train/valid "
         "splits. Use them to ground your next hypothesis in what the data "
         "actually looks like rather than in assumption.\n\n"
-        + data_tools.describe_tools(),
+        + data_tools.describe_tools() + describe_diagnostics(),
         "## Recent attempts\n" + hist,
         "## Lessons already learned (do not re-derive these)\n" + experience_text,
         "## Measured dead ends\n" + menu.render_for_prompt()[-3000:],
@@ -84,6 +84,74 @@ def parse_requests(obj) -> list:
     return out
 
 
+# ---------------------------------------------------------------------------
+# PIPELINE DIAGNOSTICS -- run in-process, not in the data sandbox.
+#
+# Added because the clean autonomy test failed for a diagnosable reason: the
+# capabilities were DESCRIBED in the planning prompt but there was no way to
+# CALL them. The agent could set configuration but could not run the
+# measurement that would tell it whether configuration was even the problem.
+# A capability the agent cannot invoke is documentation, not an action space.
+# ---------------------------------------------------------------------------
+def _tool_hardcoded_constants(**_kw):
+    from .pipeline_lab import hardcoded_constants
+    return {"constants": hardcoded_constants()}
+
+
+def _tool_selection_pressure(n: int = 5, **_kw):
+    from .validity import selection_pressure
+    return selection_pressure(int(n))
+
+
+def _tool_audit_comparison(**kw):
+    from .validity import audit_comparison
+    allowed = ("delta", "n_seeds", "paired", "n_candidates_compared",
+               "selected_on_eval_data", "confirmed_out_of_sample")
+    return audit_comparison(**{k: v for k, v in kw.items() if k in allowed})
+
+
+def _tool_training_dynamics(max_epochs: int = 40, **_kw):
+    """EXPENSIVE: one full training run with early stopping disabled.
+
+    Capped at once per run by the caller. It is the only way to see whether a
+    model is over- or under-fitting and where its epoch curve peaks, which no
+    score can reveal.
+    """
+    from .pipeline_lab import training_dynamics
+    r = training_dynamics(seeds=(0,), max_epochs=int(max_epochs))
+    s = r.get("seeds", {}).get(0, {})
+    return {"peak_epoch": s.get("peak_epoch"), "peak_primary": s.get("peak_primary"),
+            "final_primary": s.get("final_primary"),
+            "change_after_peak_sigma": s.get("decline_sigma"),
+            "verdict": r.get("verdict"),
+            "curve_tail": (s.get("curve") or [])[-8:]}
+
+
+DIAGNOSTIC_TOOLS = {
+    "hardcoded_constants": _tool_hardcoded_constants,
+    "selection_pressure": _tool_selection_pressure,
+    "audit_comparison": _tool_audit_comparison,
+    "training_dynamics": _tool_training_dynamics,
+}
+EXPENSIVE_TOOLS = {"training_dynamics"}
+
+
+def describe_diagnostics() -> str:
+    return (
+        "\nPIPELINE DIAGNOSTICS (about the MODEL, not the data):\n"
+        "- training_dynamics(max_epochs=40): trains once with early stopping "
+        "DISABLED and returns the epoch curve, its peak, and how far validation "
+        "moves after it. The only way to tell over- from under-fitting. "
+        "EXPENSIVE (~1 training run); allowed at most once per run.\n"
+        "- hardcoded_constants(): modelling constants written into the training "
+        "library that no menu option can reach, and whether you can set each.\n"
+        "- selection_pressure(n): how large an apparent gain appears purely from "
+        "picking the best of n noisy comparisons.\n"
+        "- audit_comparison(delta, n_seeds, paired, n_candidates_compared, "
+        "selected_on_eval_data, confirmed_out_of_sample): what a claimed "
+        "improvement is worth given how it was measured.\n")
+
+
 def execute(requests: list, cache_dir: str | None = None) -> list:
     """Run validated requests against the SANDBOXED cache. Never raises: a bad
     request becomes a readable error the agent can learn from, exactly like a
@@ -91,8 +159,22 @@ def execute(requests: list, cache_dir: str | None = None) -> list:
     cache_dir = cache_dir or (SANDBOX_CACHE if os.path.exists(
         os.path.join(SANDBOX_CACHE, "meta.json")) else None)
     results = []
+    used_expensive = False
     for r in requests[:MAX_TOOL_CALLS]:
         try:
+            name = r["tool"]
+            if name in DIAGNOSTIC_TOOLS:
+                if name in EXPENSIVE_TOOLS:
+                    if used_expensive:
+                        results.append({"request": r,
+                                        "error": f"{name} is expensive and is "
+                                                 f"allowed at most once per "
+                                                 f"iteration"})
+                        continue
+                    used_expensive = True
+                results.append({"request": r,
+                                "result": DIAGNOSTIC_TOOLS[name](**(r["args"] or {}))})
+                continue
             results.append({"request": r,
                             "result": data_tools.run_tool(r["tool"], r["args"],
                                                           cache_dir=cache_dir)})

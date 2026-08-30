@@ -2138,6 +2138,42 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_diagnostics_are_invocable():
+    """The clean autonomy test failed for a diagnosable reason: the
+    capabilities were DESCRIBED in the prompt but there was no way to CALL
+    them. A capability the agent cannot invoke is documentation, not an
+    action space."""
+    print("\n[pipeline diagnostics are invocable]")
+    from agent import inspect as I
+
+    check("diagnostics are registered as callable tools",
+          {"training_dynamics", "hardcoded_constants", "selection_pressure",
+           "audit_comparison"} <= set(I.DIAGNOSTIC_TOOLS))
+    check("they are advertised to the agent alongside the data tools",
+          "training_dynamics" in I.describe_diagnostics()
+          and "EXPENSIVE" in I.describe_diagnostics())
+
+    out = I.execute([
+        {"tool": "hardcoded_constants", "args": {}},
+        {"tool": "selection_pressure", "args": {"n": 5}},
+        {"tool": "audit_comparison",
+         "args": {"delta": 0.00037, "n_seeds": 1, "n_candidates_compared": 5,
+                  "selected_on_eval_data": True}}])
+    check("cheap diagnostics execute without training",
+          all("error" not in x for x in out), f"{[x.get('error') for x in out]}")
+    check("selection_pressure returns a usable number",
+          out[1]["result"]["expected_max_sigma"] > 0.5)
+    check("audit_comparison flags the teacher's own false positive",
+          out[2]["result"]["severity"] == "FATAL")
+
+    # the expensive one must be rate-limited, and a bad request must not crash
+    check("an unknown tool is an error, not a crash",
+          "error" in I.execute([{"tool": "nope", "args": {}}])[0])
+    check("expensive diagnostics are capped per iteration",
+          "EXPENSIVE_TOOLS" in open(
+              os.path.join(_ROOT, "agent", "inspect.py")).read())
+
+
 def test_validity_auditor():
     """Grades a claim by how it was MEASURED, not by its size. Asserted on the
     three cases the teacher research run actually got wrong."""
@@ -2971,6 +3007,7 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
+              test_diagnostics_are_invocable,
               test_validity_auditor, test_pipeline_lab,
               test_feature_discovery,
               test_mechanism_audit, test_residual_screen_reporting,
