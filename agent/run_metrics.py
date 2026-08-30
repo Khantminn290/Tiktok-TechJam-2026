@@ -137,9 +137,47 @@ def compute(nodes: list, label: str = "") -> dict:
     cats = [(_event(n, "research_category") or {}).get("category") for n in nodes]
     scored = [n for n in nodes if n.get("status") == "success" and n.get("metrics")]
 
+    # --- the machinery added after the post-architecture evaluation ---
+    # Distinguishing a single-seed exploratory run from a paired confirmatory
+    # one is the whole point; before this existed every node was seed 0.
+    confirm_nodes = [n for n in nodes if (n.get("action") or "") == "confirm"]
+    # A "debug" action IS the automatic repair path: the harness feeds the error
+    # trace back and the agent rewrites. Counting them separately from crashes
+    # distinguishes "it broke" from "it broke and recovered by itself".
+    repair_nodes = [n for n in nodes if (n.get("action") or "") == "debug"]
+    repairs_succeeded = [n for n in repair_nodes if n.get("status") == "success"]
+    paired_events = [e for n in nodes for e in (n.get("events") or [])
+                     if e.get("type") == "paired_result"]
+    promoted = sum(1 for e in paired_events if e.get("promote"))
+    seeds_used = set()
+    for e in paired_events:
+        seeds_used.update((e.get("result") or {}).get("seeds") or [])
+    for n in nodes:
+        if n.get("seed") is not None and (n.get("action") or "") != "confirm":
+            seeds_used.add(n["seed"])
+    allocations = [e for n in nodes for e in (n.get("events") or [])
+                   if e.get("type") == "allocation"]
+    queued = [e for n in nodes for e in (n.get("events") or [])
+              if e.get("type") in ("confirmation_queued", "feature_followup_queued")]
+    ev_states: dict = {}
+    for e in paired_events:
+        s = (e.get("evidence") or {}).get("state")
+        if s:
+            ev_states[s] = ev_states.get(s, 0) + 1
+
     return {
         "label": label,
         "nodes": len(nodes),
+        "confirmation_runs": len(confirm_nodes),
+        "paired_experiments": len(paired_events),
+        "single_seed_exploratory_runs": len(nodes) - len(confirm_nodes),
+        "distinct_seeds_used": sorted(seeds_used),
+        "results_promoted": promoted,
+        "paired_evidence_states": ev_states,
+        "allocations_recorded": len(allocations),
+        "confirmations_queued": len(queued),
+        "automatic_repair_attempts": len(repair_nodes),
+        "automatic_repairs_succeeded": len(repairs_succeeded),
         "iterations_consumed": b["iterations_consumed"],
         "preflight_rejections": b["preflight_rejections"],
         "preflight_stages": preflight_stages,
@@ -192,6 +230,14 @@ def render(rows: list) -> str:
     line("preflight rejections (free)", "preflight_rejections")
     line("repeated identical failures", "repeated_identical_failures")
     line("manual interventions", "manual_interventions")
+    L.append("  CONFIRMATION MACHINERY")
+    line("confirmation runs (paired)", "confirmation_runs")
+    line("single-seed exploratory runs", "single_seed_exploratory_runs")
+    line("results promoted", "results_promoted")
+    line("confirmations queued", "confirmations_queued")
+    line("automatic repair attempts", "automatic_repair_attempts")
+    line("  ...that recovered", "automatic_repairs_succeeded")
+    line("allocations recorded", "allocations_recorded")
     L.append("  RESEARCH DISCIPLINE")
     line("nodes with an inquiry", "nodes_with_inquiry")
     line("  ...complete (obs+2hyp+meas)", "inquiry_complete")
