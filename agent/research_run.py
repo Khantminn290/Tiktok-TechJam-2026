@@ -84,8 +84,6 @@ def run_variant(overrides: dict, seeds: list, tag: str,
         cfg = dict(base_cfg)
         cfg.update(overrides)
         cfg["seed"] = s
-        if "temporal" in overrides or "history" in overrides:
-            pass
         t0 = time.time()
         r = train_lib.train_numpy_fm(cfg, enc, splits, meta,
                                      (lambda *a, **k: None) if quiet else print)

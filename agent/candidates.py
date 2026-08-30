@@ -37,7 +37,6 @@ arithmetic, duplicate detection, saturation and convergence stay in code.
 from __future__ import annotations
 
 import json
-import math
 import re
 
 # Effect sizes below this are indistinguishable from seed noise on this task.
