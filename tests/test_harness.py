@@ -2138,6 +2138,48 @@ def test_lesson_grading_uses_noise_floor():
           "sigma" in seg and "BASELINE_SEED_STD" in seg)
 
 
+def test_validity_auditor():
+    """Grades a claim by how it was MEASURED, not by its size. Asserted on the
+    three cases the teacher research run actually got wrong."""
+    print("\n[scientific validity auditor]")
+    from agent import validity as V
+
+    # E4: rank-median, best of five rules, one validation set, one seed
+    e4 = V.audit_comparison(0.00037, n_seeds=1, n_candidates_compared=5,
+                            selected_on_eval_data=True)
+    check("a best-of-N winner chosen on the scoring data is FATAL",
+          e4["severity"] == V.FATAL and not e4["trustworthy"])
+    check("it quantifies selection pressure against the claim",
+          any("selection alone" in f["message"] for f in e4["findings"]))
+    check("the +0.46 sigma claim is smaller than best-of-5 noise",
+          V.selection_pressure(5)["expected_max_sigma"] > 0.46)
+
+    # E5: checkpoint averaging, paired, confirmed out of sample
+    e5 = V.audit_comparison(0.00069, n_seeds=24, paired=True,
+                            n_candidates_compared=2,
+                            selected_on_eval_data=True,
+                            confirmed_out_of_sample=True)
+    check("out-of-sample confirmation clears the same-data finding",
+          not any(f["level"] == V.FATAL for f in e5["findings"]), f"{e5}")
+    check("a well-measured effect is not called fatal", e5["trustworthy"])
+
+    # single seed is always fatal, whatever the size
+    big = V.audit_comparison(0.01, n_seeds=1)
+    check("one seed is fatal even for a large delta",
+          big["severity"] == V.FATAL)
+    sub = V.audit_comparison(0.0002, n_seeds=8, paired=True)
+    check("a sub-noise effect is flagged whatever its sign",
+          any("under half the noise floor" in f["message"]
+              for f in sub["findings"]))
+    check("selection pressure grows with the number compared",
+          V.selection_pressure(20)["expected_max_sigma"]
+          > V.selection_pressure(3)["expected_max_sigma"])
+
+    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    check("the validity check reaches the planning prompt",
+          "from .validity import render_for_prompt" in lsrc)
+
+
 def test_pipeline_lab():
     """Capabilities distilled from the Opus research run. Each is asserted on
     the property that made it useful, not on its existence."""
@@ -2929,7 +2971,8 @@ if __name__ == "__main__":
               test_leakage_and_ensemble, test_candidate_policy,
               test_budget_phase_awareness,
               test_lesson_grading_uses_noise_floor,
-              test_pipeline_lab, test_feature_discovery,
+              test_validity_auditor, test_pipeline_lab,
+              test_feature_discovery,
               test_mechanism_audit, test_residual_screen_reporting,
               test_error_analysis, test_research_frontier,
               test_submission_matches_reported_result,

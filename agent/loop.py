@@ -268,6 +268,8 @@ class AgentLoop:
                 # changing a conclusion during the Opus research run.
                 from .pipeline_lab import render_for_prompt as _plab
                 blocks.insert(2, _plab())
+                from .validity import render_for_prompt as _valid
+                blocks.insert(3, _valid())
             except Exception as e:
                 events.append({"type": "frontier_skipped",
                                "error": f"{type(e).__name__}: {str(e)[:160]}"})
