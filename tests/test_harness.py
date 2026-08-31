@@ -3442,13 +3442,13 @@ def test_execution_events_separate_compute_from_evidence():
     from agent import execution_events as EX
 
     fresh = EX.event(EX.FRESH_EXECUTION, seed=0, seconds=70)
-    reuse = EX.event(EX.CACHE_REUSE, seed=1)
+    reuse = EX.event(EX.REUSED_ARTIFACT, seed=1)
     fail = EX.event(EX.FAILED_EXECUTION, seed=2, seconds=40)
     manual = EX.event(EX.MANUAL_EXECUTION, seed=3, seconds=70)
 
     check("a fresh execution costs compute and is an observation",
           fresh["costs_compute"] and fresh["is_observation"])
-    check("a cache hit is an observation but costs NO compute",
+    check("a reused artifact is an observation but costs NO compute",
           reuse["is_observation"] and not reuse["costs_compute"],
           "the member was trained once at that seed; reusing it spends nothing")
     check("a crash costs compute but yields no observation",
@@ -3466,9 +3466,9 @@ def test_execution_events_separate_compute_from_evidence():
     t = EX.tally([fresh, reuse, fail, manual])
     check("compute counts only what was actually spent",
           t["training_runs_spent"] == 3, f"got {t['training_runs_spent']}")
-    check("cache hits are counted separately", t["cache_hits"] == 1)
-    check("observations exclude the crash",
-          t["independent_observations"] == 3)
+    check("reused artifacts are counted separately", t["reused_artifacts"] == 1)
+    check("unique observations exclude the crash",
+          t["unique_observations"] == 3)
     check("fresh and reused seeds are distinguishable",
           t["distinct_fresh_seeds"] == [0, 2, 3]
           and t["distinct_reused_seeds"] == [1])
@@ -3482,13 +3482,62 @@ def test_execution_events_separate_compute_from_evidence():
           d["training_runs_used"] == 2 and d["training_runs_left"] == 18,
           "a 16-member ensemble over 14 existing members costs 2 runs")
     check("...and still reports the reuse",
-          d["cache_hits"] == 14)
+          d["reused_artifacts"] == 14)
     check("...and says which number is which",
-          "COMPUTE SPENT" in d["note"])
+          "FRESH COMPUTE" in d["note"] and "unique_observations" in d["note"])
+
+    # Identity: an observation counts once, keyed by (configuration, seed).
+    cfg = {"model": "fm_numpy"}
+    other = {"model": "deepfm_mlp"}
+    check("the same config+seed has a stable identity",
+          EX.observation_id(cfg, 3) == EX.observation_id(dict(cfg), 3))
+    check("a different config at the same seed is a different observation",
+          EX.observation_id(cfg, 3) != EX.observation_id(other, 3))
+
+    # The brief's worked example: a 6-seed confirmation with 4 members already
+    # on disk.
+    ev = [EX.event(EX.REUSED_ARTIFACT, seed=s, config=cfg) for s in range(4)]
+    ev += [EX.event(EX.FRESH_EXECUTION, seed=s, seconds=70, config=cfg)
+           for s in (4, 5)]
+    w = EX.tally(ev)
+    check("6 members with 4 reused -> 6 unique observations",
+          w["unique_observations"] == 6)
+    check("...2 fresh executions", w["fresh_executions"] == 2)
+    check("...4 reused artifacts", w["reused_artifacts"] == 4)
+    check("...2 new compute units", w["training_runs_spent"] == 2,
+          "the other four cost nothing")
+
+    # Rule 4: reusing the same members again must not strengthen anything.
+    twice = EX.tally(ev + [EX.event(EX.REUSED_ARTIFACT, seed=s, config=cfg)
+                           for s in range(4)])
+    check("reusing the same members again does NOT increase evidence",
+          twice["unique_observations"] == w["unique_observations"],
+          "this is how one measurement becomes a fake confirmation")
+    check("...and the repeat is recorded as duplicate reuse",
+          twice["duplicate_reuse_attempts"] == 4)
+    check("...and still costs no compute",
+          twice["training_runs_spent"] == w["training_runs_spent"])
 
     src = open(os.path.join(_ROOT, "agent", "ensemble_experiment.py")).read()
-    check("the ensemble runner emits a cache-reuse event",
-          "EX.CACHE_REUSE" in src and "no compute" in src)
+    check("the ensemble runner emits an artifact-reuse event",
+          "EX.REUSED_ARTIFACT" in src and "no compute" in src)
+    check("...and passes the config so identity is stable",
+          "config=choices" in src)
+
+    # Naming: this is artifact reuse, not a general execution cache. Asserted on
+    # RENDERED values, not source text -- a source line break splits the phrase
+    # and a raw substring test reads a denial as an assertion.
+    from agent import manifest as _MF
+    dist = " ".join(str(v) for v in _MF.build()["distinctions"].values()).lower()
+    claims_cache = ("general execution cache" in
+                    dist.replace("no general execution cache", ""))
+    check("the manifest does not claim a general execution cache",
+          not claims_cache,
+          "the only reuse is a previously completed ensemble member")
+    check("...and says so explicitly where reuse is explained",
+          "no general execution cache" in dist)
+    check("the ledger note calls it artifact reuse",
+          "reused_artifacts" in B.Ledger().as_dict()["note"])
 
 
 def test_results_manifest_is_the_single_source():
@@ -3521,14 +3570,16 @@ def test_results_manifest_is_the_single_source():
 
     # The five distinctions that have each been got wrong here before.
     for k in ("validation_vs_hidden_test", "single_seed_vs_ensemble",
-              "agent_vs_human", "fresh_vs_cache", "preliminary_vs_confirmed"):
+              "agent_vs_human", "fresh_vs_reuse", "preliminary_vs_confirmed"):
         check(f"manifest states the `{k}` distinction",
               bool(d["distinctions"].get(k)))
 
     run = d["latest_run"]
     if run.get("available"):
-        check("compute and reuse are separate fields in the run facts",
-              "training_runs_spent" in run and "cache_hits" in run)
+        check("compute, reuse, uniqueness and duplication are separate fields",
+              all(k in run for k in ("fresh_executions", "reused_artifacts",
+                                     "unique_observations",
+                                     "duplicate_reuse_attempts")))
         check("manual interventions are reported",
               run.get("manual_interventions") is not None)
         check("a single-seed best is labelled PRELIMINARY",

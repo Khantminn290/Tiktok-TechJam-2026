@@ -379,7 +379,7 @@ def render_watch_tree():
                                        index=len(node_ids) - 1,
                                        key="tree_node_inspector")
             n = next(n for n in state["nodes"] if n["id"] == selected_id)
-            with st.expander(f"Node #{selected_id} details", expanded=True):
+            with st.expander(f"Experiment #{selected_id} details", expanded=True):
                 head = st.columns([2, 2, 2])
                 head[0].metric("Action", ACTION_LABEL.get(n["action"], n["action"]))
                 head[1].metric("Score", f"{n['primary']:.5f}"

@@ -1,10 +1,10 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T05:34:16Z",
+  "generated_utc": "2026-08-31T05:46:19Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "4b877da597bc681680c7dbe87d716ef018c346e4",
-    "short_sha": "4b877da597bc",
+    "sha": "b564ae29164c02d85486b83193a845e2e2181b8a",
+    "short_sha": "b564ae29164c",
     "branch": "opus-research-agent",
     "dirty": true,
     "dirty_files": 8
@@ -246,6 +246,54 @@
     "reproduce": "python3 -m agent.final_ensemble --seeds 16",
     "split": "validation",
     "verified": true,
+    "how_produced": {
+      "steps": [
+        "one configuration was selected (see `config`)",
+        "16 independent seeds were trained, all of them kept -- no member was chosen on validation",
+        "each member's valid predictions were rank-normalised",
+        "the normalised predictions were averaged",
+        "the average was scored with the starter-kit evaluator"
+      ],
+      "member_paths": [
+        "logs/final_ensemble/seed_00",
+        "logs/final_ensemble/seed_01",
+        "logs/final_ensemble/seed_02",
+        "logs/final_ensemble/seed_03",
+        "logs/final_ensemble/seed_04",
+        "logs/final_ensemble/seed_05",
+        "logs/final_ensemble/seed_06",
+        "logs/final_ensemble/seed_07",
+        "logs/final_ensemble/seed_08",
+        "logs/final_ensemble/seed_09",
+        "logs/final_ensemble/seed_10",
+        "logs/final_ensemble/seed_11",
+        "logs/final_ensemble/seed_12",
+        "logs/final_ensemble/seed_13",
+        "logs/final_ensemble/seed_14",
+        "logs/final_ensemble/seed_15"
+      ],
+      "seeds": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "originally_built_by": "human-invoked command (`agent.final_ensemble --seeds 16`)",
+      "agent_can_reproduce": true,
+      "agent_reproduction_evidence": "logs/opus_research/agent_reproduced_incumbent.jsonl -- a --fresh run reached the identical configuration and produced 0.60541 via its own ensemble action"
+    },
     "recomputed": {
       "primary": 0.60541,
       "GAUC": 0.67212,
@@ -289,12 +337,16 @@
     "iterations_charged": 8,
     "training_runs_spent": 28,
     "training_runs_cap": 150,
-    "cache_hits": 0,
+    "fresh_executions": 28,
+    "reused_artifacts": 0,
+    "duplicate_reuse_attempts": 0,
+    "unique_observations": 0,
     "fresh_seeds": [],
     "reused_seeds": [],
     "execution_events": {
       "fresh_execution": 0,
-      "cache_reuse": 0,
+      "reused_artifact": 0,
+      "duplicate_reuse": 0,
       "failed_execution": 0,
       "repaired_execution": 0,
       "manual_execution": 0
@@ -334,9 +386,9 @@
   },
   "tests": {
     "executed": true,
-    "passed": 930,
+    "passed": 944,
     "failed": 0,
-    "seconds": 14.5
+    "seconds": 14.7
   },
   "hidden_test": {
     "evaluated": false,
@@ -348,7 +400,7 @@
     "validation_vs_hidden_test": "Every score in this manifest is VALIDATION unless a field says hidden_test. The hidden test has not been evaluated.",
     "single_seed_vs_ensemble": "A single-seed score is one draw and is PRELIMINARY. The submitted number is an ensemble of all seeds trained for one configuration.",
     "agent_vs_human": "The submitted configuration was discovered by an agent run, and the agent has since reproduced the full pipeline (discovery, confirmation, 16-member ensemble) unaided. The originally submitted artifact was built by a human-invoked command.",
-    "fresh_vs_cache": "training_runs_spent is compute actually used. cache_hits are observations reused from disk: real and independent, but free, and never counted as new observations.",
+    "fresh_vs_reuse": "fresh_executions is compute actually spent. reused_artifacts are previously completed ensemble members on disk: real historical evidence, but free. unique_observations is what evidence may rest on, keyed by (configuration, seed), so reusing the same member twice adds nothing. There is no general execution cache in this repository.",
     "preliminary_vs_confirmed": "Only CONFIRMED evidence may change the submission. A single seed is PRELIMINARY at any effect size."
   },
   "reproduce": {

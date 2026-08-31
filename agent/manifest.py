@@ -18,8 +18,9 @@ wrong here before:
                                    imply otherwise
     single seed vs ensemble        0.60497 is one draw; 0.60541 is 16 averaged
     agent-discovered vs human-run  who actually performed the step
-    fresh execution vs cache reuse a reused member is a real observation but
-                                   cost no compute
+    fresh compute vs artifact reuse  a reused member is real historical
+                                   evidence but cost no compute, and counts
+                                   once
     preliminary vs confirmed       what a number is allowed to change
 
 Usage:
@@ -92,6 +93,31 @@ def _incumbent() -> dict:
         "reproduce": rec.get("reproduce"),
         "split": "validation",
         "verified": None,
+        "how_produced": {
+            "steps": [
+                "one configuration was selected (see `config`)",
+                f"{rec.get('k')} independent seeds were trained, all of them "
+                f"kept -- no member was chosen on validation",
+                "each member's valid predictions were rank-normalised",
+                "the normalised predictions were averaged",
+                "the average was scored with the starter-kit evaluator"],
+            "member_paths": sorted(
+                os.path.join(rec.get("members_dir", "logs/final_ensemble"),
+                             d) for d in
+                (os.listdir(os.path.join(ROOT, rec.get("members_dir",
+                                                       "logs/final_ensemble")))
+                 if os.path.isdir(os.path.join(
+                     ROOT, rec.get("members_dir", "logs/final_ensemble")))
+                 else []) if d.startswith("seed_")),
+            "seeds": rec.get("seeds_used"),
+            "originally_built_by": "human-invoked command "
+                                   "(`agent.final_ensemble --seeds 16`)",
+            "agent_can_reproduce": True,
+            "agent_reproduction_evidence":
+                "logs/opus_research/agent_reproduced_incumbent.jsonl -- a "
+                "--fresh run reached the identical configuration and produced "
+                "0.60541 via its own ensemble action",
+        },
     }
     try:
         from agent.verify_incumbent import verify
@@ -147,7 +173,14 @@ def _run_facts(journal: str) -> dict:
         "training_runs_spent": led.get("training_runs_used",
                                        tally["training_runs_spent"]),
         "training_runs_cap": led.get("max_training_runs"),
-        "cache_hits": led.get("cache_hits", tally["cache_hits"]),
+        "fresh_executions": led.get("training_runs_used",
+                                    tally["fresh_executions"]),
+        "reused_artifacts": led.get("reused_artifacts",
+                                    tally["reused_artifacts"]),
+        "duplicate_reuse_attempts": led.get("duplicate_reuse_attempts",
+                                            tally["duplicate_reuse_attempts"]),
+        "unique_observations": led.get("unique_observations",
+                                       tally["unique_observations"]),
         "fresh_seeds": tally["distinct_fresh_seeds"],
         "reused_seeds": tally["distinct_reused_seeds"],
         "execution_events": tally["by_kind"],
@@ -247,10 +280,13 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
                 "(discovery, confirmation, 16-member ensemble) unaided. The "
                 "originally submitted artifact was built by a human-invoked "
                 "command.",
-            "fresh_vs_cache":
-                "training_runs_spent is compute actually used. cache_hits are "
-                "observations reused from disk: real and independent, but free, "
-                "and never counted as new observations.",
+            "fresh_vs_reuse":
+                "fresh_executions is compute actually spent. reused_artifacts "
+                "are previously completed ensemble members on disk: real "
+                "historical evidence, but free. unique_observations is what "
+                "evidence may rest on, keyed by (configuration, seed), so "
+                "reusing the same member twice adds nothing. There is no "
+                "general execution cache in this repository.",
             "preliminary_vs_confirmed":
                 "Only CONFIRMED evidence may change the submission. A single "
                 "seed is PRELIMINARY at any effect size."},

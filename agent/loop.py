@@ -756,11 +756,13 @@ class AgentLoop:
 
         res, ev = out["result"], out["evidence"]
         tally = out.get("execution_tally") or {}
-        fresh = tally.get("training_runs_spent", len(out["members"]))
-        reused = tally.get("cache_hits", 0)
+        fresh = tally.get("fresh_executions", len(out["members"]))
+        reused = tally.get("reused_artifacts", 0)
         if getattr(self, "ledger", None):
             self.ledger.record_training(
-                fresh, crashed=max(0, k - fresh - reused), reused=reused)
+                fresh, crashed=max(0, k - fresh - reused), reused=reused,
+                unique=tally.get("unique_observations"),
+                duplicates=tally.get("duplicate_reuse_attempts", 0))
         events.extend(out.get("events") or [])
         events.append({"type": "ensemble_result", "result": res,
                        "evidence": ev, "promote": out["promote"]})

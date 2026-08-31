@@ -96,18 +96,30 @@ class Ledger:
         self.max_training_runs = max_training_runs
         self.training_runs = 0
         self.training_crashes = 0
-        # Reuse is a real observation but costs nothing, so it is tracked
-        # separately and never charged against the training-run budget.
-        self.cache_hits = 0
+        # Artifact reuse -- a previously completed ensemble member on disk. Real
+        # historical evidence, but no compute, so it is tracked separately and
+        # never charged against the training-run budget. There is no general
+        # execution cache in this repository.
+        self.reused_artifacts = 0
+        self.duplicate_reuse = 0
+        self.unique_observations = 0
 
-    def record_training(self, n: int = 1, crashed: int = 0,
-                        reused: int = 0) -> None:
-        """`n` is compute actually spent. `reused` is observations obtained for
-        free and must NOT be charged -- an ensemble over members already on
-        disk was previously reporting spend that never happened."""
+    def record_training(self, n: int = 1, crashed: int = 0, reused: int = 0,
+                        unique: int | None = None, duplicates: int = 0) -> None:
+        """`n` is compute actually spent.
+
+        `reused` are artifacts obtained for free and must NOT be charged -- an
+        ensemble over members already on disk was previously reporting spend
+        that never happened. `unique` is how many DISTINCT observations resulted;
+        `duplicates` are repeat references to observations already counted, which
+        add neither compute nor evidence.
+        """
         self.training_runs += int(n)
         self.training_crashes += int(crashed)
-        self.cache_hits += int(reused)
+        self.reused_artifacts += int(reused)
+        self.duplicate_reuse += int(duplicates)
+        self.unique_observations += int(
+            unique if unique is not None else n + reused)
 
     def training_runs_left(self) -> int | None:
         if self.max_training_runs is None:
@@ -137,9 +149,14 @@ class Ledger:
                 "training_runs_used": self.training_runs,
                 "training_runs_left": self.training_runs_left(),
                 "training_crashes": self.training_crashes,
-                "cache_hits": self.cache_hits,
-                "note": ("training_runs_used is COMPUTE SPENT; cache_hits are "
-                         "free observations and are excluded from it")}
+                "reused_artifacts": self.reused_artifacts,
+                "duplicate_reuse_attempts": self.duplicate_reuse,
+                "unique_observations": self.unique_observations,
+                "note": ("training_runs_used is FRESH COMPUTE. reused_artifacts "
+                         "are previously completed members: real historical "
+                         "evidence, no compute, excluded from the budget. "
+                         "unique_observations is what evidence may rest on; "
+                         "duplicates add neither.")}
 
 
 COUNTING_NOTE = (

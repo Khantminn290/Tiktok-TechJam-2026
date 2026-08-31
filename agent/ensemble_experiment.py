@@ -70,7 +70,7 @@ def train_members(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
             # training run reported spend that never happened.
             with open(os.path.join(d, "metrics.json")) as fh:
                 out[s] = {"metrics": json.load(fh), "dir": d}
-            events.append(EX.event(EX.CACHE_REUSE, seed=s,
+            events.append(EX.event(EX.REUSED_ARTIFACT, seed=s, config=choices,
                                    detail="member already on disk"))
             log(f"    [member] seed {s}  (reusing — no compute)")
             continue
@@ -82,13 +82,14 @@ def train_members(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
             out[s] = {"metrics": {k: float(res.metrics[k])
                                   for k in ("GAUC", "nDCG@5", "primary")},
                       "dir": d}
-            events.append(EX.event(EX.FRESH_EXECUTION, seed=s, seconds=el))
+            events.append(EX.event(EX.FRESH_EXECUTION, seed=s, seconds=el,
+                                   config=choices))
             log(f"    [member] seed {s}  primary {out[s]['metrics']['primary']:.5f}"
                 f"  {el:.0f}s")
         else:
             head = (res.error_trace or "")[:110].replace("\n", " ")
             events.append(EX.event(EX.FAILED_EXECUTION, seed=s, seconds=el,
-                                   detail=head))
+                                   config=choices, detail=head))
             log(f"    [member] seed {s}  FAILED — {head}")
     out["_events"] = events
     return out
@@ -182,9 +183,12 @@ def run(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
     log(f"  [ensemble] {ev['state']} — {ev['why']}")
     from . import execution_events as EX
     tally = EX.tally(events)
-    if tally["cache_hits"]:
-        log(f"  [ensemble] {tally['training_runs_spent']} fresh, "
-            f"{tally['cache_hits']} reused (no compute)")
+    if tally["reused_artifacts"] or tally["duplicate_reuse_attempts"]:
+        log(f"  [ensemble] {tally['fresh_executions']} fresh, "
+            f"{tally['reused_artifacts']} reused artifacts (no compute), "
+            f"{tally['unique_observations']} unique observations"
+            + (f", {tally['duplicate_reuse_attempts']} duplicate"
+               if tally["duplicate_reuse_attempts"] else ""))
     return {"members": {k: v for k, v in members.items() if k != "_events"},
             "result": res, "evidence": ev, "events": events,
             "execution_tally": tally,
