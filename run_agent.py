@@ -83,23 +83,7 @@ def main():
                     help="archive any existing logs/ into logs/archive_<ts>/ and start "
                          "iteration 0 from scratch (default: resume the journal, which "
                          "is how a crashed run continues where it left off)")
-    ap.add_argument("--force-next-iteration", action="store_true",
-                    help="development only: append exactly one iteration to an already "
-                         "converged journal, without archiving logs or replacing the "
-                         "previous final_summary.json")
-    ap.add_argument("--force-iterations", type=int, default=0, metavar="N",
-                    help="development only: append exactly N iterations to an already "
-                         "converged journal under one spend ceiling; preserves the "
-                         "previous final_summary.json")
     a = ap.parse_args()
-
-    forced_iterations = max(a.force_iterations, 1 if a.force_next_iteration else 0)
-    if a.force_iterations < 0:
-        ap.error("--force-iterations must be non-negative")
-    if forced_iterations and a.fresh:
-        ap.error("forced continuation cannot be combined with --fresh")
-    if forced_iterations and a.smoke:
-        ap.error("forced continuation cannot be combined with --smoke")
 
     if a.smoke:
         a.max_iterations = min(a.max_iterations, 3)
@@ -150,25 +134,6 @@ def main():
         test_model=a.smoke,
         log_dir=log_dir,
     )
-    if forced_iterations:
-        completed = []
-        for _ in range(forced_iterations):
-            if len(loop.tree.nodes) >= loop.max_iterations:
-                print(f"forced continuation stopped at iteration cap "
-                      f"({loop.max_iterations})")
-                break
-            over, reason = loop.spend.would_exceed()
-            if over:
-                print(f"forced continuation stopped: {reason}")
-                break
-            completed.append(loop.iterate())
-        ids = [n.iteration_id for n in completed]
-        print(f"\nforced continuation complete: nodes {ids}; "
-              f"statuses={[n.status for n in completed]}. "
-              f"Existing final_summary.json was preserved.")
-        print("Run `python -m agent.report` to inspect the extended journal.")
-        return
-
     summary = loop.run()
 
     if a.smoke:
