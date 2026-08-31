@@ -12,10 +12,16 @@ to reach, validate, and reproduce a strong Pure-only submission efficiently.
 rank-normalised ensemble (GAUC `0.67212`, nDCG@5 `0.53870`). It must remain
 reproducible throughout this work.
 
-**Observed competition run:** 12 charged decisions, 27 training executions,
-44 LLM calls, 493,573 LLM tokens, $1.71402 spend, and 2,033.2 seconds of
-training wall-clock. The high-confidence speed target is LLM/orchestration,
-not validation shortcuts.
+**Historical full competition reference:** 12 charged decisions, 27 training
+executions, 44 LLM calls, 493,573 LLM tokens, $1.71402 spend, and 2,033.2
+seconds of training wall-clock.
+
+**Latest post-frontier verification run:** 5 charged decisions, 10 training
+executions, 17 LLM calls, 196,248 LLM tokens, $0.618529 spend, 661.8 seconds
+of training wall-clock, and zero crashes. It is a smaller-budget reliability
+run, not an apples-to-apples replacement for the 12-decision reference. The
+high-confidence speed target remains LLM/orchestration, not validation
+shortcuts.
 
 ## Independent Branch Review
 

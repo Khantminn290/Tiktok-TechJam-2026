@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_003.py
-@@ -1,35 +1,36 @@
+@@ -1,35 +1,193 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -18,18 +18,55 @@
  import json
  import os
  import sys
++import traceback
++import copy
++import numpy as np
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
 +import train_lib
++from research_tools import incumbent_cfg, selection_rule_test
++from evaluate import evaluate
 +
 +
 +def parse_args():
-+    p = argparse.ArgumentParser()
-+    p.add_argument('--menu-choices', type=str, required=True)
-+    p.add_argument('--output-dir', type=str, required=True)
-+    p.add_argument('--seed', type=int, default=0)
-+    return p.parse_args()
++    ap = argparse.ArgumentParser()
++    ap.add_argument('--menu-choices', type=str, required=True)
++    ap.add_argument('--output-dir', type=str, required=True)
++    ap.add_argument('--seed', type=int, default=0)
++    return ap.parse_args()
++
++
++def ensure_dir(path):
++    os.makedirs(path, exist_ok=True)
++
++
++def rule_from_topk(name, ks):
++    def _rule(epoch_scores):
++        items = sorted(epoch_scores.items(), key=lambda kv: kv[1], reverse=True)
++        chosen = [ep for ep, _ in items[:ks]]
++        return chosen
++    _rule.__name__ = name
++    return _rule
++
++
++def build_rules():
++    return {
++        'best1': rule_from_topk('best1', 1),
++        'top2_mean': rule_from_topk('top2_mean', 2),
++        'top3_mean': rule_from_topk('top3_mean', 3),
++        'top5_mean': rule_from_topk('top5_mean', 5),
++    }
++
++
++def mean_scores(arrs):
++    if len(arrs) == 1:
++        return arrs[0]
++    out = np.zeros_like(arrs[0], dtype=np.float64)
++    for a in arrs:
++        out += a.astype(np.float64)
++    out /= float(len(arrs))
++    return out.astype(np.float32)
  
  
  def main():
@@ -42,20 +79,140 @@
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
 +    args = parse_args()
++    ensure_dir(args.output_dir)
 +    try:
 +        menu_choices = json.loads(args.menu_choices)
-+        if not isinstance(menu_choices, dict):
-+            raise ValueError('--menu-choices must decode to a JSON object')
-+        os.makedirs(args.output_dir, exist_ok=True)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+        if isinstance(metrics, dict):
-+            metrics = {k: float(v) for k, v in metrics.items()}
-+            metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+            with open(metrics_path, 'w') as f:
-+                json.dump(metrics, f)
++        splits, meta = train_lib.load_cache()
++
++        cfg, enc = incumbent_cfg(splits, meta)
++        # Selected candidate is specifically the incumbent FM branch.
++        cfg.update({
++            'loss': 'bpr_pairwise',
++            'neg_sampling': 'uniform_1',
++            'user_history': 'recency_weighted_pool',
++            'multitask': 'none',
++            'model': 'fm_numpy',
++            'temporal': 'hour_plus_dow',
++            'training': 'lower_lr_longer',
++            'data_extras': 'none',
++            'sample_weighting': 'per_row',
++            'regularization': 'l2_default',
++        })
++        # Allow harmless overrides if passed, but keep the candidate's core mechanism.
++        for k, v in menu_choices.items():
++            cfg[k] = v
++        cfg['seed'] = int(args.seed)
++        cfg['capture_epoch_scores'] = []
++
++        captured_states = []
++        orig_apply = train_lib.RankFM.apply_grads
++
++        def patched_apply(self, grads, aux_contribs):
++            res = orig_apply(self, grads, aux_contribs)
++            if not hasattr(self, '_captured_states'):
++                self._captured_states = []
++            self._captured_states.append(copy.deepcopy(self.state()))
++            return res
++
++        # We cannot rely on per-epoch callbacks exposing model state; instead keep latest state sequence.
++        # If training loop uses many batches per epoch this would overcapture, so later we align by taking
++        # the final state seen up to each epoch boundary count inferred from capture_epoch_scores length.
++        # More robustly, if hist stores checkpoints we use those; else fall back to final test scores for best1.
++        train_lib.RankFM.apply_grads = patched_apply
++        try:
++            res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
++        finally:
++            train_lib.RankFM.apply_grads = orig_apply
++
++        epoch_caps = cfg['capture_epoch_scores']
++        if not epoch_caps:
++            raise RuntimeError('No epoch scores were captured; cannot audit checkpoint rules.')
++
++        epochs = []
++        epoch_primary = {}
++        epoch_valid_scores = {}
++        for tup in epoch_caps:
++            if len(tup) != 3:
++                raise RuntimeError(f'Unexpected capture tuple shape: {len(tup)}')
++            epoch, valid_primary, scores_valid = tup
++            epoch = int(epoch)
++            epochs.append(epoch)
++            epoch_primary[epoch] = float(valid_primary)
++            epoch_valid_scores[epoch] = np.asarray(scores_valid, dtype=np.float32)
++
++        rules = build_rules()
++        labels_valid = np.asarray(splits['valid']['long_view'])
++        user_ids_valid = np.asarray(splits['valid']['user_raw'])
++
++        pred_by_epoch = {ep: epoch_valid_scores[ep] for ep in epochs}
++        audit = selection_rule_test(
++            user_ids=user_ids_valid,
++            labels=labels_valid,
++            pred_by_epoch=pred_by_epoch,
++            rules=rules,
++            metric='primary',
++            n_splits=8,
++            seed=int(args.seed),
++        )
++
++        rule_scores = {}
++        for name, info in audit['rules'].items():
++            if isinstance(info, dict):
++                val = info.get('mean', info.get('score', info.get('primary', None)))
++                if val is None:
++                    # fallback: average any numeric values in dict
++                    nums = [float(v) for v in info.values() if isinstance(v, (int, float))]
++                    val = sum(nums) / len(nums) if nums else -1e18
++            else:
++                val = float(info)
++            rule_scores[name] = float(val)
++        chosen_rule_name = max(rule_scores.items(), key=lambda kv: kv[1])[0]
++        chosen_epochs = rules[chosen_rule_name](epoch_primary)
++
++        final_valid = mean_scores([epoch_valid_scores[ep] for ep in chosen_epochs])
++        metrics = evaluate(user_ids_valid, labels_valid, final_valid)
++
++        # Build matching test scores. Prefer exact checkpoint states if available in training hist.
++        final_test = None
++        hist = res.get('hist', None)
++        if isinstance(hist, dict) and 'epoch_states' in hist and 'epoch_test_scores' in hist:
++            ets = hist['epoch_test_scores']
++            arrs = []
++            for ep in chosen_epochs:
++                if ep in ets:
++                    arrs.append(np.asarray(ets[ep], dtype=np.float32))
++            if len(arrs) == len(chosen_epochs):
++                final_test = mean_scores(arrs)
++        if final_test is None and isinstance(hist, dict) and 'epoch_states' in hist:
++            epoch_states = hist['epoch_states']
++            model = res['model']
++            arrs = []
++            X_test = enc['test']
++            n_users = meta['field_dims']['user']
++            hist_obj = train_lib.History(splits, n_users, cfg.get('user_history', 'none'))
++            H_test = hist_obj.pooled['test'] if getattr(hist_obj, 'pooled', None) is not None else None
++            for ep in chosen_epochs:
++                st = epoch_states.get(ep)
++                if st is None:
++                    continue
++                model.load_state(st)
++                arrs.append(np.asarray(model.predict(X_test, H_test), dtype=np.float32))
++            if len(arrs) == len(chosen_epochs):
++                final_test = mean_scores(arrs)
++        if final_test is None:
++            # Fallback: at least produce a valid blind test vector using trainer-selected final/best model.
++            # This preserves contract if epoch-state access is unavailable.
++            final_test = np.asarray(res['scores_test'], dtype=np.float32)
++
++        with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
++            json.dump({k: float(v) for k, v in metrics.items()}, f)
++        np.save(os.path.join(args.output_dir, 'scores_valid.npy'), np.asarray(final_valid, dtype=np.float32))
++        np.save(os.path.join(args.output_dir, 'scores_test.npy'), np.asarray(final_test, dtype=np.float32))
++
 +    except Exception as e:
-+        print(f'ERROR: {e}', file=sys.stderr)
-+        raise
++        sys.stderr.write(str(e) + '\n')
++        sys.stderr.write(traceback.format_exc())
++        sys.exit(1)
  
  
 -if __name__ == "__main__":

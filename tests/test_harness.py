@@ -3181,10 +3181,16 @@ def test_ensembling_is_an_agent_action():
           "_maybe_queue_ensemble" in src)
     check("...and executes it as a journalled node",
           "_run_ensemble_node" in src and 'action="ensemble"' in src)
-    check("it will not ensemble a configuration seen only once",
-          "repeats < 2" in src,
-          "averaging seeds of a config that is not good buys a precise "
-          "estimate of a mediocre number")
+    check("it only ensembles a configuration that beats the baseline",
+          "BASELINE_VALID_PRIMARY" in src)
+    check("it will not try to ensemble an agent-written script",
+          'menu_choices") or {}).get("model")' in src,
+          "a custom script cannot be re-run at k seeds through the reference "
+          "solution, however well it scored")
+    check("convergence waits while an affordable ensemble is untried",
+          '_ensemble_done", True)' in src and "can_afford(k)" in src,
+          "ensembling is worth ~1 sigma and no single run can show it, so the "
+          "convergence rule would end the search with it unattempted")
     check("it charges every member to the training-run budget",
           "record_training(trained" in src)
 

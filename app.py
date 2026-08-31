@@ -92,6 +92,47 @@ def pill(text, colour, bg=None):
             f"{text}</span>")
 
 
+def experiment_tree_dot(nodes: list[dict]) -> str:
+    """Render the journal's parent links as one readable Graphviz tree."""
+    colours = {"ok": ("#d8f3dc", "#1a7f37"),
+               "fail": ("#ffebe9", "#cf222e"),
+               "preflight": ("#fff8c5", "#9a6700")}
+    ids = {n.get("id") for n in nodes if n.get("id") is not None}
+    lines = ["digraph experiments {",
+             "rankdir=TB;",
+             "graph [bgcolor=transparent, ranksep=0.45, nodesep=0.18];",
+             "node [shape=circle, style=filled, fontname=\"Helvetica\", "
+             "fontsize=7, margin=0, width=0.46, height=0.46, fixedsize=true, "
+             "color=\"#57606a\"];",
+             "edge [color=\"#8c959f\", penwidth=1.2, arrowsize=0.65];"]
+    lines.append("start [label=\"START\\nRUN\", shape=circle, style=filled, "
+                 "fillcolor=\"#0f766e\", color=\"#115e59\", "
+                 "fontcolor=\"#ffffff\", fontsize=8, width=0.66, height=0.66, "
+                 "fixedsize=true, margin=0, penwidth=2];")
+    for n in nodes:
+        node_id = n.get("id")
+        if node_id is None:
+            continue
+        fill, border = colours.get(n.get("state"), ("#f6f8fa", "#57606a"))
+        action = ACTION_LABEL.get(n.get("action"), n.get("action") or "Experiment")
+        score = f"{n['primary']:.4f}" if n.get("primary") is not None else "pending"
+        evidence = (n.get("evidence") or {}).get("state") or n.get("state", "unknown")
+        label = f"#{node_id}"
+        lines.append(f"n{int(node_id)} [label={json.dumps(label)}, "
+                     f"tooltip={json.dumps(f'#{node_id} {action}: {score}; {evidence}')}, "
+                     f"fillcolor=\"{fill}\", color=\"{border}\"];" )
+    for n in nodes:
+        node_id, parent = n.get("id"), n.get("parent")
+        if node_id is None:
+            continue
+        if parent in ids:
+            lines.append(f"n{int(parent)} -> n{int(node_id)};")
+        else:
+            lines.append(f"start -> n{int(node_id)};")
+    lines.append("}")
+    return "\n".join(lines)
+
+
 running = L._agent_running()
 
 st.title("Autonomous ML Research Agent")
@@ -204,15 +245,16 @@ with tabs[0]:
 
 
 # ------------------------------------------------------------ watch it run ---
-with tabs[1]:
+@st.fragment(run_every=3)
+def render_watch_tree():
+    """Refresh only the live tree, never the dashboard's other tabs."""
     js = journals()
     if not js:
         st.info("No run on disk yet. Start one from **Start a run**.")
     else:
-        c = st.columns([2, 1, 1])
+        c = st.columns([2, 1])
         pick = c[0].selectbox("Run", list(js), key="tree_journal")
-        auto = c[1].checkbox("Auto-refresh", value=running,
-                             help="polls every 3 seconds")
+        c[1].caption("Live refresh\nevery 3 seconds")
         state = L.state(js[pick])
         k = state["kpi"]
 
@@ -242,74 +284,64 @@ with tabs[1]:
         st.divider()
         if not state["nodes"]:
             st.info("No experiments recorded yet.")
+        else:
+            st.markdown("#### Experiment tree")
+            st.caption("START RUN is the root. Each circle is one experiment; "
+                       "arrows show what it extended, and colour shows completed, "
+                       "failed, or safely rejected before training.")
+            # Keep the tree as an overview, not a full-screen visualization.
+            tree_col, _ = st.columns([1, 1])
+            with tree_col:
+                st.graphviz_chart(experiment_tree_dot(state["nodes"]),
+                                  width="stretch", height=360)
 
-        depth: dict = {}
-        for n in state["nodes"]:
-            p = n["parent"]
-            depth[n["id"]] = depth.get(p, -1) + 1 if p is not None else 0
-            d = min(depth[n["id"]], 4)
+            node_ids = [n["id"] for n in state["nodes"]]
+            selected_id = st.selectbox("Inspect experiment", node_ids,
+                                       index=len(node_ids) - 1,
+                                       key="tree_node_inspector")
+            n = next(n for n in state["nodes"] if n["id"] == selected_id)
+            with st.expander(f"Node #{selected_id} details", expanded=True):
+                head = st.columns([2, 2, 2])
+                head[0].metric("Action", ACTION_LABEL.get(n["action"], n["action"]))
+                head[1].metric("Score", f"{n['primary']:.5f}"
+                               if n["primary"] is not None else "not scored")
+                evidence = (n.get("evidence") or {}).get("state") or n["state"]
+                head[2].metric("Evidence", evidence)
+                if n["allocator"]:
+                    st.markdown(f"<span class='small'>Allocator chose <b>{n['allocator']}"
+                                f"</b> for this decision.</span>",
+                                unsafe_allow_html=True)
+                if n["question"]:
+                    st.markdown(f"**Asked:** {n['question']}")
+                if n["hypotheses"]:
+                    st.markdown("**Competing explanations**")
+                    for h in n["hypotheses"]:
+                        st.markdown(f"- {h}")
+                if n["plan"]:
+                    st.markdown(f"**Tried:** {n['plan']}")
+                if n["paired"]:
+                    pr = n["paired"]
+                    st.markdown(
+                        f"**Paired test:** control {pr['control']:.5f} → treatment "
+                        f"{pr['treatment']:.5f}; Δ {pr['delta']:+.5f} "
+                        f"({pr['sigma']:+.2f}σ) over {pr['n']} seeds; "
+                        f"**{'adopted' if pr['promote'] else 'not adopted'}**.")
+                if n["error"]:
+                    st.error(n["error"])
+                if n["outcome"]:
+                    st.caption(f"Outcome: {n['outcome']}")
+                if n["evidence"]:
+                    ev = n["evidence"]
+                    colr, meaning = TIER.get(ev["state"], ("#57606a", ""))
+                    seeds = (f" · {ev['n_seeds']} seeds"
+                             if ev.get("n_seeds") else "")
+                    st.markdown(pill(f"{ev['state']}{seeds}", colr)
+                                + f"<span class='small'>{meaning}</span>",
+                                unsafe_allow_html=True)
 
-            # Indentation IS the search tree: a child experiment branched
-            # from its parent. Done with columns rather than markdown spacing so
-            # the cards keep their borders.
-            target = st.columns([d, 12 - d])[1] if d else st.container()
-            with target:
-                with st.container(border=True):
-                    head = st.columns([3, 2])
-                    icon = {"ok": "🟢", "fail": "🔴", "preflight": "🟠"}[n["state"]]
-                    label = ACTION_LABEL.get(n["action"], n["action"])
-                    head[0].markdown(f"{icon} **#{n['id']} · {label}**")
-                    if n["primary"] is not None:
-                        head[1].markdown(
-                            f"<div style='text-align:right'><b>{n['primary']:.5f}</b>"
-                            f"<span class='small'> &nbsp;{n['delta']:+.5f} · "
-                            f"{n['sigma']:+.2f}σ</span></div>",
-                            unsafe_allow_html=True)
 
-                    if n["allocator"]:
-                        st.markdown(
-                            f"<span class='small'>Chose <b>{n['allocator']}"
-                            f"</b> as the most useful next experiment</span>",
-                            unsafe_allow_html=True)
-                    if n["question"]:
-                        st.markdown(f"**Asked:** {n['question']}")
-                    if n["hypotheses"]:
-                        with st.expander(f"Competing explanations "
-                                         f"({len(n['hypotheses'])})"):
-                            for h in n["hypotheses"]:
-                                st.markdown(f"- {h}")
-                    if n["plan"]:
-                        st.markdown(f"<span class='small'><b>Tried:</b> "
-                                    f"{n['plan']}</span>", unsafe_allow_html=True)
-
-                    if n["paired"]:
-                        pr = n["paired"]
-                        st.markdown(
-                            f"<span class='small'><b>Paired test</b> — "
-                            f"control {pr['control']:.5f} → treatment "
-                            f"{pr['treatment']:.5f} · Δ {pr['delta']:+.5f} "
-                            f"({pr['sigma']:+.2f}σ) over {pr['n']} seeds → "
-                            f"<b>{'adopted' if pr['promote'] else 'not adopted'}"
-                            f"</b></span>", unsafe_allow_html=True)
-                    if n["error"]:
-                        st.markdown(f"<span class='small' style='color:#cf222e'>"
-                                    f"<code>{n['error']}</code></span>",
-                                    unsafe_allow_html=True)
-                    if n["outcome"]:
-                        st.markdown(f"<span class='small'>→ {n['outcome']}</span>",
-                                    unsafe_allow_html=True)
-                    if n["evidence"]:
-                        ev = n["evidence"]
-                        colr, meaning = TIER.get(ev["state"], ("#57606a", ""))
-                        seeds = (f" · {ev['n_seeds']} seeds"
-                                 if ev.get("n_seeds") else "")
-                        st.markdown(
-                            pill(f"{ev['state']}{seeds}", colr)
-                            + f"<span class='small'>{meaning}</span>",
-                            unsafe_allow_html=True)
-        if auto:
-            time.sleep(3)
-            st.rerun()
+with tabs[1]:
+    render_watch_tree()
 
 
 # ----------------------------------------------------------- iteration log ---

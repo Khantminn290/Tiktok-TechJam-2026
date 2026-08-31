@@ -147,6 +147,28 @@ class AgentLoop:
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
+        # A search is not finished while a known-valuable action is untried.
+        #
+        # Convergence is measured on SINGLE-RUN scores, but ensembling is worth
+        # about 1 sigma and no single run can ever show it -- so the rule
+        # happily declares the search over with the most valuable remaining
+        # action unattempted. Measured: a 20-iteration run stopped at 10 nodes
+        # with 130 of 150 training runs and $11 of $12 unspent, having never
+        # ensembled anything.
+        #
+        # Only blocks while it is actually affordable, so this can delay a
+        # convergence stop but never overrun the iteration, training-run,
+        # wall-clock or spend budgets.
+        # getattr: tests build partial loops via __new__, where an absent
+        # attribute means "no ensemble pending", not a crash.
+        if not getattr(self, "_ensemble_done", True):
+            led = getattr(self, "ledger", None)
+            scored = [n for n in self.tree.nodes
+                      if n.status == "success" and n.metrics]
+            k = getattr(self, "_ensemble_k", 16)
+            if scored and (led is None or led.can_afford(k)):
+                return False, ""
+
         bests = []
         cur = -1.0
         for n in self.tree.nodes:
@@ -644,16 +666,27 @@ class AgentLoop:
                     target = n.get("menu_choices")
                     why = f"node {n.get('iteration_id')} was CONFIRMED"
         if target is None:
-            best = max(scored, key=lambda n: n["metrics"]["primary"])
-            sig = json.dumps(best.get("menu_choices") or {}, sort_keys=True)
-            repeats = sum(1 for n in scored
-                          if json.dumps(n.get("menu_choices") or {},
-                                        sort_keys=True) == sig)
-            if repeats < 2:
-                return          # one draw of one config is not worth k runs
+            # Ensemble the best MENU-DRIVEN configuration that beats the
+            # baseline. An agent-written script with no menu_choices cannot be
+            # re-run at k seeds through the reference solution, so it is not a
+            # candidate however well it scored.
+            #
+            # Requiring the config to have been reproduced first was too strict
+            # in practice: the best configuration is usually found exactly once,
+            # so the trigger never fired and runs ended having never ensembled.
+            # The downside of ensembling a mediocre config is a precise estimate
+            # of a mediocre number -- it costs k runs and simply does not
+            # promote, which the evidence layer already handles.
+            usable = [n for n in scored
+                      if (n.get("menu_choices") or {}).get("model")
+                      and n["metrics"]["primary"] > BASELINE_VALID_PRIMARY]
+            if not usable:
+                return
+            best = max(usable, key=lambda n: n["metrics"]["primary"])
             target = best.get("menu_choices")
-            why = (f"node {best.get('iteration_id')} at "
-                   f"{best['metrics']['primary']:.5f}, reproduced {repeats}x")
+            why = (f"best menu configuration is node "
+                   f"{best.get('iteration_id')} at "
+                   f"{best['metrics']['primary']:.5f}")
         if not target:
             return
 

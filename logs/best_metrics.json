@@ -1,12 +1,23 @@
 {
   "iteration_id": 1,
-  "menu_choices": {},
-  "hypothesis": "The likely remaining lever is not a new model family but a less biased checkpoint-selection rule: train the incumbent FM+BPR+recency+hour_plus_dow configuration once, capture per-epoch validation predictions, and choose between single-best-epoch and top-5-epoch averaging using held-out user splits from validation rather than the same users used for the final score. This directly tests whether the current same-validation checkpoint rule is overfitting; if so, cross-fitted selection could recover a small real gain (~0.0003-0.0008 primary), and if not it will provide a cleaner confirmation that checkpoint combining is already saturated. After this run, a paired multi-seed CONFIRM is due before acting on any tiny gain.",
+  "menu_choices": {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "recency_weighted_pool",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "hour_plus_dow",
+    "training": "lower_lr_longer",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default"
+  },
+  "hypothesis": "Reproduce the broader incumbent FM branch directly: fm_numpy with bpr_pairwise, uniform_1 negatives, recency_weighted_pool history, hour_plus_dow temporal features, and lower_lr_longer training should match or exceed the one-shot 0.60299 local best because the research frontier reports this family saturating at 0.60497, while the current best observed here is a single preliminary GRU draw. This is a confirmation draft, not a claim of a new mechanism; if it lands near 0.6045-0.6050, the next correct step is paired multi-seed confirmation rather than more menu exploration.",
   "valid_metrics": {
-    "GAUC": 0.6722885728946539,
-    "nDCG@5": 0.538253811788693,
-    "primary": 0.6052711923416735
+    "GAUC": 0.6720477510874213,
+    "nDCG@5": 0.5378881530235174,
+    "primary": 0.6049679520554694
   },
   "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_001.py",
-  "timestamp": 1788142444.600009
+  "timestamp": 1788145700.506676
 }

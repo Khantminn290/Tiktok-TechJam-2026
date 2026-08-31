@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import traceback
+
 import numpy as np
 
 import train_lib
@@ -21,32 +22,39 @@ def parse_args():
 def mean_scores(arrs):
     if not arrs:
         raise ValueError('No score arrays to average')
+    base = np.asarray(arrs[0], dtype=np.float64)
     if len(arrs) == 1:
-        return np.asarray(arrs[0], dtype=np.float32)
-    out = np.zeros_like(np.asarray(arrs[0], dtype=np.float64), dtype=np.float64)
+        return base.astype(np.float32)
+    out = np.zeros_like(base, dtype=np.float64)
     for a in arrs:
-        out += np.asarray(a, dtype=np.float64)
+        aa = np.asarray(a, dtype=np.float64)
+        if aa.shape != out.shape:
+            raise ValueError('Score arrays have mismatched shapes')
+        out += aa
     out /= float(len(arrs))
     return out.astype(np.float32)
 
 
 def build_rules():
-    def best1(epoch_scores):
+    def _sorted_epoch_ids(epoch_scores):
         items = sorted(epoch_scores.items(), key=lambda kv: kv[1], reverse=True)
-        return [items[0][0]]
+        return [int(ep) for ep, _ in items]
+
+    def best1(epoch_scores):
+        ordered = _sorted_epoch_ids(epoch_scores)
+        return ordered[:1]
 
     def top2_mean(epoch_scores):
-        items = sorted(epoch_scores.items(), key=lambda kv: kv[1], reverse=True)
-        return [ep for ep, _ in items[:2]]
+        ordered = _sorted_epoch_ids(epoch_scores)
+        return ordered[: min(2, len(ordered))]
 
     def top3_mean(epoch_scores):
-        items = sorted(epoch_scores.items(), key=lambda kv: kv[1], reverse=True)
-        return [ep for ep, _ in items[:3]]
+        ordered = _sorted_epoch_ids(epoch_scores)
+        return ordered[: min(3, len(ordered))]
 
     def top5_mean(epoch_scores):
-        items = sorted(epoch_scores.items(), key=lambda kv: kv[1], reverse=True)
-        k = min(5, len(items))
-        return [ep for ep, _ in items[:k]]
+        ordered = _sorted_epoch_ids(epoch_scores)
+        return ordered[: min(5, len(ordered))]
 
     return {
         'best1': best1,
@@ -57,21 +65,23 @@ def build_rules():
 
 
 def extract_rule_value(info):
-    if isinstance(info, (int, float)):
+    if isinstance(info, (int, float, np.floating)):
         return float(info)
     if isinstance(info, dict):
         for key in ('mean', 'score', 'primary', 'heldout_mean', 'avg', 'delta_vs_reference'):
-            if key in info and isinstance(info[key], (int, float)):
+            if key in info and isinstance(info[key], (int, float, np.floating)):
                 return float(info[key])
-        nums = [float(v) for v in info.values() if isinstance(v, (int, float))]
+        nums = [float(v) for v in info.values() if isinstance(v, (int, float, np.floating))]
         if nums:
             return float(sum(nums) / len(nums))
     return float('-inf')
 
 
 def choose_rule_from_audit(audit, fallback_name='best1'):
-    rules_info = audit.get('rules', {}) if isinstance(audit, dict) else {}
-    if not rules_info:
+    if not isinstance(audit, dict):
+        return fallback_name
+    rules_info = audit.get('rules', {})
+    if not isinstance(rules_info, dict) or not rules_info:
         return fallback_name
     scored = [(name, extract_rule_value(info)) for name, info in rules_info.items()]
     scored.sort(key=lambda kv: kv[1], reverse=True)
@@ -111,7 +121,9 @@ def main():
 
         epoch_primary = {}
         epoch_valid_scores = {}
-        per_epoch = []
+        ordered_epochs = []
+        ordered_valid_arrays = []
+
         for item in epoch_caps:
             if len(item) != 3:
                 raise RuntimeError('capture_epoch_scores returned unexpected tuple shape')
@@ -121,19 +133,23 @@ def main():
             scores_valid = np.asarray(scores_valid, dtype=np.float32)
             epoch_primary[epoch] = valid_primary
             epoch_valid_scores[epoch] = scores_valid
-            per_epoch.append((epoch, valid_primary, scores_valid))
 
-        per_epoch.sort(key=lambda x: x[0])
+        for epoch in sorted(epoch_valid_scores.keys()):
+            ordered_epochs.append(epoch)
+            ordered_valid_arrays.append(epoch_valid_scores[epoch])
+
         rules = build_rules()
         user_ids_valid = np.asarray(splits['valid']['user_raw'])
         labels_valid = np.asarray(splits['valid']['long_view'])
 
-        audit = selection_rule_test(per_epoch, user_ids_valid, labels_valid, rules)
+        audit = selection_rule_test(ordered_valid_arrays, user_ids_valid, labels_valid, rules)
         chosen_rule_name = choose_rule_from_audit(audit, fallback_name='best1')
         chosen_epochs = rules[chosen_rule_name](epoch_primary)
+        if not chosen_epochs:
+            raise RuntimeError('Chosen rule returned no epochs')
+
         final_valid = mean_scores([epoch_valid_scores[ep] for ep in chosen_epochs])
         metrics = evaluate(user_ids_valid, labels_valid, final_valid)
-
         final_test = np.asarray(res['scores_test'], dtype=np.float32)
 
         with open(os.path.join(args.output_dir, 'metrics.json'), 'w') as f:
