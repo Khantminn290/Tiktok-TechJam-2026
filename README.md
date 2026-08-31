@@ -47,6 +47,7 @@ development used train + validation only.
 
 | Deliverable | File |
 |---|---|
+| Devpost project story | [`docs/DEVPOST_STORY.md`](docs/DEVPOST_STORY.md) |
 | Results summary + resource usage | [`RESULTS.md`](RESULTS.md) |
 | Per-iteration run log | [`logs/ITERATION_LOG.md`](logs/ITERATION_LOG.md) |
 | Machine-readable journal | [`logs/journal.jsonl`](logs/journal.jsonl) |

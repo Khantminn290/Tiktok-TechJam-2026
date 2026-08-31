@@ -1,33 +1,22 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T15:12:54Z",
+  "generated_utc": "2026-08-31T15:23:01Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "7603c2a088a497dd4987ba9282d322cf81b1a68d",
-    "short_sha": "7603c2a088a4",
+    "sha": "2f3f5c2c07e41c0e9d20bf45b3d4f16c4307c02f",
+    "short_sha": "2f3f5c2c07e4",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 16,
+    "dirty_files": 5,
     "source_dirty": true,
     "source_dirty_files": [
       "README.md",
-      "agent/devpost.py",
-      "agent/manifest.py",
-      "agent/report.py",
-      "agent/results_report.py",
-      "docs/ARCHITECTURE.md",
-      "docs/CLAUDE_HACKATHON_READINESS_BRIEF.md",
-      "docs/RESEARCH_LOG.md",
-      "agent/iteration_log.py"
+      "agent/iteration_log.py",
+      "docs/DEVPOST_STORY.md"
     ],
     "generated_dirty_files": [
       "RESULTS.md",
-      "docs/DEVPOST_SUBMISSION.md",
-      "logs/opus_research/AUTONOMY_EVALUATION.md",
-      "results/JUDGE_PACKET.md",
-      "results/manifest.json",
-      "logs/ITERATION_LOG.md",
-      "logs/baseline/"
+      "logs/ITERATION_LOG.md"
     ]
   },
   "dataset": {
@@ -598,7 +587,7 @@
     "executed": true,
     "passed": 1116,
     "failed": 0,
-    "seconds": 28.8
+    "seconds": 27.1
   },
   "submission_artifacts": {
     "valid": {

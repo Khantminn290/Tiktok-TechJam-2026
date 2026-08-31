@@ -70,7 +70,7 @@ Each iteration states the four things the run-log deliverable requires: the **hy
 
 - failure: BrokenPipeError: [Errno 32] Broken pipe
 - event: `execution_error` — BrokenPipeError: [Errno 32] Broken pipe
-- recovery: none recorded after this iteration
+- recovery: iteration 3 moved on with a `confirm` — scored 0.60446
 
 ---
 
@@ -174,7 +174,7 @@ Each iteration states the four things the run-log deliverable requires: the **hy
 
 - failure: out = capture_selection_rule_test(cfg['capture_epoch_scores'], users, labels)
 - event: `execution_error` — class `api_misuse` — per_epoch_scores could not be read as an array (setting an array element with a sequence. The requested array has an inhomogeneous shape after 2 dimensions. The — agent judged retry worthwhile
-- recovery: none recorded after this iteration
+- recovery: iteration 8 abandoned this branch after the retry cap and routed around it, extending node 4 instead — scored 0.60454
 
 ---
 

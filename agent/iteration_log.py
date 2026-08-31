@@ -105,7 +105,34 @@ def _recovery(node: dict, nodes: list) -> list:
     nid = node.get("iteration_id")
     kids = [n for n in nodes if n.get("parent_id") == nid
             and n.get("iteration_id") != nid]
+    # A retry is not always a child. When a `confirm` crashes, the agent
+    # re-runs it against the SAME parent, so the retry is a sibling and a
+    # child-only read would report "no recovery" for a failure the agent
+    # actually handled -- understating autonomy in the deliverable that
+    # autonomy is scored from.
+    if not kids:
+        kids = [n for n in nodes
+                if (n.get("iteration_id") or -1) > (nid or -1)
+                and n.get("parent_id") == node.get("parent_id")
+                and n.get("action") == node.get("action")
+                and n.get("hypothesis") == node.get("hypothesis")][:1]
     out = []
+    # Routing around is recovery too. When a debug chain hits its cap the
+    # agent abandons the branch and extends the best known node instead --
+    # it says so in the next node's decide_reason. Reporting "none" there
+    # would hide the handling and count it as an unrecovered failure.
+    if not kids:
+        later = [n for n in nodes if (n.get("iteration_id") or -1) > (nid or -1)]
+        nxt = min(later, key=lambda n: n["iteration_id"]) if later else None
+        if nxt and f"abandoning node {nid}" in (nxt.get("decide_reason") or ""):
+            got = (nxt.get("metrics") or {}).get("primary")
+            out.append(
+                f"iteration {nxt['iteration_id']} abandoned this branch after "
+                f"the retry cap and routed around it, extending node "
+                f"{nxt.get('parent_id')} instead"
+                + (f" — scored {got:.5f}" if isinstance(got, (int, float))
+                   else ""))
+            return out
     for k in kids:
         verb = ("debugged it and retried" if k.get("action") == "debug"
                 else f"moved on with a `{k.get('action')}`")
