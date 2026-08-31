@@ -1,5 +1,34 @@
 # Claude Code Brief: Make the Pure Agent Hackathon-Ready
 
+> ## Review note — 2026-08-31, after commit `4b4282c`
+>
+> I fact-checked this brief against the repository. **The central finding is
+> correct and I had it wrong in my own documentation.** Summary of the review,
+> with the detail attached to each section below as `> REVIEW:` blocks.
+>
+> **Confirmed by re-deriving from artifacts:**
+>
+> | Claim | Status |
+> |---|---|
+> | Official rule fires at node 3; ensemble is node 4 | **Confirmed.** Eligible checkpoint is 0.60497 (node 1), not 0.60541 |
+> | A stricter internal epsilon cannot extend the official run | **Confirmed, and it contradicted our own docs** |
+> | Manifest underreports tokens (137,446 vs 269,807) | **Confirmed.** Provider total is 269,807 over 24 calls |
+> | `best_single_seed` reports the ensemble node | **Confirmed.** Was 0.60541 labelled "one draw" |
+> | `+0.00410` at the last training-data doubling | **Confirmed.** 0.60036 → 0.60446, 3 seeds |
+> | Path B has no completed paired retrain | **Confirmed.** 8 registry entries: 6 REJECTED, 2 PROBED |
+> | No pinned environment file | **Confirmed.** No `requirements.txt` or `pyproject.toml` |
+> | Live fault run did not complete a repaired result | **Confirmed.** Correctly labelled incomplete |
+>
+> **Already done since this brief was written** — do not redo (see per-section
+> notes): `manifest.render()` `cache_hits` fix, legacy-journal observation
+> reporting, provider-token fix, `best_single_seed` fix, official-eligibility
+> reporting, the fault suite, and a manifest-generated judge packet.
+>
+> **Where I disagree:** the `+0.00410` evidence does not support the
+> rolling-origin proposal it is attached to (P1), and P0's "ensemble
+> immediately" would skip confirmation — a concrete sequence that satisfies
+> both is given in the P0 notes.
+
 ## Executive verdict
 
 The agent is already a credible autonomous research system, not a dashboard
@@ -24,6 +53,34 @@ official baseline observation first and schedule the fixed 16-seed ensemble
 before the earliest no-progress window can close. Do not rewrite the old
 journal or reinterpret the rule after the fact.
 
+> **REVIEW: correct, and this was the most valuable thing in the brief.**
+> Re-derived from `logs/journal.jsonl`: running best 0.60330 → 0.60497 →
+> 0.60497 → 0.60497, so the window ending at node 3 gains +0.00167 ≤ 0.002 and
+> the rule fires. Eligible checkpoint = **0.60497 (node 1)**. The 0.60541
+> ensemble (node 4) and 0.60509 (node 6) are both after the stop.
+>
+> This contradicted three places in our own repository, all of which argued
+> that a stricter internal epsilon was "the safe direction" because it "can
+> only make the loop run longer... so no scored checkpoint is ever missed".
+> That is true and irrelevant: the rule fixes *what is scored*, so running
+> longer produces an **ineligible** artifact rather than protecting it. Fixed
+> in `agent/convergence_report.py`, `agent/loop.py`, `README.md` and the
+> generated judge packet.
+>
+> **Now machine-checkable, so Codex does not have to take this on trust:**
+> `convergence_report.report()` returns an `eligible_checkpoint` block naming
+> the eligible node, its score, and every higher-scoring node that came too
+> late. It is surfaced in `manifest.render()`, in `results/manifest.json`, and
+> in section 10 of `results/JUDGE_PACKET.md`. Pinned by
+> `test_official_checkpoint_eligibility`.
+>
+> One qualification worth holding onto: with ε = 0.002 against a benchmark
+> whose *total* headroom over baseline is about 0.004, the rule fires at the
+> earliest legal moment in almost any run. That is a property of the rule, not
+> of this agent. It makes the 50-iteration cap and 6-hour ceiling nearly
+> unreachable, which is worth raising with the organizers — but plan for the
+> literal reading, because that is the one that will be applied.
+
 ## Current evidence snapshot
 
 | Item | Current evidence | Submission meaning |
@@ -45,6 +102,23 @@ journal or reinterpret the rule after the fact.
 These are validation facts, not hidden-test claims. The public validation gain
 is promising but does not guarantee that the hidden-test primary beats
 `0.5946`.
+
+> **REVIEW: every row verified. Three need updating.**
+>
+> - *Incumbent validation primary* — accurate, but should now carry the
+>   eligibility caveat: `0.60541` is the best artifact, and `0.60497` is what
+>   the official rule would score on this journal.
+> - *LLM use* — `269,807` is correct and is now what the manifest reports; it
+>   was 137,446 when this table was written. Add that it is **24 provider calls
+>   for 8 decisions**, which is the figure the P2 token work should target.
+> - *Robustness* — now 20 component faults at 100% detection and correct
+>   routing, plus 2 live subprocess faults, plus the one incomplete loop
+>   recovery. The conclusion is unchanged and still right.
+>
+> *Strongest single seed `0.60497`* is correct as written (seed 0 of the
+> submitted configuration). Note it is **not** the same as the manifest's
+> `best_single_seed`, which means the best single-seed node in the journal
+> (`0.60509`, node 6). Keep the two apart in any judge-facing text.
 
 ## Authoritative interpretation
 
@@ -98,6 +172,18 @@ transferred research memory, and the current literature grounding is embedded
 in prose rather than attached to each autonomous decision. The randomized log
 is useful as a diagnostic, but evaluation is on the logged policy, so forcing
 IPS into training would optimize the wrong distribution.
+
+> **REVIEW: "the menu is essentially exhausted" is asserted, not shown.**
+> `agent/frontier.py` tracks per-axis, per-option coverage and can answer this
+> directly — quote its output rather than the claim, especially since a
+> frontier bug previously mislabelled the highest-scoring temporal option as a
+> dead end and cost about 0.007 of apparent headroom. An exhaustion claim from
+> the same subsystem should be checked before it is used to justify skipping
+> Path-A work.
+>
+> The IPS reasoning is correct and worth keeping: the evaluator scores the
+> logged distribution, so reweighting training toward the randomized-exposure
+> distribution optimizes something the metric does not reward.
 
 **Winning evidence:** research cards generated at decision time, one new
 leakage-safe mechanism outside the menu, and an honest negative result if it
@@ -176,6 +262,42 @@ stopping point.
 7. Never mutate the existing journal to make it pass. Produce a clean new run
    directory and preserve the old run as evidence of the issue found.
 
+> **REVIEW: items 4-7 are done; 1-3 are the real work, and item 3 needs
+> amending.**
+>
+> - **Item 4 (compute official convergence, persist eligibility): done.**
+>   `eligible_checkpoint` is computed on every report and carried in the
+>   manifest. What remains is enforcing it *during* a run rather than
+>   reporting it after.
+> - **Item 6 (keep 0.00048 labelled non-official): done and now correctly
+>   reasoned.** The `--competition` profile already exists
+>   (`agent/profiles.py`) but does **not** set the organizer epsilon — the loop
+>   always runs `EPSILON = 0.00048`, and `min_branching_iterations: 3` plus the
+>   pending-ensemble gate actively *block* convergence. That is the gap to
+>   close for item 1.
+> - **Item 7 (never mutate the journal): agreed, and nothing has been.**
+>
+> **Item 3 needs amending — as written it would trade one rigour problem for
+> another.** "Make the first above-baseline candidate eligible for autonomous
+> ensembling immediately" means ensembling a configuration backed by a single
+> seed, which is exactly what the evidence layer exists to prevent.
+>
+> The two goals are compatible, because the ensemble node is itself a scored
+> iteration and its jump keeps the window open. This sequence is verified in
+> `test_official_checkpoint_eligibility`:
+>
+> | node | action | primary | running best | window |
+> |---|---|---|---|---|
+> | 0 | official baseline | 0.6016 | 0.6016 | — |
+> | 1 | candidate | 0.60497 | 0.60497 | — |
+> | 2 | paired confirm | 0.60327 | 0.60497 | — |
+> | 3 | **ensemble** | **0.60541** | 0.60541 | +0.00381 > ε → open |
+> | 4 | improve | 0.60480 | 0.60541 | +0.00044 ≤ ε → **stop** |
+>
+> Convergence fires at node 4 and the eligible checkpoint is the ensemble.
+> Confirmation is preserved. The requirement is "baseline first, ensemble by
+> node 3", not "ensemble without confirming".
+
 ### Required tests
 
 - Reproduce the current score sequence and assert official convergence at node
@@ -212,13 +334,47 @@ Make every displayed result derivable from one machine-readable artifact.
 7. Fail finalization if manifest totals disagree with provider summary, if the
    repository is dirty, or if the selected node is after official convergence.
 
+> **REVIEW: items 1-4 are done. Items 5-7 remain.**
+>
+> All four diagnoses were correct and are fixed in
+> `agent/manifest.py`, pinned by `test_manifest_accounting_matches_the_provider`:
+>
+> - **Item 1 (provider tokens): fixed.** Now 269,807 from
+>   `final_summary.total_llm_tokens`, with `llm_calls: 24` and the node-owned
+>   137,446 retained as `llm_tokens_node_owned` for diagnostics. The 2x gap is
+>   planning, candidate scoring and repair retries — real billed calls that no
+>   single node owns.
+> - **Item 2 (`best_single_seed`): fixed.** It was reporting 0.60541 — the
+>   16-member ensemble — labelled "one draw; cannot change the submission",
+>   which both misattributed the number and understated the evidence. Now
+>   excludes `action == "ensemble"`.
+>   *One correction to the brief:* the right value is **0.60509** (node 6), not
+>   0.60497. Those are different quantities — 0.60497 is seed 0 of the
+>   *submitted configuration*, while this field means the best single-seed
+>   *node in this journal*. The test pins both and says which is which.
+> - **Item 3 (legacy journals): fixed.** `unique_observations_source` states
+>   either "derived from scored nodes: this journal predates execution-event
+>   instrumentation" or the live source, so 28 runs never sit beside 0
+>   observations unexplained.
+> - **Item 4 (`cache_hits`): fixed**, and it was a live `KeyError` in
+>   `manifest.render()`, not just a stale key.
+>
+> **Still open: items 5, 6, 7.** Item 5 partly — git commit, dirty state,
+> dataset and evaluator hashes are present; CSV hash, test-lock state and
+> final-artifact node are not. Item 6 partly — README, dashboard and the judge
+> packet consume the manifest; `RESULTS.md` and a Devpost summary do not.
+> Item 7 (fail finalization on disagreement) is entirely open and is the one
+> that makes the rest enforceable rather than aspirational.
+
 ### Required tests
 
 - Pin the current true total at 269,807 tokens and catch the incorrect 137,446
-  node-only total.
-- Pin single `0.60497` versus ensemble `0.60541` labeling.
-- Render a legacy and a fully instrumented journal without `KeyError`.
+  node-only total. *(done)*
+- Pin single `0.60497` versus ensemble `0.60541` labeling. *(done, but the
+  single-seed node figure is `0.60509`; see the review note above)*
+- Render a legacy and a fully instrumented journal without `KeyError`. *(done)*
 - Regenerate twice and assert stable hashes except for timestamp fields.
+  *(still open)*
 
 ## P1 - Improve hidden-test generalization, not public-valid overfit
 
@@ -228,6 +384,27 @@ Use the strongest measured clue: the model gains `+0.00410` from the final
 50%-to-100% training-data doubling, while epoch selection is highly sensitive.
 With bonus datasets excluded, better use of Pure's legal training period is the
 highest-value score direction.
+
+> **REVIEW: the number is right, the inference attached to it is not.**
+>
+> `+0.00410` is confirmed (`logs/archive_20260830_025425/learning_curve.json`:
+> 0.60036 at 50% → 0.60446 at 100%, 3 seeds, +5.12σ). But it measures a **data
+> volume** effect. Rolling-origin inner validation adds no data — it changes
+> *when you stop training*. The learning curve is evidence that the model is
+> data-limited, which argues for more rows; it is not evidence that epoch
+> selection is leaving anything on the table.
+>
+> The actual premise for P1 is the second clause, "epoch selection is highly
+> sensitive", and that one is asserted without a citation. **Codex: measure it
+> first.** The cheap version is to take the existing per-epoch capture on the
+> incumbent config and ask how much primary varies across the plausible stopping
+> window. If that spread is under about 1σ, rolling-origin cannot pay for itself
+> and this phase should be dropped rather than run.
+>
+> Note also that `docs/RESEARCH_LOG.md` cites this same +0.00410 as the argument
+> for **1K/27K** — which the user has excluded from this cycle. That exclusion is
+> a scope decision, not a technical finding, and it is worth being explicit that
+> excluding it forgoes the largest measured lever in the project.
 
 ### Implement
 
@@ -308,6 +485,36 @@ later action without a human.
 5. Keep robustness logs separate from the competition journal. A controlled
    safe stop is valid robustness evidence; it is not a recovery.
 
+> **REVIEW: agreed throughout, and item 3 is a fair correction of my work.**
+>
+> The live run detected the injected error, classified it, and chose `debug` —
+> then the network dropped and two LLM calls failed, so no repaired training
+> result exists. Calling that "closed-loop recovery" would be overclaiming, and
+> the brief is right to insist on the distinction. `results/live_fault_run/`
+> and the judge packet both describe what happened rather than what was hoped
+> for, but neither yet uses the word *incomplete* — Codex should add it.
+>
+> The three-level split in item 2 is a better framing than what I built, which
+> reports two levels (component, real subprocess) and one narrative live run.
+> Current state against those levels:
+>
+> | level | status |
+> |---|---|
+> | component simulation | 20 faults, 100% detected and correctly routed (`agent/faults.py`) |
+> | real subprocess detection/termination | 2 faults, live through the real executor |
+> | full agent-loop recovery to a later successful action | **not achieved** |
+>
+> Two things the fault work already contributes to item 4, worth reusing rather
+> than rebuilding: the ten-axis check (detection alone is not recovery) and the
+> repair/skip/pivot/abort routing distinction, which is where the interesting
+> judgement lives. A timeout that gets "repaired" by re-running the same work
+> is a failure even though nothing crashed.
+>
+> Note the accounting bug the live run exposed, since it bears on item 4's
+> "record retries, compute spent, final status": the ledger was crediting
+> crashed runs as unique observations while `execution_events` correctly was
+> not. A crash costs compute and earns no evidence. Fixed in `agent/budget.py`.
+
 ## P2 - Reduce tokens without removing agentic code generation
 
 ### Goal
@@ -357,6 +564,30 @@ Create and generate these from the canonical manifest:
 
 1. `docs/JUDGE_GUIDE.md`: a three-minute route covering baseline, clean run,
    tree/journal, final artifact, robustness, cost, and reproduction.
+
+> **REVIEW: items 1 and 5 are stale — following them literally would undo
+> work.**
+>
+> **Item 1 — extend, do not duplicate.** `results/JUDGE_PACKET.md` already
+> exists (`python3 -m agent.judge_packet`, 245 lines) and is generated from the
+> manifest, covering problem, loop, action space, experiment choice,
+> confirmation, ensembling, both results with attribution, run cost, the fault
+> suite, both convergence rules with the eligibility gap, limitations, and
+> reproduction commands. `test_judge_packet_is_generated` mutates the manifest
+> and asserts the packet's numbers move with it, so it cannot go stale.
+> What is genuinely missing from item 1 is the *three-minute route* framing — a
+> short ordered path through the evidence. Add that to the existing generator;
+> a second hand-written guide would be the exact drift this replaced.
+>
+> **Item 5 — the dashboard now has five tabs, and the README is correct.**
+> This instruction ("current four-tab dashboard... no stale five-tab text")
+> was right when written and is now inverted. `app.py` has **Overview / Watch
+> it run / Iteration log / Robustness / Start a run**; the Robustness tab was
+> added with the fault suite and renders from the manifest. README was updated
+> to match in `4b4282c`. Do not "fix" it back to four.
+> The rest of item 5 stands: there is still no public repository URL in the
+> README, and no pinned environment file (confirmed — no `requirements.txt`,
+> `pyproject.toml` or `setup.py`), which makes item 3 a real gap.
 2. `docs/DEVPOST_SUBMISSION.md`: problem, full-stack agent loop, key research
    insight, score, autonomy, robust recovery, resources, limitations, tools,
    libraries, dataset, and solo contribution.
@@ -427,3 +658,43 @@ If Claude Code runs out of context before completing this brief, update
 `HANDOVER_FOR_CODEX.md` with completed commits, dirty files, exact commands and
 outputs, unresolved failures, and the next unchecked acceptance test. Never
 claim a phase complete merely because its code exists.
+
+---
+
+## Review addendum — state at handover
+
+Verified state as of this review (`python3 tests/test_harness.py`: **1077
+passed, 0 failed**):
+
+| | |
+|---|---|
+| Incumbent, recomputed from stored predictions | `0.60541`, exact match |
+| Eligible checkpoint under the official rule | `0.60497` (node 1) — **the open gap** |
+| Hidden test | unspent, no lock file |
+| Faults injected / detected / correctly routed | 20 / 20 / 20 |
+| Live subprocess faults | 2, both detected and classified |
+| Full agent-loop recovery to a later success | **not achieved** |
+| Manual interventions, all runs | 0 |
+| Provider tokens, last run | 269,807 over 24 calls |
+| Pinned environment file | **none** |
+| Path B completed paired retrains | **0** (6 rejected, 2 probed) |
+
+**Suggested order for Codex,** which differs from the brief only in putting the
+cheap enforcement work before the expensive research:
+
+1. **P0 competition profile** — the profile exists but does not set the
+   organizer epsilon, and `min_branching_iterations` plus the pending-ensemble
+   gate actively block convergence. Use the verified baseline → candidate →
+   confirm → ensemble sequence in the P0 notes.
+2. **P0 item 7, fail finalization on disagreement** — small, and it is what
+   makes every other manifest guarantee enforceable rather than aspirational.
+3. **Pinned environment file** — a judge cannot reproduce anything without it,
+   and it is fifteen minutes.
+4. **P1 closed-loop recovery** — the one robustness level not yet reached.
+5. **P1 rolling-origin** — but measure epoch sensitivity first and drop the
+   phase if the spread is under ~1σ (see the P1 review note).
+
+**Do not** reinterpret the recorded journal to make `0.60541` eligible. It is
+the best artifact in the repository and it is honestly documented as produced
+after the official stopping point; a clean run is the fix, and an argument is
+not.

@@ -152,13 +152,29 @@ def _run_facts(journal: str) -> dict:
                  if e.get("type") == "execution_event"]
     tally = EX.tally(ex_events)
 
-    tok = {}
+    # Tokens: the PROVIDER total, not the sum of node-owned calls. Those differ
+    # by roughly 2x -- 137,446 against 269,807 on the recorded run -- because
+    # planning, candidate scoring and repair retries are real billed calls that
+    # no single node owns. The rubric scores what the provider billed, so the
+    # node sum is kept only as a diagnostic.
+    node_tok = {}
     for n in nodes:
         for k, v in (n.get("token_breakdown") or {}).items():
-            tok[k] = tok.get(k, 0) + v
+            node_tok[k] = node_tok.get(k, 0) + v
+    provider = summary.get("total_llm_tokens") or {}
+    tok = {k: provider[k] for k in
+           ("input_tokens", "output_tokens", "cache_creation_input_tokens",
+            "cache_read_input_tokens") if k in provider} or dict(node_tok)
+    tok_total = provider.get("input_plus_output")
+    if tok_total is None:
+        tok_total = sum(tok.values())
 
+    # best_single_seed must EXCLUDE the ensemble node. It was reporting 0.60541
+    # -- the 16-member ensemble -- labelled "one draw; cannot change the
+    # submission", which both misattributes the number and understates it.
     best = max((n["metrics"]["primary"] for n in nodes
-                if n.get("status") == "success" and n.get("metrics")), default=None)
+                if n.get("status") == "success" and n.get("metrics")
+                and (n.get("action") or "") != "ensemble"), default=None)
     ens = [n for n in nodes if (n.get("action") or "") == "ensemble"
            and n.get("metrics")]
     conf = [n for n in nodes if (n.get("action") or "") == "confirm"]
@@ -209,7 +225,11 @@ def _run_facts(journal: str) -> dict:
             _load_jsonl(os.path.join(LOGS, "interventions.jsonl"))),
         "runtime_training_s": m["training_wall_clock_s"],
         "runtime_agent_s": summary.get("total_agent_wall_clock_s"),
-        "llm_tokens": tok, "llm_tokens_total": sum(tok.values()),
+        "llm_tokens": tok, "llm_tokens_total": tok_total,
+        "llm_tokens_source": ("provider run summary"
+                              if provider else "node-owned calls only"),
+        "llm_calls": provider.get("calls"),
+        "llm_tokens_node_owned": sum(node_tok.values()),
         "llm_spend_usd": (summary.get("spend") or {}).get("total_usd"),
         "gpu_hours": summary.get("gpu_hours", 0.0),
         "devices": summary.get("devices_used", ["cpu"]),
@@ -217,7 +237,8 @@ def _run_facts(journal: str) -> dict:
         "best_single_seed": {
             "primary": round(best, 5) if best else None,
             "evidence": "PRELIMINARY",
-            "note": "one draw; cannot change the submission"},
+            "note": "one draw; cannot change the submission. Excludes the "
+                    "ensemble node, which is not a single seed."},
         "best_ensemble": ({"primary": ens[-1]["metrics"]["primary"],
                            "evidence": "CONFIRMED",
                            "note": "agent-run ensemble of one configuration"}
@@ -326,6 +347,10 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
             "official": conv["official"],
             "internal": conv["internal"],
             "caps": conv["caps"],
+            # Which checkpoint the OFFICIAL rule would score. On the recorded
+            # journal this is not the submitted artifact, and that gap is the
+            # single most important open item in the project.
+            "eligible_checkpoint": conv["eligible_checkpoint"],
             "note": conv["compliance_note"]},
 
         "latest_run": _run_facts(journal),
@@ -417,6 +442,15 @@ def render(d: dict) -> str:
          + (f" at node {c['official']['converged_at_node']}"
             if c["official"]["converged"] else ""),
          f"  CONVERGENCE internal     {c['internal']['rule']} (not official)"]
+    el = c.get("eligible_checkpoint") or {}
+    if el.get("determined"):
+        L += [f"  ELIGIBLE CHECKPOINT      node {el['eligible_node']} at "
+              f"{el['eligible_primary']}  (official stop: node "
+              f"{el['converged_at_node']})"]
+        if el.get("better_but_ineligible"):
+            worse = ", ".join(f"node {x['node']} {x['primary']} ({x['action']})"
+                              for x in el["better_but_ineligible"])
+            L += [f"  *** SCORES HIGHER BUT AFTER THE OFFICIAL STOP: {worse}"]
     if r.get("available"):
         L += ["",
               f"  LATEST RUN               {r['outer_iterations']} iterations, "

@@ -42,15 +42,26 @@ BASELINE_VALID_PRIMARY = 0.6016
 BASELINE_SEED_STD = 0.0008     # the official FM baseline's own 5-seed std
 
 # Stop when the running best has gained no more than selection drift alone
-# would produce over N_CONVERGE iterations -- 0.60 sigma, not a round number
-# somebody liked. See validity.convergence_epsilon.
+# would produce over N_CONVERGE iterations. See validity.convergence_epsilon.
 #
-# The previous hand-picked 0.002 was 2.5 sigma. Nothing left on this benchmark
-# is that large, so the loop reliably declared convergence on differences it
-# should have been investigating: clean run 2 stopped at 4 of 6 permitted
-# iterations having gained 0.0003, which is well within noise either way. The
-# calibrated bar makes the ITERATION and SPEND caps the binding budget, which
-# is the honest place for a budget to bind.
+# READ agent/convergence_report.py BEFORE CHANGING THIS. Two rules are in play
+# and they are not interchangeable:
+#
+#   organizer rule   epsilon = 0.002, N = 3.  PUBLISHED BY THE ORGANIZERS.
+#                    It defines when the run stops AND what is scored: the
+#                    validation-best checkpoint at that point.
+#   this constant    epsilon = 0.00048 (0.60 sigma). An INTERNAL research
+#                    controller, not the official rule.
+#
+# An earlier version of this comment called 0.002 "the previous hand-picked"
+# value and "a round number somebody liked". That was wrong: it is the
+# competition's own rule, not a mistake that got fixed.
+#
+# The calibrated bar exists because at 2.5 sigma the loop declared convergence
+# on differences it should have been investigating -- clean run 2 stopped at 4
+# of 6 permitted iterations having gained 0.0003. It is the right bar for
+# SEARCH. It does not extend eligibility: anything found after the organizer
+# rule would have fired is research evidence, not a scored checkpoint.
 EPSILON = convergence_epsilon(N_CONVERGE)     # 0.00048 = 0.60 sigma
 
 

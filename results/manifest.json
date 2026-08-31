@@ -1,13 +1,13 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T06:35:51Z",
+  "generated_utc": "2026-08-31T06:51:01Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "b155457fce5d6dfc3b52446c59a5355ce4d2b21b",
-    "short_sha": "b155457fce5d",
+    "sha": "4b4282c1434b2c0e72339db54fd31175f6d1b875",
+    "short_sha": "4b4282c1434b",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 14
+    "dirty_files": 7
   },
   "dataset": {
     "name": "KuaiRand-Pure",
@@ -322,13 +322,32 @@
       "gain_over_window": 0.000442,
       "best_primary": 0.60541,
       "epsilon_sigma": 0.6,
-      "rationale": "calibrated to the upward drift a running maximum shows by luck over N iterations. Stricter than the organizer rule, so it can only extend a search, never end one early."
+      "rationale": "calibrated to the upward drift a running maximum shows by luck over N iterations. Stricter than the organizer rule, so it extends the SEARCH -- but anything it finds after the official stopping point is research evidence, not an eligible scored checkpoint."
     },
     "caps": {
       "iterations": 50,
       "wall_clock_hours": 6.0
     },
-    "note": "The organizer rule is the official definition of convergence and of which checkpoint is scored. The internal controller is STRICTER, so the loop stops no earlier than the organizer rule would; it never skips a scored checkpoint. Both are reported so neither is mistaken for the other."
+    "eligible_checkpoint": {
+      "determined": true,
+      "converged_at_node": 3,
+      "eligible_node": 1,
+      "eligible_primary": 0.60497,
+      "better_but_ineligible": [
+        {
+          "node": 4,
+          "primary": 0.60541,
+          "action": "ensemble"
+        },
+        {
+          "node": 6,
+          "primary": 0.60509,
+          "action": "improve"
+        }
+      ],
+      "note": "anything in better_but_ineligible was produced AFTER the official stopping point and cannot be the scored submission for this journal"
+    },
+    "note": "The organizer rule is the official definition of convergence AND of which checkpoint is scored: the validation-best checkpoint at the point it fires. The internal controller is stricter, so the loop keeps searching past that point -- which is useful for research and does NOT make a later artifact eligible. Check official.converged_at_node before treating any result as the submission."
   },
   "latest_run": {
     "available": true,
@@ -362,12 +381,15 @@
     "runtime_training_s": 2321.5,
     "runtime_agent_s": 2545.4,
     "llm_tokens": {
-      "input_tokens": 131323,
-      "output_tokens": 6123,
+      "input_tokens": 250713,
+      "output_tokens": 19094,
       "cache_creation_input_tokens": 0,
       "cache_read_input_tokens": 0
     },
-    "llm_tokens_total": 137446,
+    "llm_tokens_total": 269807,
+    "llm_tokens_source": "provider run summary",
+    "llm_calls": 24,
+    "llm_tokens_node_owned": 137446,
     "llm_spend_usd": 0.913193,
     "gpu_hours": 0.0,
     "devices": [
@@ -375,9 +397,9 @@
     ],
     "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
     "best_single_seed": {
-      "primary": 0.60541,
+      "primary": 0.60509,
       "evidence": "PRELIMINARY",
-      "note": "one draw; cannot change the submission"
+      "note": "one draw; cannot change the submission. Excludes the ensemble node, which is not a single seed."
     },
     "best_ensemble": {
       "primary": 0.60541,
@@ -387,7 +409,7 @@
   },
   "tests": {
     "executed": true,
-    "passed": 1058,
+    "passed": 1077,
     "failed": 0,
     "seconds": 21.9
   },

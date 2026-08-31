@@ -358,11 +358,43 @@ def _convergence(d) -> list:
         f"**Internal research controller.** `{i['rule']}` "
         f"({i.get('epsilon_sigma')} sigma) — *not* the official rule. It is "
         f"calibrated to the upward drift a running maximum shows by luck at "
-        f"this noise floor. It is **stricter**, so it can only make the loop "
-        f"run longer than the organizers' rule would, never stop it earlier, "
-        f"and no scored checkpoint is ever skipped.", "",
+        f"this noise floor, and it is stricter, so the search keeps going past "
+        f"the point the organizers' rule would end it.", "",
         f"> {c['note']}", "",
-    ]
+    ] + _eligibility(c)
+
+
+def _eligibility(c) -> list:
+    """The gap between "our best number" and "the number that would be scored".
+
+    This is the most consequential thing in the packet and it reads badly, so
+    it is stated in full rather than softened. The organizer rule fixes not
+    only when a run stops but which checkpoint is scored, and on the recorded
+    journal the submitted ensemble was produced after that point.
+    """
+    el = c.get("eligible_checkpoint") or {}
+    if not el.get("determined"):
+        return ["### Eligible checkpoint", "",
+                f"Not determined: {el.get('reason', 'unknown')}.", ""]
+    L = ["### Eligible checkpoint — an open compliance risk", "",
+         f"The organizers' rule fixes *what is scored*, not just when to stop: "
+         f"the validation-best checkpoint **at the point it fires**. On the "
+         f"recorded journal it fires at **node "
+         f"{el['converged_at_node']}**, where the validation-best checkpoint is "
+         f"**{_f(el['eligible_primary'])}** (node {el['eligible_node']}).", ""]
+    if el.get("better_but_ineligible"):
+        L += ["Later nodes score higher, but were produced after that point:",
+              ""]
+        L += [f"- node {x['node']} — {_f(x['primary'])} (`{x['action']}`)"
+              for x in el["better_but_ineligible"]]
+        L += ["",
+              "**We are not claiming these are eligible for this journal.** A "
+              "stricter internal epsilon keeps a search alive; it does not make "
+              "a later artifact scoreable. The fix is a clean run under the "
+              "organizers' rule that reaches the ensemble before the first "
+              "no-progress window can close — not a reinterpretation of this "
+              "one after the fact.", ""]
+    return L
 
 
 def _limitations(d) -> list:
@@ -372,30 +404,36 @@ def _limitations(d) -> list:
     L = [
         "## 11. Limitations", "",
         "Stated because they are true, not because they are small.", "",
-        f"1. **The hidden test has not been evaluated** "
+        f"1. **The submitted ensemble may not be an eligible checkpoint for "
+        f"the recorded journal.** The organizers' rule fires at node "
+        f"{((d['convergence'].get('eligible_checkpoint') or {}).get('converged_at_node'))}"
+        f" and the ensemble is later than that (section 10). This is a "
+        f"compliance gap, not a scoring one, and it is fixed by a clean run "
+        f"under the organizers' rule — not by reinterpreting this journal.",
+        f"2. **The hidden test has not been evaluated** "
         f"(`evaluated: {ht.get('evaluated')}`). Every number in this packet is "
         f"validation. The gap between validation and test on the official "
         f"baseline is -0.0070, and there is no reason to expect this "
         f"submission to be exempt from a gap of that order.",
-        f"2. **The agent matched the incumbent; it has not beaten it.** From a "
+        f"3. **The agent matched the incumbent; it has not beaten it.** From a "
         f"cold start it reproduced {_f((s.get('reported') or {}).get('primary'))} "
         f"unaided. No result in this repository exceeds it.",
-        f"3. **The submitted artifact was originally human-invoked.** The "
+        f"4. **The submitted artifact was originally human-invoked.** The "
         f"reproduction is real and journalled, but the file that will be "
         f"submitted was built by a person typing a command.",
-        f"4. **One configuration family.** The ensemble is 16 seeds of a "
+        f"5. **One configuration family.** The ensemble is 16 seeds of a "
         f"single configuration, not a diverse ensemble. Diversity across "
         f"configurations is untested and is the most obvious place left to "
         f"look.",
-        f"5. **The effect being claimed is close to the noise floor.** "
+        f"6. **The effect being claimed is close to the noise floor.** "
         f"+{_f(s.get('gain_over_mean_member'))} over the mean member is about "
         f"1 sigma. It is real and reproducible by re-aggregating the stored "
         f"predictions, but it is not large.",
-        f"6. **Autonomy is Level B, not Level A.** The agent transfers "
+        f"7. **Autonomy is Level B, not Level A.** The agent transfers "
         f"capabilities and writes its own experiments, but the capability "
         f"contract and the modification menu are human-authored; a new axis "
         f"requires human approval before it becomes live.",
-        f"7. **The search is short.** The recorded run is "
+        f"8. **The search is short.** The recorded run is "
         f"{r.get('outer_iterations', '?')} outer iterations. The organizers "
         f"allow 50.", "",
     ]

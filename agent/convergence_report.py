@@ -20,10 +20,24 @@ replaced -- which reads as though an official rule were a bug that got fixed.
 It is not. It is the rule the competition is scored under, and this module
 reports it as such.
 
-Stricter is the safe direction: a tighter epsilon can only make the loop run
+A CORRECTION, because this module previously argued the opposite. It said
+"stricter is the safe direction: a tighter epsilon can only make the loop run
 LONGER than the organizer rule would, never stop it earlier, so no scored
-checkpoint is ever missed. It stays inside the organizer's other two limits,
-which are hard caps rather than judgement calls.
+checkpoint is ever missed."
+
+That is true and beside the point. The organizer rule does not only say when to
+stop; it says WHAT IS SCORED -- "the scored submission is the validation-best
+checkpoint at that point." So running longer does not protect a later artifact,
+it produces an INELIGIBLE one. On the recorded journal the official rule fires
+at node 3, where the validation-best checkpoint is 0.60497; the 0.60541 ensemble
+is node 4, after the official stop.
+
+The risk therefore runs the other way from what this module used to claim. A
+stricter internal epsilon is safe for RESEARCH -- it keeps a search alive past
+the point the organizer rule would kill it -- and unsafe for SUBMISSION, because
+everything it discovers after the official stopping point is evidence, not a
+scored checkpoint. Both numbers are reported below so the two are never
+confused, and `official.converged_at_node` is the one that decides eligibility.
 
 Usage:
     python3 -m agent.convergence_report
@@ -110,8 +124,9 @@ def research_controller(nodes: list) -> dict:
     r["epsilon_sigma"] = round(EPSILON / NOISE, 2)
     r["rationale"] = (
         "calibrated to the upward drift a running maximum shows by luck over N "
-        "iterations. Stricter than the organizer rule, so it can only extend a "
-        "search, never end one early.")
+        "iterations. Stricter than the organizer rule, so it extends the "
+        "SEARCH -- but anything it finds after the official stopping point is "
+        "research evidence, not an eligible scored checkpoint.")
     return r
 
 
@@ -124,13 +139,51 @@ def report(nodes: list) -> dict:
         "caps": {"iterations": ORGANIZER_ITERATION_CAP,
                  "wall_clock_hours": ORGANIZER_WALL_CLOCK_H},
         "compliance_note": (
-            "The organizer rule is the official definition of convergence and "
-            "of which checkpoint is scored. The internal controller is "
-            "STRICTER, so the loop stops no earlier than the organizer rule "
-            "would; it never skips a scored checkpoint. Both are reported so "
-            "neither is mistaken for the other."),
-        "consistent": (not org["converged"]) or bool(org["converged"]),
+            "The organizer rule is the official definition of convergence AND "
+            "of which checkpoint is scored: the validation-best checkpoint at "
+            "the point it fires. The internal controller is stricter, so the "
+            "loop keeps searching past that point -- which is useful for "
+            "research and does NOT make a later artifact eligible. Check "
+            "official.converged_at_node before treating any result as the "
+            "submission."),
+        "eligible_checkpoint": _eligible(nodes, org),
     }
+
+
+def _eligible(nodes: list, org: dict) -> dict:
+    """Which checkpoint the official rule would actually score.
+
+    The one question the two-rule report has to answer and previously did not:
+    if the organizer rule fired at node X, the submission is the best scored
+    node at or before X -- not the best node overall.
+    """
+    if not org.get("converged"):
+        bests = _running_best(nodes)
+        return {"determined": False,
+                "reason": "the official rule has not fired on this journal",
+                "best_so_far": bests[-1][1] if bests else None}
+    stop = org["converged_at_node"]
+    scored = [(n.get("iteration_id"), n["metrics"]["primary"]) for n in nodes
+              if n.get("status") == "success" and n.get("metrics")
+              and n.get("iteration_id") is not None
+              and n["iteration_id"] <= stop]
+    if not scored:
+        return {"determined": False, "reason": "no scored node at or before "
+                                               f"the stop at node {stop}"}
+    node, primary = max(scored, key=lambda x: x[1])
+    later = [(n.get("iteration_id"), n["metrics"]["primary"], n.get("action"))
+             for n in nodes
+             if n.get("status") == "success" and n.get("metrics")
+             and (n.get("iteration_id") or -1) > stop
+             and n["metrics"]["primary"] > primary]
+    return {"determined": True, "converged_at_node": stop,
+            "eligible_node": node, "eligible_primary": round(primary, 5),
+            "better_but_ineligible": [
+                {"node": i, "primary": round(p, 5), "action": a}
+                for i, p, a in later],
+            "note": ("anything in better_but_ineligible was produced AFTER the "
+                     "official stopping point and cannot be the scored "
+                     "submission for this journal")}
 
 
 def render(r: dict) -> str:

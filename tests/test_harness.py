@@ -5473,6 +5473,146 @@ def test_fault_recovery():
               run.get("manual_interventions", 0) == 0)
 
 
+def test_official_checkpoint_eligibility():
+    """Which checkpoint would the ORGANIZERS score?
+
+    Found in review, and it is the most consequential thing in the project.
+    The organizer rule fixes not only when a run stops but what is scored --
+    "the validation-best checkpoint at that point". This repository's docs
+    previously argued that a stricter internal epsilon was "the safe
+    direction", because it can only make the loop run longer and so "no scored
+    checkpoint is ever missed". True, and beside the point: running past the
+    official stop does not protect a later artifact, it produces an INELIGIBLE
+    one.
+    """
+    print("\n[official checkpoint eligibility]")
+    from agent import convergence_report as CR
+
+    def n(i, primary, action="draft", status="success"):
+        return {"iteration_id": i, "status": status, "action": action,
+                "metrics": {"primary": primary} if primary else None}
+
+    # The recorded journal: the rule fires at node 3, the ensemble is node 4.
+    live = [json.loads(l) for l in
+            open(os.path.join(_ROOT, "logs", "journal.jsonl")) if l.strip()]
+    r = CR.report(live)
+    el = r["eligible_checkpoint"]
+    check("the official rule fires before the submitted ensemble",
+          r["official"]["converged"] and el["converged_at_node"] == 3,
+          f"converged at node {el.get('converged_at_node')}")
+    check("...so the eligible checkpoint is 0.60497, not 0.60541",
+          el["eligible_primary"] == 0.60497 and el["eligible_node"] == 1,
+          f"node {el.get('eligible_node')} at {el.get('eligible_primary')}")
+    check("...and the higher later scores are named as ineligible",
+          {x["node"] for x in el["better_but_ineligible"]} == {4, 6},
+          json.dumps(el["better_but_ineligible"]))
+
+    # A run sequenced to keep the window open: the ensemble's own jump exceeds
+    # epsilon, so convergence cannot fire until after it exists.
+    good = [n(0, 0.6016), n(1, 0.60497), n(2, 0.60327, "confirm"),
+            n(3, 0.60541, "ensemble"), n(4, 0.60480), n(5, 0.60500)]
+    rg = CR.report(good)
+    eg = rg["eligible_checkpoint"]
+    check("baseline-first then early ensemble keeps the ensemble eligible",
+          eg["eligible_primary"] == 0.60541 and not eg["better_but_ineligible"],
+          f"eligible {eg.get('eligible_primary')} at node "
+          f"{eg.get('eligible_node')}, stop node {eg.get('converged_at_node')}")
+
+    # A crash cannot advance or trigger the window: the rule is over SCORED
+    # iterations, so an errored node must not be able to end the run.
+    crashy = [n(0, 0.6016), n(1, None, status="error"),
+              n(2, None, status="error"), n(3, None, status="error")]
+    rc = CR.organizer_convergence(crashy)
+    check("crashes cannot trigger official convergence",
+          not rc["converged"] and rc["scored_iterations"] == 1)
+
+    check("the internal rule is never presented as the official one",
+          "NOT the organizer rule" in r["internal"]["source"]
+          and r["official"]["rule"] == "epsilon=0.002, N=3")
+    check("...and the compliance note says eligibility follows the OFFICIAL "
+          "rule", "official.converged_at_node" in r["compliance_note"])
+
+    # It must be visible in the manifest, not buried in a module.
+    from agent import manifest as MF
+    m = MF.load() or {}
+    check("the manifest carries the eligible checkpoint",
+          ((m.get("convergence") or {}).get("eligible_checkpoint") or {})
+          .get("eligible_primary") == 0.60497)
+    txt = MF.render(m)
+    check("...and render() surfaces the gap rather than hiding it",
+          "ELIGIBLE CHECKPOINT" in txt and "AFTER THE OFFICIAL STOP" in txt)
+
+
+def test_manifest_accounting_matches_the_provider():
+    """Two accounting bugs found in review, both of which flatter the project.
+
+    Tokens are what the PROVIDER billed, not the sum of node-owned calls --
+    planning, candidate scoring and repair retries are real billed calls that
+    no single node owns, and the two differ by roughly 2x. And the "best single
+    seed" field was reporting the 16-member ensemble, labelled "one draw".
+    """
+    print("\n[manifest accounting]")
+    from agent import manifest as MF
+
+    r = (MF.load() or {}).get("latest_run") or {}
+    summary = json.load(open(os.path.join(_ROOT, "logs", "final_summary.json")))
+    prov = summary["total_llm_tokens"]
+
+    node_only = 0
+    for ln in open(os.path.join(_ROOT, "logs", "journal.jsonl")):
+        if ln.strip():
+            node_only += sum((json.loads(ln).get("token_breakdown") or {}).values())
+
+    check("tokens come from the provider total",
+          r["llm_tokens_total"] == prov["input_plus_output"] == 269807,
+          f"manifest {r.get('llm_tokens_total')} vs provider "
+          f"{prov['input_plus_output']}")
+    check("...not the node-owned sum, which is about half of it",
+          r["llm_tokens_total"] != node_only and node_only == 137446,
+          f"node-owned {node_only}")
+    check("...and the node-owned figure is kept, labelled as a diagnostic",
+          r["llm_tokens_node_owned"] == node_only
+          and "provider" in r["llm_tokens_source"])
+    check("the provider call count is reported",
+          r["llm_calls"] == prov["calls"],
+          f"{r.get('llm_calls')} calls for {r['outer_iterations']} decisions")
+
+    check("best_single_seed excludes the ensemble node",
+          r["best_single_seed"]["primary"] != r["best_ensemble"]["primary"],
+          f"single {r['best_single_seed']['primary']} vs ensemble "
+          f"{r['best_ensemble']['primary']}")
+    # Two different "best single seed" numbers exist and are easily confused:
+    # 0.60509 is the best single-seed NODE in this journal, while 0.60497 is
+    # seed 0 of the SUBMITTED configuration. The manifest field means the
+    # former, and must equal the best non-ensemble scored node.
+    best_node = max(json.loads(l)["metrics"]["primary"]
+                    for l in open(os.path.join(_ROOT, "logs", "journal.jsonl"))
+                    if l.strip() and json.loads(l).get("metrics")
+                    and json.loads(l).get("action") != "ensemble")
+    check("...and reports the best non-ensemble scored node",
+          r["best_single_seed"]["primary"] == round(best_node, 5) == 0.60509,
+          f"{r['best_single_seed']['primary']} vs {round(best_node, 5)}")
+    check("...which is NOT seed 0 of the submitted config (0.60497)",
+          r["best_single_seed"]["primary"] != 0.60497,
+          "these are different quantities and the field means the former")
+    check("...while the ensemble keeps its own field at 0.60541",
+          r["best_ensemble"]["primary"] == 0.60541)
+
+    # A legacy journal and an instrumented one must both render.
+    with tempfile.TemporaryDirectory() as td:
+        legacy = os.path.join(td, "legacy.jsonl")
+        with open(legacy, "w") as fh:
+            fh.write(json.dumps({"iteration_id": 0, "status": "success",
+                                 "action": "draft",
+                                 "metrics": {"primary": 0.603}}) + "\n")
+        f = MF._run_facts(legacy)
+        check("a journal with no execution events still renders",
+              f["available"] and "predates" in f["unique_observations_source"],
+              f["unique_observations_source"])
+        check("...without claiming zero observations beside real runs",
+              f["unique_observations"] == 1)
+
+
 def test_judge_packet_is_generated():
     """The judge-facing document must be derivable, not written.
 
@@ -5682,6 +5822,8 @@ if __name__ == "__main__":
               test_evidence_states, test_research_memory,
               test_redundancy_reasoning, test_failure_repeat_detection,
               test_provenance, test_fault_recovery, test_judge_packet_is_generated,
+              test_official_checkpoint_eligibility,
+              test_manifest_accounting_matches_the_provider,
               test_incumbent_still_reproduces,
               test_restricted_access_survives_termination,
               test_submission_artifacts_survive_fresh):

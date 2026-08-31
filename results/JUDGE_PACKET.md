@@ -1,6 +1,6 @@
 # Autonomous ML Research Agent — KuaiRand-Pure
 
-*Generated from `results/manifest.json` on 2026-08-31T06:35:51Z at commit `b155457fce5d` (opus-research-agent).*
+*Generated from `results/manifest.json` on 2026-08-31T06:51:01Z at commit `4b4282c1434b` (opus-research-agent).*
 
 Every number in this document is read from that manifest, which is generated from artifacts on disk. Nothing is transcribed by hand.
 
@@ -126,7 +126,7 @@ This is the part most easily overstated, so it is stated plainly.
 | **manual interventions** | **0** |
 | training wall-clock | 2321.5 s |
 | total agent wall-clock | 2545.4 s |
-| LLM tokens | 137,446 (in 131,323, out 6,123) |
+| LLM tokens | 269,807 (in 250,713, out 19,094) |
 | LLM spend | $0.9132 |
 | devices | cpu |
 
@@ -161,7 +161,7 @@ Unit tests establish that components behave when handed a constructed input. Thi
 Artifacts: `results/live_fault_run/`  
 Reproduce: `python3 run_agent.py --fresh --max-iterations 4 --inject-error-at 1 --max-training-runs 4`
 
-Test harness: **1058 passed, 0 failed** (21.9s).
+Test harness: **1077 passed, 0 failed** (21.9s).
 
 ## 10. Convergence
 
@@ -173,21 +173,33 @@ Two rules, kept separate, because conflating them would be a compliance problem 
 - converged: **yes**, first at node 3 (gain 0.001672 over the window)
 - best validation primary: 0.60541
 
-**Internal research controller.** `epsilon=0.00048, N=3` (0.6 sigma) — *not* the official rule. It is calibrated to the upward drift a running maximum shows by luck at this noise floor. It is **stricter**, so it can only make the loop run longer than the organizers' rule would, never stop it earlier, and no scored checkpoint is ever skipped.
+**Internal research controller.** `epsilon=0.00048, N=3` (0.6 sigma) — *not* the official rule. It is calibrated to the upward drift a running maximum shows by luck at this noise floor, and it is stricter, so the search keeps going past the point the organizers' rule would end it.
 
-> The organizer rule is the official definition of convergence and of which checkpoint is scored. The internal controller is STRICTER, so the loop stops no earlier than the organizer rule would; it never skips a scored checkpoint. Both are reported so neither is mistaken for the other.
+> The organizer rule is the official definition of convergence AND of which checkpoint is scored: the validation-best checkpoint at the point it fires. The internal controller is stricter, so the loop keeps searching past that point -- which is useful for research and does NOT make a later artifact eligible. Check official.converged_at_node before treating any result as the submission.
+
+### Eligible checkpoint — an open compliance risk
+
+The organizers' rule fixes *what is scored*, not just when to stop: the validation-best checkpoint **at the point it fires**. On the recorded journal it fires at **node 3**, where the validation-best checkpoint is **0.60497** (node 1).
+
+Later nodes score higher, but were produced after that point:
+
+- node 4 — 0.60541 (`ensemble`)
+- node 6 — 0.60509 (`improve`)
+
+**We are not claiming these are eligible for this journal.** A stricter internal epsilon keeps a search alive; it does not make a later artifact scoreable. The fix is a clean run under the organizers' rule that reaches the ensemble before the first no-progress window can close — not a reinterpretation of this one after the fact.
 
 ## 11. Limitations
 
 Stated because they are true, not because they are small.
 
-1. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
-2. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
-3. **The submitted artifact was originally human-invoked.** The reproduction is real and journalled, but the file that will be submitted was built by a person typing a command.
-4. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.
-5. **The effect being claimed is close to the noise floor.** +0.00078 over the mean member is about 1 sigma. It is real and reproducible by re-aggregating the stored predictions, but it is not large.
-6. **Autonomy is Level B, not Level A.** The agent transfers capabilities and writes its own experiments, but the capability contract and the modification menu are human-authored; a new axis requires human approval before it becomes live.
-7. **The search is short.** The recorded run is 8 outer iterations. The organizers allow 50.
+1. **The submitted ensemble may not be an eligible checkpoint for the recorded journal.** The organizers' rule fires at node 3 and the ensemble is later than that (section 10). This is a compliance gap, not a scoring one, and it is fixed by a clean run under the organizers' rule — not by reinterpreting this journal.
+2. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
+3. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
+4. **The submitted artifact was originally human-invoked.** The reproduction is real and journalled, but the file that will be submitted was built by a person typing a command.
+5. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.
+6. **The effect being claimed is close to the noise floor.** +0.00078 over the mean member is about 1 sigma. It is real and reproducible by re-aggregating the stored predictions, but it is not large.
+7. **Autonomy is Level B, not Level A.** The agent transfers capabilities and writes its own experiments, but the capability contract and the modification menu are human-authored; a new axis requires human approval before it becomes live.
+8. **The search is short.** The recorded run is 8 outer iterations. The organizers allow 50.
 
 ## 12. Exact reproduction commands
 
