@@ -40,6 +40,19 @@ MECHANISM_BLOCKED = "mechanism_blocked"
 HYPOTHESIS_DISPROVED = "hypothesis_disproved"   # NOT a failure of the code
 UNKNOWN = "unknown"
 
+# A few classes leave their evidence in STDOUT rather than in the traceback: an
+# OOM kill and a CUDA device assert are printed by the kernel or the driver, not
+# raised. Everything else must be diagnosed from the traceback.
+#
+# The distinction is not academic. Every training run in this project logs
+# `valid primary ... (GAUC ... nDCG@5 ...)` once per epoch, so matching the
+# generic patterns against stdout means the EVALUATION pattern (`ndcg|gauc`)
+# fires on ordinary progress logging. A deliberately injected RuntimeError was
+# classified `evaluation_failure` in a live run for exactly this reason, and the
+# agent was handed "Scoring itself failed. Use train_lib's official evaluate" --
+# guidance that points away from the actual fault.
+_STDOUT_VISIBLE = ("resource_exhaustion", "cuda_device")
+
 # Ordered: first match wins, so specific patterns precede generic ones.
 _PATTERNS = [
     (LEAKAGE_BLOCKED, r"BLOCKED BEFORE EXECUTION by the leakage review"),
@@ -135,11 +148,21 @@ def classify(error_trace: str | None, *, status: str = "error",
                                 "did not support the hypothesis",
                 "metrics": metrics}
     t = error_trace or ""
+    # Diagnose from the traceback. The executor appends the run's stdout after
+    # a "--- stdout" marker, and that tail is progress logging, not a fault.
+    stderr_part = t.split("--- stdout")[0]
     cls = UNKNOWN
     for name, pat in _PATTERNS:
-        if re.search(pat, t, re.IGNORECASE):
+        if re.search(pat, stderr_part, re.IGNORECASE):
             cls = name
             break
+    if cls is UNKNOWN:
+        # Second pass over the whole trace, but only for the faults that really
+        # do announce themselves in stdout.
+        for name, pat in _PATTERNS:
+            if name in _STDOUT_VISIBLE and re.search(pat, t, re.IGNORECASE):
+                cls = name
+                break
     # A NaN reported by the contract checker is an invalid-prediction problem,
     # not generic numerical noise mid-training.
     if cls == NUMERICAL and re.search(r"scores_\w+\.npy contains", t):

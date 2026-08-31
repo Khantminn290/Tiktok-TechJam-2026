@@ -1,0 +1,76 @@
+{
+  "injected_at": 1,
+  "elapsed_s": 314.2,
+  "stop_reason": "iteration cap reached (4)",
+  "nodes": [
+    {
+      "id": 0,
+      "action": "draft",
+      "status": "success",
+      "primary": 0.6046344095078879,
+      "wall_s": 152,
+      "fault_injected_here": false,
+      "failure_class": null,
+      "retry_worthwhile": null,
+      "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes",
+      "error_head": ""
+    },
+    {
+      "id": 1,
+      "action": "improve",
+      "status": "error",
+      "primary": null,
+      "wall_s": 143,
+      "fault_injected_here": true,
+      "failure_class": "evaluation_failure",
+      "retry_worthwhile": true,
+      "decide_reason": "extending global best node 0 (valid primary 0.6046); its neighborhood is not exhausted",
+      "error_head": "exit code 1\n--- stderr (tail) ---\nTraceback (most recent call last):\n  File \"/private/tmp/claude-501/-Users-khantminn-Desktop-Tiktok-TechJam-2026/f68ce099-a4fb-"
+    },
+    {
+      "id": 2,
+      "action": "debug",
+      "status": "error",
+      "primary": null,
+      "wall_s": 0,
+      "fault_injected_here": false,
+      "failure_class": null,
+      "retry_worthwhile": null,
+      "decide_reason": "last attempt (node 1) errored; debug chain length 0 < 2, feeding the error trace back to fix it",
+      "error_head": "LLM stage failed: OpenAI call failed: APIConnectionError: Connection error."
+    },
+    {
+      "id": 3,
+      "action": "draft",
+      "status": "error",
+      "primary": null,
+      "wall_s": 0,
+      "fault_injected_here": false,
+      "failure_class": null,
+      "retry_worthwhile": null,
+      "decide_reason": "node 2 failed before any code was written (LLM-stage failure), so there is nothing to debug; drafting a fresh combination instead",
+      "error_head": "LLM stage failed: OpenAI call failed: APIConnectionError: Connection error."
+    }
+  ],
+  "ledger": {
+    "max_iterations": 4,
+    "max_training_runs": 4,
+    "training_runs_used": 2,
+    "training_runs_left": 2,
+    "training_crashes": 1,
+    "reused_artifacts": 0,
+    "duplicate_reuse_attempts": 0,
+    "unique_observations": 1,
+    "note": "training_runs_used is FRESH COMPUTE. reused_artifacts are previously completed members: real historical evidence, no compute, excluded from the budget. unique_observations is what evidence may rest on; crashes and duplicates add neither."
+  },
+  "spend_usd": 0.0676,
+  "tokens": {
+    "input_tokens": 17681,
+    "output_tokens": 1376,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 11008,
+    "calls": 2
+  },
+  "what_this_is": "One live agent run with a deliberate failure injected at iteration 1 (run_agent.py --inject-error-at 1). Run in an isolated root, so the project's logs/ and the submitted ensemble artifacts were untouched. A second, UNPLANNED fault occurred during the run -- the network dropped and two LLM calls failed -- which is recorded here as it happened.",
+  "reproduce": "python3 run_agent.py --fresh --max-iterations 4 --inject-error-at 1 --max-training-runs 4"
+}

@@ -3117,6 +3117,235 @@ def test_frontier_never_condemns_the_shipped_config():
           "exempting the shipped config must not exempt everything")
 
 
+def _bare_loop(k=16, max_training_runs=None, log_dir=None):
+    """A real AgentLoop with no LLM client, for driving its decision methods.
+
+    Constructing one normally needs an API key and a live provider, which would
+    make every scheduling assertion below depend on the network. Only the
+    attributes the ensembling path actually reads are set, so if that path
+    starts depending on something else this raises instead of quietly passing.
+    """
+    from agent.budget import Ledger
+    from agent.contracts import ExperimentTree
+    from agent.loop import AgentLoop
+
+    lp = AgentLoop.__new__(AgentLoop)
+    lp._confirmation_queue = []
+    lp._ensemble_done = False
+    lp._ensemble_k = k
+    lp.exec_timeout_s = 60
+    lp.ledger = Ledger(max_iterations=50, max_training_runs=max_training_runs)
+    lp.max_iterations = 50
+    if log_dir:
+        lp.log_dir = log_dir
+        lp.tree = ExperimentTree(log_dir)
+    return lp
+
+
+def _scored_node(i, primary, menu_choices, events=None):
+    """A journal-shaped dict, which is what the scheduling methods read."""
+    return {"iteration_id": i, "status": "success",
+            "metrics": {"primary": primary, "GAUC": 0.67, "nDCG@5": 0.53},
+            "menu_choices": dict(menu_choices), "events": list(events or [])}
+
+
+def test_autonomous_ensembling():
+    """The whole ensembling decision, executed by the agent, end to end.
+
+    The submitted 0.60541 is a 16-seed ensemble. For most of this project's
+    history a human produced it by running `agent.final_ensemble --seeds 16`
+    after the agent had already stopped, which made the headline number only
+    partly the agent's work. This exercises the version that is not: the agent
+    decides ensembling is worthwhile, picks the configuration, picks the seeds,
+    looks at what already exists, spends compute only on what is missing,
+    aggregates, compares against the single model, and accepts or rejects.
+
+    The members here are the REAL stored predictions, so `combine` performs a
+    real rank-normalise-and-average and returns a real score.
+    """
+    print("\n[autonomous ensembling]")
+    import shutil
+    import numpy as np
+    from agent import ensemble_experiment as EE
+    from agent import evidence as EV
+    from agent import execution_events as EX
+
+    REAL = os.path.join(_ROOT, "logs", "final_ensemble")
+    rec = json.load(open(os.path.join(_ROOT, "logs", "ensemble_results.json")))
+    cfg = rec["config"]
+
+    with tempfile.TemporaryDirectory() as td:
+        work = os.path.join(td, "ens")
+        os.makedirs(work, exist_ok=True)
+
+        # FOUR of six members already exist. This is the ordinary case: an
+        # earlier experiment left members on disk, and the agent must notice.
+        for s in (0, 1, 2, 3):
+            shutil.copytree(os.path.join(REAL, f"seed_{s:02d}"),
+                            os.path.join(work, f"seed_{s:02d}"))
+
+        trained = []
+
+        def fake_run_solution(src, path, choices, out_dir, timeout_s=0, seed=0):
+            """Stands in for a training run: the only thing it must get right
+            is that it is CALLED exactly for the members that are missing."""
+            trained.append(seed)
+            shutil.copytree(os.path.join(REAL, f"seed_{seed:02d}"), out_dir,
+                            dirs_exist_ok=True)
+            m = json.load(open(os.path.join(out_dir, "metrics.json")))
+            return type("R", (), {"ok": True, "metrics": m,
+                                  "error_trace": None})()
+
+        real_rs = EE.run_solution
+        EE.run_solution = fake_run_solution
+        try:
+            members = EE.train_members(cfg, range(6), work, timeout_s=60,
+                                       log=lambda *a, **k: None)
+        finally:
+            EE.run_solution = real_rs
+
+        events = members.pop("_events")
+        t = EX.tally(events)
+
+        check("it inspects what already exists rather than retraining it",
+              sorted(trained) == [4, 5],
+              f"trained seeds {sorted(trained)}; it should train only 4 and 5")
+        check("six valid members are available", len(members) == 6)
+        check("  two fresh executions", t["fresh_executions"] == 2)
+        check("  four reused artifacts", t["reused_artifacts"] == 4)
+        check("  six unique observations", t["unique_observations"] == 6)
+        check("  two new compute units", t["training_runs_spent"] == 2,
+              "the four members on disk cost nothing now")
+        check("  and the reused four are still historical evidence",
+              t["historical_evidence"] == 4)
+
+        # The rule that stops one measurement becoming a fake confirmation:
+        # asking for the same four members again buys no evidence at all.
+        again = [EX.event(EX.REUSED_ARTIFACT, seed=s, config=cfg)
+                 for s in (0, 1, 2, 3)]
+        t2 = EX.tally(events + again)
+        check("re-requesting the same four members adds no observations",
+              t2["unique_observations"] == t["unique_observations"] == 6)
+        check("...and is recorded as four duplicate-reuse attempts",
+              t2["duplicate_reuse_attempts"] == 4)
+        check("...and spends no further compute",
+              t2["training_runs_spent"] == t["training_runs_spent"] == 2)
+
+        # The ledger must agree with the event tally, or the run report and the
+        # journal tell two different stories.
+        led = _bare_loop(max_training_runs=40).ledger
+        led.record_training(t["fresh_executions"],
+                            reused=t["reused_artifacts"],
+                            unique=t["unique_observations"],
+                            duplicates=t2["duplicate_reuse_attempts"])
+        d = led.as_dict()
+        check("the ledger agrees with the event tally",
+              (d["training_runs_used"], d["reused_artifacts"],
+               d["unique_observations"], d["duplicate_reuse_attempts"])
+              == (2, 4, 6, 4),
+              json.dumps({k: d[k] for k in ("training_runs_used",
+                                            "reused_artifacts",
+                                            "unique_observations",
+                                            "duplicate_reuse_attempts")}))
+        check("...and 18 of the 20-run budget remain",
+              led.training_runs_left() == 38)
+
+        # --- aggregate, and compare against the SINGLE model ------------------
+        res = EE.combine(members, log=lambda *a, **k: None)
+        check("the ensemble is built and scored", res["usable"] and res["k"] == 6)
+        check("the aggregation is rank-normalise-then-mean",
+              abs(res["primary"] - _rank_mean_primary(
+                  [os.path.join(work, f"seed_{s:02d}") for s in range(6)]))
+              < 1e-9,
+              "averaging raw scores would let the widest-spread member dominate")
+        check("the gain is measured against the MEAN member, not the best",
+              res["gain_over_mean_member"] > res["gain_over_best_member"],
+              f"mean {res['mean_member']} best {res['best_member']} "
+              f"ensemble {res['primary']}")
+        ev6 = EE.grade(res)
+        check("six real members reach CONFIRMED",
+              ev6["state"] == EV.CONFIRMED and ev6["actionable"],
+              f"{ev6['state']}: {ev6['why']}")
+
+        # --- and the trap: a k<16 subset is NOT a new incumbent ---------------
+        # The recorded k-curve peaks at 0.60563 (k=14), above the submitted
+        # 0.60541. Choosing that k after seeing the scores is selection on
+        # validation, and the project already measured the bias it carries.
+        curve = rec["k_curve_diagnostic_only"]
+        best_k = max(curve, key=lambda k: curve[k])
+        check("the k-curve is recorded as DIAGNOSTIC ONLY",
+              "diagnostic" in json.dumps(rec["selection_bias"]).lower()
+              and rec["k"] == 16,
+              f"k={best_k} scores {curve[best_k]}, above the submitted "
+              f"{rec['primary']} -- and is not what was submitted")
+        check("...because k was fixed before any score was seen",
+              rec["seeds_used"] == list(range(16))
+              and "NONE" in rec["selection_bias"])
+        check("a 6-member subset is not claimed as an improvement",
+              res["primary"] <= rec["primary"]
+              or ev6["next_step"] != "promote this over the incumbent",
+              f"subset scored {res['primary']} vs incumbent {rec['primary']}; "
+              f"a subset chosen on validation is not a result")
+
+    # --- the two known results, both recomputed, both correctly attributed ----
+    print("  -- reproduction path --")
+    per_seed = rec["per_seed_primary"]
+    check("the single-model result is 0.60497 at seed 0",
+          round(per_seed["0"], 5) == 0.60497)
+    check("the ensemble result is 0.60541 over all 16 seeds",
+          rec["primary"] == 0.60541 and rec["k"] == 16)
+    check("the ensemble beats the mean member by +0.00078 (~1 sigma)",
+          rec["gain_over_mean_member"] == 0.00078
+          and round(0.00078 / EV.NOISE, 1) == 1.0)
+
+    from agent import manifest as MF
+    mani = MF.load() or MF.build()
+    hp = mani["submitted"]["how_produced"]
+    check("the manifest records that the original was human-invoked",
+          "human-invoked" in hp["originally_built_by"],
+          hp["originally_built_by"])
+    check("...and that the agent has since reproduced it unaided",
+          hp["agent_can_reproduce"] is True
+          and os.path.exists(os.path.join(
+              _ROOT, "logs", "opus_research",
+              "agent_reproduced_incumbent.jsonl")))
+
+    # The reproduction journal is the evidence for that claim, so it has to say
+    # what the claim says: the agent queued the ensemble ITSELF and ran it.
+    repro = [json.loads(ln) for ln in open(os.path.join(
+        _ROOT, "logs", "opus_research", "agent_reproduced_incumbent.jsonl"))
+        if ln.strip()]
+    ens = [n for n in repro if n.get("action") == "ensemble"]
+    check("the agent's own run contains an ensemble node", len(ens) == 1)
+    check("...which the agent queued for itself, not a human",
+          any(e.get("type") == "ensemble_queued"
+              for n in repro for e in (n.get("events") or [])))
+    check("...and it reached exactly 0.60541",
+          round(ens[0]["metrics"]["primary"], 5) == 0.60541,
+          f"{ens[0]['metrics']['primary']}")
+    single = max((n["metrics"]["primary"] for n in repro
+                  if n.get("status") == "success" and n.get("metrics")
+                  and n.get("action") != "ensemble"), default=0)
+    check("...having found the 0.60497 single-model configuration first",
+          round(single, 5) == 0.60497, f"{single}")
+    check("no new improvement is claimed: it matched the incumbent, not beat it",
+          round(ens[0]["metrics"]["primary"], 5) == rec["primary"])
+
+
+def _rank_mean_primary(member_dirs):
+    """Independent recomputation of the aggregation, for cross-checking."""
+    import numpy as np
+    import train_lib
+    from evaluate import evaluate
+    from agent.ensemble import rank_normalise
+    splits, _ = train_lib.load_cache()
+    va = splits["valid"]
+    arrays = [np.load(os.path.join(d, "scores_valid.npy")) for d in member_dirs]
+    agg = np.mean([rank_normalise(a) for a in arrays], axis=0)
+    return round(float(evaluate(list(va["user_raw"]), va["long_view"],
+                                agg)["primary"]), 5)
+
+
 def test_ensembling_is_an_agent_action():
     """Ensembling must be something the agent can DO, not a human post-process.
 
@@ -3175,28 +3404,44 @@ def test_ensembling_is_an_agent_action():
           EE.combine({0: {"metrics": {"primary": 0.6}, "dir": ""}})["usable"]
           is False)
 
-    # The loop must be able to schedule and execute it.
-    src = open(os.path.join(_ROOT, "agent", "loop.py")).read()
-    check("the loop schedules ensembling itself",
-          "_maybe_queue_ensemble" in src)
-    check("...and executes it as a journalled node",
-          "_run_ensemble_node" in src and 'action="ensemble"' in src)
-    check("it only ensembles a configuration that beats the baseline",
-          "BASELINE_VALID_PRIMARY" in src)
-    check("it will not try to ensemble an agent-written script",
-          'menu_choices") or {}).get("model")' in src,
-          "a custom script cannot be re-run at k seeds through the reference "
-          "solution, however well it scored")
-    check("convergence waits while an affordable ensemble is untried",
-          '_ensemble_done", True)' in src and "can_afford(k)" in src,
-          "ensembling is worth ~1 sigma and no single run can show it, so the "
-          "convergence rule would end the search with it unattempted")
-    check("it charges only members it actually trained",
-          "record_training(\n                fresh" in src
-          or "record_training(fresh" in src,
-          "charging reused members reported compute that was never spent")
-    check("...and records reused members separately",
-          "reused=reused" in src)
+    # The scheduling decisions, DRIVEN rather than read out of the source. An
+    # earlier version of this test matched substrings in loop.py, which breaks
+    # when a line is reflowed and keeps passing when the behaviour rots.
+    loop = _bare_loop(k=8, max_training_runs=40)
+    ev = []
+    loop._maybe_queue_ensemble([], ev, budget_left=10)
+    check("nothing to ensemble -> nothing is queued", loop._confirmation_queue == [])
+
+    weak = [_scored_node(0, 0.5990, {"model": "fm_numpy"})]
+    loop._maybe_queue_ensemble(weak, ev, budget_left=10)
+    check("a configuration below the baseline is not ensembled",
+          loop._confirmation_queue == [],
+          "a precise estimate of a mediocre number is not worth k runs")
+
+    custom = [_scored_node(0, 0.6070, {})]      # agent-written script, no menu
+    loop._maybe_queue_ensemble(custom, ev, budget_left=10)
+    check("an agent-written script is not ensembled however well it scored",
+          loop._confirmation_queue == [],
+          "it cannot be re-run at k seeds through the reference solution")
+
+    good = [_scored_node(0, 0.6049, {"model": "fm_numpy", "loss": "bpr"})]
+    loop._maybe_queue_ensemble(good, ev, budget_left=10)
+    check("a configuration above the baseline IS ensembled, by the agent",
+          len(loop._confirmation_queue) == 1
+          and loop._confirmation_queue[0].experiment_type
+          == XS.ENSEMBLE_CONSTRUCTION)
+    check("...and the decision is journalled with its reason",
+          any(e["type"] == "ensemble_queued" and "node 0" in e["reason"]
+              for e in ev))
+
+    # Budget: k members is k training runs, and it must not start one it
+    # cannot finish.
+    poor = _bare_loop(k=16, max_training_runs=16)
+    poor.ledger.record_training(9)
+    poor._maybe_queue_ensemble(good, [], budget_left=10)
+    check("an unaffordable ensemble is not queued",
+          poor._confirmation_queue == [],
+          poor.ledger.why_not(16))
 
 
 def test_streamlit_dashboard_executes():
@@ -5071,6 +5316,265 @@ def test_autonomy_eval():
           and "not a verdict" in txt)
 
 
+def test_fault_recovery():
+    """Nineteen injected faults, and what the agent DID about each one.
+
+    The thing being tested is not that an exception was raised. Any wrapper can
+    raise. What is checked here is the decision that follows: whether the fault
+    was named correctly, whether the move that followed was the right one,
+    whether the agent stopped instead of retrying forever, and whether its
+    books still balanced afterwards.
+
+    Two mistakes this suite exists to catch, both observed before the taxonomy
+    existed: repairing something that cannot be repaired (a timeout is not
+    fixed by re-running the same work), and letting a failure count as
+    evidence (a crash produced no measurement, so it may not support a claim).
+    """
+    print("\n[fault and recovery suite]")
+    from agent import faults as FA
+
+    rep = FA.run_suite()
+    check(f"every injected fault is detected ({rep['detected']}/"
+          f"{rep['faults_injected']})",
+          rep["detection_rate"] == 1.0,
+          ", ".join(r["fault"] for r in rep["results"] if not r["detected"]))
+
+    # Per-fault, so a regression names itself instead of collapsing into a rate.
+    for r in rep["results"]:
+        if r["harness_error"]:
+            check(f"  {r['fault']}", False, r["harness_error"][:90])
+            continue
+        check(f"  {r['fault']} -> {r['expected_response']}", r["recovered"],
+              "; ".join(k for k in ("classified_correctly", "routed_correctly",
+                                    "bounded", "budget_correct",
+                                    "evidence_correct", "journalled")
+                        if not r[k])
+              or ("promoted an invalid candidate" if r["promoted_invalid"] else
+                  "did not continue" if r["recoverable"] and not r["continued"]
+                  else "did not terminate cleanly"))
+
+    check("no injected fault promoted an invalid candidate",
+          not rep["invalid_candidate_promoted"])
+    check("convergence is still reported correctly under fault",
+          rep["convergence_still_correct"])
+    check("no fault required a human to step in",
+          rep["manual_interventions"] == 0)
+    check("the four recovery routes are all exercised",
+          min(rep["automatic_repairs"], rep["automatic_skips"],
+              rep["automatic_pivots"], rep["clean_terminations"]) >= 2,
+          f"repairs={rep['automatic_repairs']} skips={rep['automatic_skips']} "
+          f"pivots={rep['automatic_pivots']} aborts={rep['clean_terminations']}")
+
+    # The two routing calls that are easy to get wrong, pinned individually.
+    by = {r["fault"]: r for r in rep["results"]}
+    check("a timeout is a PIVOT, not a retry -- the same work would time out "
+          "again", by["training_timeout"]["observed"]["response"] == FA.PIVOT)
+    check("an unverifiable result ABORTS rather than being stamped anyway",
+          by["failed_provenance_generation"]["observed"]["response"] == FA.ABORT
+          and by["failed_provenance_generation"]["terminated_cleanly"])
+    check("a broken feature builder is a finding, not a crashed iteration",
+          by["failed_feature_probe"]["continued"])
+
+    # --- the classifier must diagnose from the TRACEBACK, not from stdout -----
+    # Found by a live injected-failure run: every training run in this project
+    # logs "valid primary ... (GAUC ... nDCG@5 ...)" once per epoch, and the
+    # executor appends that log to the error trace. The EVALUATION pattern is
+    # `ndcg|gauc`, so it matched ordinary progress output and a deliberately
+    # injected RuntimeError came back as `evaluation_failure` -- handing the
+    # agent "Scoring itself failed. Use train_lib's official evaluate", which
+    # points away from the fault.
+    from agent import failure as F
+    epoch_log = ("\n\n--- stdout (tail) ---\n"
+                 "  [bpr_pairwise] epoch 1 | valid primary 0.5934 "
+                 "(GAUC 0.6569 nDCG@5 0.5300) | 6.8s\n")
+    injected = ("exit code 1\n--- stderr (tail) ---\nTraceback (most recent "
+                "call last):\nRuntimeError: injected failure\n" + epoch_log)
+    check("a crash is not misdiagnosed from per-epoch GAUC/nDCG logging",
+          F.classify(injected)["class"] != F.EVALUATION,
+          f"classified as {F.classify(injected)['class']}")
+    check("...and a real evaluate() failure is still caught",
+          F.classify("exit code 1\n--- stderr (tail) ---\n"
+                     "TypeError in evaluate(users, labels, scores)\n"
+                     )["class"] == F.EVALUATION)
+    check("...while an OOM kill, which only ever appears in stdout, still is",
+          F.classify("exit code 137\n--- stderr (tail) ---\n" + epoch_log
+                     + "Killed\n")["class"] == F.RESOURCE,
+          "some faults are printed by the kernel, not raised")
+    check("...and a KeyError under the same logging is api_misuse",
+          F.classify("exit code 1\n--- stderr (tail) ---\n"
+                     "KeyError: 'video_id'\n" + epoch_log)["class"]
+          == F.API_MISUSE)
+
+    # --- live: two faults injected into REAL subprocess executions ------------
+    lv = FA.live_faults()
+    a, b = lv["live_faults"]
+    check("LIVE: a script exiting 0 with NaN predictions is not believed",
+          not a["accepted"] and a["classified_correctly"],
+          a["error_head"][:80])
+    check("LIVE: ...and no metrics were recorded from it",
+          a["metrics_recorded"] is None)
+    check("LIVE: a training run that never returns is actually killed",
+          b["actually_killed"] and b["classified_correctly"],
+          f"killed after {b['killed_after_s']}s on a {b['timeout_was_s']}s limit")
+    check("LIVE: the timeout is not marked retry-worthwhile",
+          b["retry_worthwhile"] is False)
+    check("LIVE: both crashes are charged as compute",
+          lv["ledger"]["training_runs_used"] == 2)
+    check("LIVE: ...and neither is credited as an observation",
+          lv["ledger"]["unique_observations"] == 0,
+          "a crash produced no measurement, so it cannot support a claim")
+    check("LIVE: the run could continue after both", lv["accounting_correct"])
+
+    # --- the recorded live agent run, with a deliberate failure in it ---------
+    # Unit tests drive components. This is the whole loop: real LLM, real
+    # training, a failure injected at iteration 1, and whatever the agent then
+    # decided to do about it.
+    print("  -- recorded live run --")
+    rp = os.path.join(_ROOT, "results", "live_fault_run", "report.json")
+    check("a live injected-failure run is recorded", os.path.exists(rp))
+    if os.path.exists(rp):
+        run = json.load(open(rp))
+        nodes = {n["id"]: n for n in run["nodes"]}
+        inj = nodes[run["injected_at"]]
+        check("  the injected failure was detected",
+              inj["status"] == "error" and inj["fault_injected_here"])
+        check("  it was charged as spent compute, because it was",
+              inj["wall_s"] > 60,
+              f"{inj['wall_s']}s of training ran before the injected raise")
+        nxt = nodes[run["injected_at"] + 1]
+        check("  the agent chose to DEBUG the failed node, not abandon it",
+              nxt["action"] == "debug" and "errored" in nxt["decide_reason"],
+              nxt["decide_reason"][:80])
+
+        # The run also hit a fault nobody planned: the network dropped and two
+        # LLM calls failed. That is the more interesting half of the evidence,
+        # because nothing about it was staged.
+        llm_failed = [n for n in run["nodes"]
+                      if "LLM stage failed" in (n["error_head"] or "")]
+        check("  an UNPLANNED LLM-stage fault also occurred", len(llm_failed) == 2,
+              "the network dropped mid-run")
+        check("  ...each was journalled and the run continued",
+              all(n["status"] == "error" for n in llm_failed)
+              and len(run["nodes"]) == 4)
+        last = run["nodes"][-1]
+        check("  ...and the agent did not try to debug code that never existed",
+              last["action"] == "draft"
+              and "failed before any code was written" in last["decide_reason"],
+              last["decide_reason"][:90])
+        check("  the run terminated cleanly on its cap, not on a crash",
+              "iteration cap" in run["stop_reason"], run["stop_reason"])
+        led = run["ledger"]
+        check("  2 training runs charged, 1 crashed",
+              (led["training_runs_used"], led["training_crashes"]) == (2, 1))
+        check("  ...and only 1 observation credited",
+              led["unique_observations"] == 1,
+              "the crashed run measured nothing, so it supports nothing")
+        check("  no human intervened at any point",
+              run.get("manual_interventions", 0) == 0)
+
+
+def test_judge_packet_is_generated():
+    """The judge-facing document must be derivable, not written.
+
+    A write-up that quotes numbers from memory stays quoted long after the
+    artifact behind it has moved -- which is how a headline becomes
+    unreproducible. So the packet is generated from the manifest, and the test
+    that matters is not "does it contain the right string" but "if the manifest
+    said something else, would the packet say something else too".
+    """
+    print("\n[judge packet]")
+    from agent import judge_packet as JP
+    from agent import manifest as MF
+
+    d = MF.load()
+    check("a manifest exists to generate from", d is not None)
+    if d is None:
+        return
+    text = JP.build(d)
+
+    # Everything the brief requires the packet to explain.
+    required = {
+        "the problem": "KuaiRand-Pure",
+        "the research loop": "research loop",
+        "the unified action space": "unified action space",
+        "how experiments are chosen": "chooses experiments",
+        "how confirmation works": "confirmation works",
+        "how ensembling works": "ensembling works",
+        "the official baseline": "official baseline",
+        "the convergence rule": "Convergence",
+        "current limitations": "Limitations",
+        "reproduction commands": "reproduction commands",
+    }
+    for label, needle in required.items():
+        check(f"  it explains {label}", needle in text)
+
+    # The numbers must MOVE when the manifest moves. A packet that prints the
+    # same score whatever it is handed is a hardcoded packet wearing a
+    # generator's clothes.
+    import copy
+    alt = copy.deepcopy(d)
+    alt["submitted"]["reported"]["primary"] = 0.61234
+    alt["latest_run"]["training_runs_spent"] = 999
+    alt["robustness"]["fault_suite"]["faults_injected"] = 77
+    alt2 = JP.build(alt)
+    check("the submitted score is read from the manifest, not hardcoded",
+          "0.61234" in alt2 and "0.61234" not in text)
+    check("the training-run count is read from the manifest",
+          "999" in alt2 and "| 999 " not in text)
+    check("the fault count is read from the manifest",
+          "77 faults injected" in alt2)
+
+    # The claims that must never soften.
+    s = d["submitted"]
+    check("the packet states the submitted score the manifest recomputed",
+          f"{s['reported']['primary']:.5f}" in text)
+    check("...and that the hidden test is NOT evaluated",
+          d["hidden_test"]["evaluated"] is False
+          and "has not been evaluated" in text)
+    check("...and that the original artifact was human-invoked",
+          "human-invoked" in text)
+    check("...and that the agent matched rather than beat it",
+          "did not beat it" in text and "no new improvement is claimed" in text)
+    check("...and that ensembling is measured against the MEAN member",
+          "mean member" in text and "best of k draws" in text)
+    check("...and that a single seed cannot change the submission",
+          "no single-seed measurement can change what gets submitted" in text)
+    check("it names the internal epsilon as NOT the official rule",
+          "not* the official rule" in text and "epsilon=0.002" in text)
+
+    # Limitations must be real limitations, not a modesty paragraph.
+    lim = text.split("## 11. Limitations")[1].split("## 12.")[0]
+    for needed in ("hidden test has not been evaluated",
+                   "has not beaten it", "originally human-invoked",
+                   "One configuration family", "close to the noise floor",
+                   "Level B, not Level A"):
+        check(f"  limitation stated: {needed[:40]}", needed in lim)
+
+    # Every command it tells a judge to run must be a real entry point.
+    cmds = text.split("## 12.")[1]
+    for mod in ("agent.verify_incumbent", "agent.faults", "agent.final_ensemble",
+                "agent.manifest", "agent.judge_packet", "tests/test_harness.py"):
+        check(f"  reproduction command exists: {mod}",
+              mod in cmds and (
+                  os.path.exists(os.path.join(_ROOT, mod))
+                  or os.path.exists(os.path.join(
+                      _ROOT, mod.replace(".", "/") + ".py"))))
+    check("  the hidden-test command is present but marked once-only",
+          "--final-test-eval" in cmds and "once" in cmds)
+
+    # And the packet on disk must be current.
+    out = os.path.join(_ROOT, "results", "JUDGE_PACKET.md")
+    check("the generated packet is on disk", os.path.exists(out))
+    if os.path.exists(out):
+        disk = open(out).read()
+        # Ignore the generation timestamp, which differs by construction.
+        norm = lambda t: "\n".join(  # noqa: E731
+            ln for ln in t.splitlines() if not ln.startswith("*Generated from"))
+        check("...and matches what the current manifest generates",
+              norm(disk) == norm(text),
+              "run `python3 -m agent.judge_packet` to refresh it")
+
+
 def test_submission_artifacts_survive_fresh():
     """Regression: a previous headline became unreproducible because --fresh
     archived the ensemble member arrays while the JSON quoting them stayed
@@ -5159,7 +5663,7 @@ if __name__ == "__main__":
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
               test_frontier_never_condemns_the_shipped_config,
-              test_ensembling_is_an_agent_action,
+              test_ensembling_is_an_agent_action, test_autonomous_ensembling,
               test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,
               test_execution_events_separate_compute_from_evidence,
@@ -5177,7 +5681,8 @@ if __name__ == "__main__":
               test_capability_contract, test_preflight, test_budget_accounting,
               test_evidence_states, test_research_memory,
               test_redundancy_reasoning, test_failure_repeat_detection,
-              test_provenance, test_incumbent_still_reproduces,
+              test_provenance, test_fault_recovery, test_judge_packet_is_generated,
+              test_incumbent_still_reproduces,
               test_restricted_access_survives_termination,
               test_submission_artifacts_survive_fresh):
         t()

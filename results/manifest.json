@@ -1,13 +1,13 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T05:46:19Z",
+  "generated_utc": "2026-08-31T06:35:51Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "b564ae29164c02d85486b83193a845e2e2181b8a",
-    "short_sha": "b564ae29164c",
+    "sha": "b155457fce5d6dfc3b52446c59a5355ce4d2b21b",
+    "short_sha": "b155457fce5d",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 8
+    "dirty_files": 14
   },
   "dataset": {
     "name": "KuaiRand-Pure",
@@ -340,7 +340,8 @@
     "fresh_executions": 28,
     "reused_artifacts": 0,
     "duplicate_reuse_attempts": 0,
-    "unique_observations": 0,
+    "unique_observations": 8,
+    "unique_observations_source": "derived from scored nodes: this journal predates execution-event instrumentation",
     "fresh_seeds": [],
     "reused_seeds": [],
     "execution_events": {
@@ -386,9 +387,54 @@
   },
   "tests": {
     "executed": true,
-    "passed": 944,
+    "passed": 1058,
     "failed": 0,
-    "seconds": 14.7
+    "seconds": 21.9
+  },
+  "robustness": {
+    "fault_suite": {
+      "available": true,
+      "faults_injected": 20,
+      "detection_rate": 1.0,
+      "recovery_rate": 1.0,
+      "automatic_repairs": 9,
+      "automatic_skips": 6,
+      "automatic_pivots": 3,
+      "clean_terminations": 2,
+      "failed_retries": 0,
+      "manual_interventions": 0,
+      "invalid_candidate_promoted": false,
+      "command": "python3 -m agent.faults --live"
+    },
+    "live_injected_failure_run": {
+      "available": true,
+      "injected_at_iteration": 1,
+      "nodes": 4,
+      "stop_reason": "iteration cap reached (4)",
+      "runtime_s": 314.2,
+      "ledger": {
+        "max_iterations": 4,
+        "max_training_runs": 4,
+        "training_runs_used": 2,
+        "training_runs_left": 2,
+        "training_crashes": 1,
+        "reused_artifacts": 0,
+        "duplicate_reuse_attempts": 0,
+        "unique_observations": 1,
+        "note": "training_runs_used is FRESH COMPUTE. reused_artifacts are previously completed members: real historical evidence, no compute, excluded from the budget. unique_observations is what evidence may rest on; crashes and duplicates add neither."
+      },
+      "manual_interventions": 0,
+      "artifacts": "results/live_fault_run/",
+      "command": "python3 run_agent.py --fresh --max-iterations 4 --inject-error-at 1 --max-training-runs 4",
+      "what_happened": {
+        "injected_fault_detected": true,
+        "compute_spent_before_it_crashed_s": 143,
+        "agent_response": "debug",
+        "agent_reason": "last attempt (node 1) errored; debug chain length 0 < 2, feeding the error trace back to fix it",
+        "unplanned_faults": 2,
+        "unplanned_fault_note": "the network dropped mid-run and two LLM calls failed. Nothing about this was staged; both were journalled, the agent correctly declined to debug a node that had produced no code, and the run continued to its cap."
+      }
+    }
   },
   "hidden_test": {
     "evaluated": false,

@@ -1,440 +1,429 @@
-# Hackathon Readiness Brief for Claude Code
+# Claude Code Brief: Make the Pure Agent Hackathon-Ready
 
-## Purpose and non-negotiables
+## Executive verdict
 
-This is an implementation brief for improving the **KuaiRand-Pure** agent for
-TikTok TechJam. It is based on the current repository and its generated
-evidence, not on a hypothetical redesign.
+The agent is already a credible autonomous research system, not a dashboard
+mock-up. It has a reproducible KuaiRand-Pure validation result, an executable
+research loop, strict hidden-test boundaries, paired evidence, autonomous
+ensembling, provenance, cost accounting, and detailed research memory.
 
-Current verified position:
+It is not yet safe to submit as a hackathon-winning run. The largest risk is
+not model quality; it is **official checkpoint eligibility**:
 
-- Incumbent validation primary: **0.60541** (GAUC `0.67212`, nDCG@5 `0.53870`),
-  a fixed 16-member rank-normalised ensemble.
-- Official validation baseline: `0.60160`; current margin: `+0.00381`.
-- The incumbent can be recomputed exactly from stored member predictions.
-- The hidden test has not been evaluated.
-- The latest autonomous run used 8 decision nodes, 28 training executions,
-  269,807 LLM tokens, 2,321.5 seconds of training wall-clock, and zero manual
-  interventions. It converged without crashes, but did not recover from a
-  fault because no fault occurred.
-- Path B feature discovery probed 8 features but has not completed its
-  stored-source -> paired-retrain lifecycle.
+- The organizer rule is epsilon `0.002`, N `3`, with the first of convergence,
+  50 iterations, or 6 hours ending the run.
+- On the current journal, the official rule first converges at node `3`.
+- The submitted `0.60541` ensemble is node `4`.
+- Therefore this journal cannot prove that `0.60541` was the validation-best
+  checkpoint **at convergence**. An internal stricter epsilon cannot extend the
+  official run, because the problem statement says the first stopping condition
+  wins.
 
-The task is **not** to chase a cosmetic dashboard change or inflate claims. The
-task is to strengthen the agent against the actual rubric:
+Fix this before further score work. A clean competition run should put an
+official baseline observation first and schedule the fixed 16-seed ensemble
+before the earliest no-progress window can close. Do not rewrite the old
+journal or reinterpret the rule after the fact.
 
-| Rubric area | Weight | What judges can verify |
+## Current evidence snapshot
+
+| Item | Current evidence | Submission meaning |
 |---|---:|---|
-| Technical execution | 35% | final hidden-test delta, correct convergence, robust recovery |
-| Innovation and problem insight | 20% | why the agent targets a meaningful full-stack mechanism |
-| Impact and relevance | 20% | autonomous iteration and manual-intervention count |
-| Feasibility and practicality | 15% | LLM tokens and wall-clock after clearing baseline |
-| Presentation and communication | 10% | reproducible, legible submission evidence |
+| Official validation baseline | `0.60160` | Organizer-provided comparator |
+| Incumbent validation primary | `0.60541` | `+0.00381`, but hidden-test delta is unknown |
+| Incumbent components | GAUC `0.67212`, nDCG@5 `0.53870` | Correct official metrics |
+| Incumbent construction | 16 fixed seeds, rank-normalized mean | Recomputable from stored predictions |
+| Strongest single seed | `0.60497` | Preliminary; do not call it the ensemble |
+| Latest search trajectory | 8 nodes, 28 training executions | Continued beyond official node-3 convergence |
+| LLM use | 269,807 input + output tokens | Provider total in `logs/final_summary.json` |
+| Agent wall-clock | 2,545.4 seconds | About 42.4 minutes |
+| Training wall-clock | 2,321.5 seconds | CPU, zero GPU-hours reported |
+| Manual interventions | 0 | Strong autonomy evidence |
+| Hidden test | Not evaluated | Preserve until the frozen final artifact |
+| Path B | 8 probes, no real paired retrain | Plumbing exists; lifecycle is incomplete |
+| Robustness | Component faults plus one incomplete live recovery | Do not claim full closed-loop recovery yet |
 
-### Hard constraints
+These are validation facts, not hidden-test claims. The public validation gain
+is promising but does not guarantee that the hidden-test primary beats
+`0.5946`.
 
-1. Work on **KuaiRand-Pure only**. Do not spend effort on 1k or 27k.
-2. Never read hidden-test labels or use hidden-test feedback while developing.
-3. Do not use transductive batch features. In particular, do **not** compute a
-   feature from the whole validation/test impression batch and feed it back to
-   rows in that same batch. The rejected repeat-fatigue idea falls in this
-   category and must not return under a different name.
-4. Do not alter `kuairand-starter-kit/evaluate.py` or redefine the score.
-   The starter-kit evaluator is authoritative: `long_view`, GAUC and nDCG@5.
-5. A single seed is never enough to promote a submitted configuration.
-6. Keep the current 16-member incumbent immutable until a candidate has passed
-   the predeclared paired-evidence gate.
-7. Preserve existing logs and dirty work. Use `--fresh` for a new run; do not
-   overwrite submitted artifacts.
-8. Do not claim Level-A independent discovery. The present system is honestly
-   a Level-B capability-transfer agent. Improve the evidence, not the label.
+## Authoritative interpretation
 
-## Findings from the current pipeline
+Claude Code must treat the pasted challenge statement and starter-kit code as
+authoritative. Preserve these invariants:
 
-### What is already strong
+1. Work on **KuaiRand-Pure only**. Do not spend this cycle on 1k or 27k.
+2. The label is `long_view`; metrics are GAUC and nDCG@5; primary is their mean.
+   The earlier contradictory NDCG@10/Recall@50 line is superseded by the detailed
+   starter-kit definition and evaluator.
+3. Never alter `kuairand-starter-kit/evaluate.py`, train on hidden-test labels,
+   inspect hidden-test metrics during development, or run the final test twice.
+4. Do not use transductive features computed from an entire validation/test
+   impression batch and fed back into rows from that same batch.
+5. A single seed may screen a hypothesis but cannot promote the submission.
+6. Validation-selected configurations require predeclared paired confirmation.
+7. Artifact reuse is historical evidence, not fresh compute and not a new
+   independent observation.
+8. Keep the honest autonomy label: the current agent demonstrates strong
+   Level-B capability transfer, not independent Level-A discovery.
+9. The agent must still write code for genuinely new pipeline stages. Typed
+   configuration is appropriate for known Path-A operations, but eliminating
+   all code generation would weaken alignment with the task statement.
 
-- Baseline and incumbent provenance are unusually strong: the repository can
-  rebuild and re-evaluate the reported ensemble from stored predictions.
-- Train/validation/test separation is enforced technically by the execution
-  sandbox, not merely by prompt text.
-- The loop records hypotheses, diffs, metrics, budget, errors, and evidence
-  states. Paired confirmation and ensembling are executable actions rather
-  than manual post-processing.
-- The capability contract, preflight checks, mechanism audit, source lineage,
-  budget ledger, and generated `RESULTS.md` are excellent foundations for a
-  credible agent demonstration.
+## Rubric assessment
 
-### Gaps that materially affect judging
+### Technical Execution - 35%
 
-1. **Convergence reporting is not explicitly mapped to the organizer rule.**
-   The agent's internal epsilon is `0.00048`, while the brief fixes organizer
-   convergence at epsilon `0.002`, N `3`. The stricter research controller is
-   defensible, but the final submission must explicitly show that the organizer
-   rule was met and must not present a private rule as the official one.
-2. **Robustness is not yet demonstrated on the final run.** Zero crashes is
-   good operation, but the rubric assesses recovery after a real failure. The
-   current one-off injected `RuntimeError` is not a pre-registered recovery
-   benchmark and does not cover the failure classes the system says it handles.
-3. **Path B is architecturally capable but unproven end-to-end.** The feature
-   probe is careful, but no real feature has reached `stored -> queued paired
-   confirmation -> outcome`. There are also two Path-B routes: the feature
-   lab and generic generated implementation code. That makes lineage and
-   recovery harder to explain.
-4. **The randomized-exposure resource is only a passive diagnostic.** The
-   dataset's distinctive research opportunity is counterfactual/randomized
-   exposure. The current NumPy-only check writes metrics but cannot inform a
-   bounded next experiment, so it earns little Innovation credit.
-5. **Path-A work spends too many tokens generating boilerplate scripts.** A
-   normal menu experiment is planned by an LLM and then rendered as a complete
-   LLM-written script, even though the deterministic reference runner already
-   executes `menu_choices` in confirmations. This raises cost and failure risk
-   without adding research freedom.
-6. **Judge-facing documentation has drifted from the app.** The README still
-   describes five dashboard tabs, while the current UI groups the judging
-   explanation into Overview. A judge should never have to reconcile docs with
-   the live demo.
+**Strong:** exact incumbent verification, official evaluator reuse, protected
+test labels, paired evidence gates, deterministic ensemble aggregation, source
+hashing, preflight checks, and a final-evaluation lock.
 
-## Implementation sequence
+**Material gaps:** the current scored journal makes the ensemble ineligible
+under the official convergence point; hidden performance is unknown; the live
+fault run chose a debug action but did not complete a repaired training result;
+and Path B has not carried a real feature from source to paired outcome.
 
-Complete each phase, its tests, and its generated evidence before starting the
-next one. Do not perform a hidden-test evaluation in any phase.
+**Winning evidence:** one clean official run with an eligible ensemble, exact
+reproduction, a valid submission CSV, and at least three genuine closed-loop
+recoveries in an isolated non-scored run.
 
-## Phase 0: Freeze compliance and final-selection evidence
+### Innovation and Problem Insight - 20%
 
-### Goal
+**Strong:** the agent reasoned across objective, negative sampling, temporal
+features, history, multitask learning, architecture, regularization, variance,
+residual signal, and metric structure. It also rejected attractive but invalid
+ideas such as transductive repeat fatigue and random-log IPS training.
 
-Make the result unambiguous to a judge: one official metric, one organizer
-convergence status, one final-selection manifest, and one protected test step.
+**Material gaps:** the menu is essentially exhausted, many findings came from
+transferred research memory, and the current literature grounding is embedded
+in prose rather than attached to each autonomous decision. The randomized log
+is useful as a diagnostic, but evaluation is on the logged policy, so forcing
+IPS into training would optimize the wrong distribution.
 
-### Implement
+**Winning evidence:** research cards generated at decision time, one new
+leakage-safe mechanism outside the menu, and an honest negative result if it
+fails. Novelty should come from the reasoning and experiment design, not from
+claim inflation.
 
-1. Add a small `agent/convergence_report.py` (or extend the generated results
-   report) with two separately named concepts:
-   - `organizer_convergence`: epsilon `0.002`, N `3`, computed exactly from
-     the journal according to the published rule.
-   - `research_controller`: the internal epsilon and its rationale.
-2. Add `results/final_selection_manifest.json`, generated only from existing
-   artifacts. It must contain:
-   - selected configuration and aggregation rule;
-   - validation metrics and baseline delta;
-   - data/config/code hashes and member paths;
-   - organizer convergence result and the journal node at which it became true;
-   - explicit `hidden_test_evaluated: false` before the one final command;
-   - a statement that test evaluation is blocked by the existing lock.
-3. Make `agent.make_submission --final-test-eval` refuse to run unless this
-   manifest exists, verifies the incumbent, and names the organizer
-   convergence result. It must never mutate the validation artifact while
-   performing these checks.
-4. Add a single command that regenerates the valid submission, validates it
-   with starter-kit `submit.py --check`, verifies the incumbent, and writes the
-   manifest. It must not invoke the hidden-test path.
+### Impact and Relevance - 20%
 
-### Acceptance tests
+**Strong:** the latest run reports zero manual interventions and the loop can
+plan, generate/validate code, train, evaluate, reflect, confirm, and ensemble.
 
-- Unit-test the published convergence boundary, including a case where the
-  organizer rule is satisfied but the stricter controller is not.
-- Unit-test that the final-test command fails closed without a valid manifest.
-- Run the valid-only finalization command and confirm the output CSV passes
-  starter-kit alignment/schema validation.
-- Run `python3 -m agent.verify_incumbent`; it must still match exactly.
+**Material gaps:** the original headline ensemble was first produced by a
+human-invoked command, although the agent later reproduced it. Recovery and
+Path-B completion still need human-independent end-to-end evidence.
 
-### Why this helps judging
+**Winning evidence:** a fresh run in which the agent itself reaches the final
+eligible artifact, with intervention events mechanically counted rather than
+stated in prose.
 
-It removes the most avoidable technical-execution risk: a judge can see that
-the score, the convergence definition, and the one-shot hidden test follow the
-organizer's process rather than a custom interpretation.
+### Feasibility and Practicality - 15%
 
-## Phase 1: Make Path B one reliable, testable state machine
+**Strong:** the result is CPU-only and finishes well inside six hours.
 
-### Goal
+**Material gaps:** roughly 270k tokens for eight decisions is high; ordinary
+menu actions generate too much repeated script text; and the generated manifest
+currently underreports tokens by summing node-owned calls instead of the
+provider total. Feasibility is scored only after the hidden baseline gate, so
+never trade away model quality to make the run look cheap.
 
-Prove that autonomous feature engineering is a real pipeline, while retaining
-the strict leakage and residual-signal gates that protect score validity.
+**Winning evidence:** preserve the same decision quality and confirmation rigor
+while reducing calls and repeated context, with provider totals matching the
+journal and report exactly.
 
-### Implement
+### Presentation and Communication - 10%
 
-1. Establish one canonical Path-B lifecycle:
+**Strong:** the dashboard, experiment tree, journal, architecture notes, and
+generated results provide unusually rich evidence.
 
-   `proposal -> static/leakage validation -> probe -> immutable lineage record
-   -> queued paired experiment -> paired result -> evidence state`
+**Material gaps:** README tab descriptions have drifted, there is no compact
+judge route, the repository setup is not fully packaged, and current generated
+artifacts contain accounting/labeling inconsistencies.
 
-   Route every feature-producing Path-B action through this lifecycle. A generic
-   Path-B script must not bypass the feature registry or retype a prior source.
-2. Store **every** valid proposal with source hash and outcome, not only
-   promising ones. A rejected feature should have a durable lineage record and
-   an explicit reason; only a cleared probe may queue training.
-3. Change the prompt/result wording that currently tells the model to reinsert
-   feature source manually into `menu_choices`. A cleared feature should be
-   referenced by immutable source hash, and the orchestrator should inject the
-   exact stored source itself.
-4. Add an integration fixture using tiny synthetic splits. It should create a
-   safe, non-transductive feature that clears the fixture's probe, queues a
-   paired comparison using the exact stored source, and records the result.
-   This validates plumbing only; it is not a claimed KuaiRand improvement.
-5. Add a `Path B lifecycle` section to the generated report:
-   proposals, static refusals, probes, stored sources, queued confirmations,
-   completed paired retrains, promotions, and any recovery after a bad builder.
+**Winning evidence:** a public-repo-ready three-minute judge guide, one canonical
+manifest, a valid CSV beside it, and a Devpost narrative generated from those
+same facts.
 
-### Acceptance tests
+## Implementation order
 
-- Same source under a new name deduplicates by source hash.
-- A feature that reads valid/test labels is refused before execution.
-- The fixture proves that stored source bytes equal the source used by the
-  paired treatment.
-- A rejected real feature remains recorded and cannot be silently retried.
-- `python3 tests/test_harness.py` remains green.
+Complete the phases in this order. Do not start hidden-test evaluation in any
+phase.
 
-### Important rule
-
-Do not lower the real residual-signal threshold merely to make Path B appear
-successful. An honest result is: "the lifecycle works; no evaluated feature
-cleared the evidence gate yet." The synthetic fixture is evidence of system
-integrity, not model quality.
-
-## Phase 2: Demonstrate robustness with a pre-registered fault suite
+## P0 - Add an official competition profile
 
 ### Goal
 
-Show the behavior the rubric asks for: the agent encounters a fault, explains
-it, repairs/retries/routes around it, and continues without a human.
+Guarantee that the artifact named final was available at the first official
+stopping point.
 
 ### Implement
 
-1. Create `agent/robustness_eval.py` and a committed
-   `config/robustness_protocol.json` **before** running the evaluation.
-2. Define a small fixed corpus of non-scored faults, each with an expected safe
-   route. Suggested cases:
-   - nonexistent or wrong-context capability: free preflight refusal;
-   - incomplete training config: actionable validation with all missing keys;
-   - syntax/runtime error in a generated script: debug/retry path;
-   - malformed or missing output artifact: fail closed, retry or abandon;
-   - timeout: classify, shrink/reroute, and remain within the configured cap.
-3. Run each case in a dedicated smoke workspace with an immutable fixture and
-   no competition score claim. Record fault ID, fingerprint, original attempt,
-   recovery action, retry count, compute spent, final status, and manual
-   intervention count.
-4. Generate `logs/robustness/RESULTS.md` from those journaled artifacts. Keep
-   it visibly separate from the scored Pure run.
+1. Add a `--competition` profile with organizer epsilon `0.002`, N `3`, 50
+   iterations, and 6-hour ceiling. This profile must stop on the organizer rule;
+   internal research gates may not defer it.
+2. Journal an actual organizer FM baseline evaluation as experiment `0`. Do not
+   hardcode a synthetic score-only node. Record code/config/data hashes and the
+   official evaluator output.
+3. Make the first above-baseline candidate eligible for autonomous ensembling
+   immediately. Queue the predeclared 16-seed ensemble before lower-value
+   exploration, while the official convergence window is still open.
+4. Compute official convergence after every scored iteration. Persist
+   `official_eligible: true/false` on each candidate and ensemble artifact.
+5. When convergence fires, freeze the validation-best eligible artifact and
+   reject any later score as post-convergence research evidence.
+6. Keep the calibrated `0.00048` controller only in a separate `--research`
+   profile. Label it non-official everywhere.
+7. Never mutate the existing journal to make it pass. Produce a clean new run
+   directory and preserve the old run as evidence of the issue found.
 
-### Acceptance tests
+### Required tests
 
-- The protocol is hashed and loaded before fault execution.
-- At least one preflight, one runtime, and one artifact/timeout route are
-  exercised end-to-end.
-- Every completed recovery has an automated next action and zero manual edits.
-- A fault that cannot be safely repaired is recorded as a controlled stop, not
-  as a fictitious recovery.
+- Reproduce the current score sequence and assert official convergence at node
+  `3`, with node `4` marked ineligible.
+- Use `baseline -> candidate -> ensemble -> no-progress` and assert the ensemble
+  is eligible when official convergence eventually fires.
+- Assert `--competition` cannot be delayed by branching, pending ensemble,
+  debug, or the research epsilon.
+- Assert errored/preflight-only attempts do not fake scored progress, while all
+  relevant wall-clock still counts.
 
-### Why this helps judging
-
-It turns "zero crashes" into evidence of robust behavior rather than an
-unverified claim. It directly maps to the rubric's definition of robustness.
-
-## Phase 3: Convert randomized exposure from a report into a bounded research action
+## P0 - Repair the canonical manifest and budget truth
 
 ### Goal
 
-Use the one distinctive KuaiRand resource without leakage or transduction:
-the randomized-exposure validation log is a diagnostic/confirmation signal,
-not extra training data or a test proxy.
+Make every displayed result derivable from one machine-readable artifact.
 
 ### Implement
 
-1. Extract the present `_unbiased_check` into a named capability with an
-   explicit contract: it may read only the sandboxed randomized **validation**
-   window; test-window rows must remain physically absent.
-2. Add a structured counterfactual diagnostic artifact that reports, at minimum:
-   - sample/date boundaries and row counts;
-   - standard logged-policy validation metrics;
-   - randomized-exposure validation metrics;
-   - metric disagreement and uncertainty notes;
-   - no promotion decision by itself.
-3. Add a narrow, predeclared mapping from diagnostic patterns to **one** legal
-   experiment family. Examples are sample-weighting, a duration/watch-time
-   auxiliary objective, or a counterfactual loss already implementable from
-   train-only information. The mapping must output an `ExperimentSpec` with
-   control, treatment, seed set, and paired acceptance gate.
-4. Require the final selection metric to remain the official logged validation
-   GAUC/nDCG@5. The randomized log can motivate a hypothesis or reject a fragile
-   candidate; it cannot silently replace the official objective.
-5. First run a fixed diagnostic-only baseline/incumbent comparison. Only then
-   allow one pre-registered paired candidate. Record a negative outcome as a
-   valid research result.
+1. Source total LLM input + output tokens from the provider-level run summary.
+   Node token ownership is useful diagnostics but is not the rubric total.
+2. Exclude `action == "ensemble"` when calculating `best_single_seed`; report
+   the ensemble in its own field.
+3. For legacy journals without execution events, report observation count as
+   `unknown` or explicitly derived from scored nodes. Never show 28 runs beside
+   zero observations without explaining missing instrumentation.
+4. Fix `manifest.render()` to use `reused_artifacts`; remove the stale
+   `cache_hits` key.
+5. Add official convergence node, final artifact node, eligibility, manual
+   interventions, test-lock state, CSV hash, dataset hash, evaluator hash, git
+   commit, and dirty-worktree state.
+6. Make README, dashboard, `RESULTS.md`, judge guide, and Devpost summary consume
+   the manifest rather than retyping numbers.
+7. Fail finalization if manifest totals disagree with provider summary, if the
+   repository is dirty, or if the selected node is after official convergence.
 
-### Acceptance tests
+### Required tests
 
-- The data-boundary test proves the random-log test dates are absent.
-- The capability fails closed for a non-NumPy model until an equivalent safe
-  implementation exists.
-- A diagnostic cannot directly promote a submission.
-- Mapping output is deterministic for a fixture diagnostic and is paired before
-  promotion.
+- Pin the current true total at 269,807 tokens and catch the incorrect 137,446
+  node-only total.
+- Pin single `0.60497` versus ensemble `0.60541` labeling.
+- Render a legacy and a fully instrumented journal without `KeyError`.
+- Regenerate twice and assert stable hashes except for timestamp fields.
 
-### Why this helps judging
-
-This is a meaningful, domain-specific research direction beyond architecture
-tweaks. It uses a dataset property the prompt calls out, while preserving the
-official objective and hidden-test boundary.
-
-## Phase 4: Reduce cost and failure surface without reducing statistical rigor
+## P1 - Improve hidden-test generalization, not public-valid overfit
 
 ### Goal
 
-Lower token and wall-clock use for the same or better research throughput. The
-current 8-node run used roughly 270k LLM tokens; standard menu experiments
-should not need a full generated Python program every time.
+Use the strongest measured clue: the model gains `+0.00410` from the final
+50%-to-100% training-data doubling, while epoch selection is highly sensitive.
+With bonus datasets excluded, better use of Pure's legal training period is the
+highest-value score direction.
 
 ### Implement
 
-1. For Path A/menu-only experiments, replace full-script generation with a
-   typed, validated experiment object: hypothesis, evidence grounding,
-   `menu_choices`, expected effect, and promotion criterion. Dispatch the
-   deterministic reference runner already used by paired confirmation.
-2. Reserve code generation for Path B or a genuinely new implementation that
-   cannot be expressed by the menu. Keep preflight and mechanism audit for
-   those cases.
-3. Add a strict immutable execution cache keyed by:
-   - data fingerprint;
-   - reference-runner/source hash;
-   - normalized menu choices;
-   - seed;
-   - evaluation-script hash.
+1. Add rolling-origin inner validation **inside the official train dates**.
+   Example: train through day d, select/freeze training duration on later
+   train-only days, and repeat across several cut points.
+2. Use those folds to choose one fixed epoch/schedule rule before evaluating on
+   official validation. Official validation remains the outer selection set;
+   do not tune the rule after seeing its score.
+3. Compare the fixed rolling-origin rule against current valid-argmax early
+   stopping over the same predeclared seeds. Promote only on paired evidence and
+   retain the 16-seed aggregation rule fixed in advance.
+4. Add one bounded out-of-menu experiment only if rolling-origin error analysis
+   motivates it. The best candidate is a leakage-safe as-of sequence/history
+   residual that varies within user and uses only earlier train interactions.
+   It must clear residual and paired gates; do not reopen broad architecture,
+   negative-sampling, reweighting, or heterogeneous-ensemble sweeps already
+   closed by evidence.
+5. Ask organizers in writing whether a final train+validation refit with frozen
+   hyperparameters is eligible as the "validation-best checkpoint." Implement
+   it only after affirmative confirmation. Without confirmation, submit the
+   eligible train-only checkpoint; do not gamble on an unscored refit.
 
-   Cached observations may be reused as the same observation, never counted as
-   a new independent seed or new evidence.
-4. Cache static, dataset-fingerprinted diagnostics such as feature feasibility
-   tables. Do not cache model outputs across differing code/config/data hashes.
-5. Benchmark optional parallel workers only after deterministic parity and
-   isolation tests pass. Do not enable them by default merely because the
-   executor has a parallel path: the repository has a history of shared data
-   locks, and CPU contention could make wall-clock worse.
+### Required evidence
 
-### Acceptance tests
+- Fold dates, labels, seeds, and rule are pre-registered and hashed.
+- No official-valid score is used to choose epochs within the candidate.
+- Paired deltas include GAUC, nDCG@5, primary, mean, standard deviation, wins,
+  and the predeclared promotion threshold.
+- A null result closes the direction and leaves `0.60541` untouched.
 
-- For a representative fixed config and seed, legacy Path A and the typed
-  runner produce matching predictions/metrics and equivalent provenance.
-- Cache hits have a visible cache key and are excluded from training-run and
-  seed-count increments.
-- A code, data, evaluator, configuration, or seed change is a cache miss.
-- Compare a fixed smoke workload before/after: report tokens, elapsed time,
-  training executions, metrics, and failures. Adopt only if metric parity is
-  exact and total cost is lower.
-- If parallel mode is kept, prove sandbox isolation and output parity first.
-
-### Why this helps judging
-
-Feasibility is scored only among teams that clear the baseline. This improves
-the relevant comparison without taking shortcuts on paired confirmation or
-provenance.
-
-## Phase 5: Add a clean autonomy evaluation, without overstating it
+## P1 - Make Path B one complete lifecycle
 
 ### Goal
 
-Provide stronger evidence that the agent can conduct a cycle from observation
-to revised action, while keeping the existing honest Level-B classification.
+Prove that generated feature code can become a trustworthy experiment without
+manual source copying.
 
 ### Implement
 
-1. Extend the existing journal grader with a separate `clean_autonomy` runner.
-   It must use a versioned, hash-recorded prompt/context that excludes
-   answer-shaped research memory, known dead ends, measured effect sizes, and
-   exact winning configurations.
-2. Pre-register three short, non-submission tasks before execution. Each should
-   give data schema, capability contract, constraints, and budget, but not the
-   answer. The desired behavior is observation -> competing hypotheses ->
-   discriminating measurement -> execution -> later belief/direction change.
-3. Record prompt hashes, allowed files, tool calls, generated code/config,
-   journal, manual interventions, and evaluator verdict. Make the provenance
-   review explicit rather than relying on a text heuristic alone.
-4. Keep this evaluation separate from score search. It can demonstrate method;
-   it must not be used to select the final benchmark model.
+Use one state machine:
 
-### Acceptance tests
+`proposal -> static/leakage check -> sandbox probe -> immutable source hash ->`
+`paired retrain queue -> paired outcome -> evidence state`
 
-- Forbidden answer-shaped paths cannot be read in the clean workspace.
-- The existing `autonomy_eval` still reports `UNOBSERVED` when a final node has
-  no later belief revision.
-- The rendered report includes both passed and failed criteria without rounding
-  up an incomplete trajectory.
+Store every valid proposal and rejection. The orchestrator, not the LLM, must
+inject the exact stored source into treatment runs. Deduplicate by source hash,
+block validation/test labels before execution, and expose lifecycle counts in
+the manifest. Add a synthetic integration fixture that completes the lifecycle;
+do not weaken the real residual threshold just to produce a positive demo.
 
-## Phase 6: Ship a judge packet and repair presentation drift
+Success is either a confirmed real feature or the honest statement: "the full
+lifecycle worked, but no Pure feature cleared the evidence gate."
+
+## P1 - Produce genuine closed-loop recovery evidence
 
 ### Goal
 
-Let a judge verify the work in minutes, not by reading the entire repository.
+Demonstrate what the rubric asks: after a failure, the agent completes a safe
+later action without a human.
 
 ### Implement
 
-1. Add a generated `docs/JUDGE_GUIDE.md` with a 3-minute route:
-   - baseline reproduction;
-   - incumbent verification;
-   - valid-only submission schema check;
-   - generated results and resource summary;
-   - one autonomous run tree/journal;
-   - Path-B and robustness evidence.
-2. Generate a compact `results/submission_manifest.json` beside the CSV with
-   CSV hash, row count, config/ensemble provenance, valid metrics, and the
-   exact command that generated it.
-3. Update README dashboard documentation to match the current tabs and the
-   Overview-embedded judging explanation. Remove stale claims rather than
-   adding another competing description.
-4. Add a Devpost-ready outline generated from the same artifacts: problem,
-   architecture, score, autonomy/recovery evidence, resources, constraints,
-   limitations, tools/libraries/dataset, and solo contribution.
-5. Before final submission, regenerate all reports from artifacts and run all
-   valid-only verification commands. The final hidden-test command remains a
-   deliberate last action, once.
+1. Preserve Claude's current fault-accounting work in `agent/faults.py`,
+   `agent/failure.py`, `agent/budget.py`, and the associated tests. Do not
+   overwrite these in-flight changes.
+2. Report three evidence levels separately:
+   - component simulation;
+   - real subprocess detection/termination;
+   - full agent-loop recovery with a later successful action.
+3. The existing live run detected an injected runtime error and selected debug,
+   but network failures prevented a repaired result. Label it incomplete rather
+   than calling it successful closed-loop recovery.
+4. Run an isolated, non-scored, pre-registered suite that reaches a later
+   successful action for at least: generated syntax/runtime error, malformed
+   artifact, and timeout/reroute. Record retries, compute spent, final status,
+   and manual interventions.
+5. Keep robustness logs separate from the competition journal. A controlled
+   safe stop is valid robustness evidence; it is not a recovery.
 
-## Score-focused research order after reliability work
+## P2 - Reduce tokens without removing agentic code generation
 
-The current model-family sweep is broad and the documented residual blend is
-under the noise scale. Do not spend the remaining budget on another unstructured
-architecture lottery. Use this order instead:
+### Goal
 
-1. Complete the counterfactual/randomized-exposure diagnostic and one
-   pre-registered paired treatment if it yields a concrete mechanism.
-2. Complete any legitimate Path-B candidate that clears the residual gate, with
-   exact-source paired confirmation.
-3. For a candidate that survives paired evidence, test the fixed ensemble
-   integration using a predeclared member set and compare against mean-member
-   performance, never the best sampled seed.
-4. If no candidate clears the gate, retain the verified incumbent. A stable,
-   reproducible `+0.00381` validation margin is better than sacrificing the
-   submission to a single-seed claim.
+Reach the same eight-decision quality with materially less than 269,807 tokens.
 
-## Do not build
+### Implement
 
-- Do not implement repeat-fatigue, frequency, exposure, or other aggregates
-  computed across the full validation/test batch for use on that same batch.
-- Do not touch test labels, hidden test metrics, or the official evaluator.
-- Do not lower Path-B probe/evidence thresholds simply to obtain a positive
-  demo.
-- Do not report internal epsilon `0.00048` as the organizer's epsilon `0.002`.
-- Do not call a fault-free run proof of recovery.
-- Do not add 1k/27k transfer work in this cycle.
-- Do not use cache hits as new independent seeds.
-- Do not run two training jobs concurrently until the existing isolation and
-  parity tests prove it safe and faster on this machine.
+1. Use typed `ExperimentSpec` dispatch for known Path-A menu operations and
+   reserve generated code for Path B or a genuinely new mechanism.
+2. Ask for implementation source only after a candidate wins planning. Do not
+   generate full scripts for discarded candidates.
+3. Merge redundant planning/research-state calls and send only the delta in
+   journal state. Keep a stable prompt prefix so provider prompt caching works.
+4. For generated code, provide a small validated scaffold and request a patch,
+   while still storing the final agent-authored source and diff required by the
+   challenge.
+5. Cache immutable diagnostics by data/code hash. Reuse never increments seeds,
+   observations, or fresh training runs.
+6. Benchmark before/after on a fixed smoke protocol. Target no more than 16 LLM
+   calls and under 190k total tokens for an equivalent eight-decision run,
+   without reducing candidate diversity or paired confirmation.
 
-## Required final verification order
+Do not optimize cost before correctness. Feasibility receives value only if the
+hidden score clears the baseline.
 
-1. `python3 tests/test_harness.py`
-2. Regenerate the valid submission, schema-check it with the starter kit, and
-   write the final-selection/submission manifests.
-3. `python3 -m agent.verify_incumbent`
-4. `python3 -m agent.results_report --run-tests`
-5. Regenerate the judge guide, robustness report, and Devpost outline.
-6. Inspect the exact artifacts that will be submitted.
-7. Only when the team explicitly freezes the configuration, run the one-shot
-   hidden-test evaluation.
+## P2 - Strengthen innovation evidence
 
-## Definition of success
+For every nontrivial proposal, generate a compact research card containing:
 
-The strongest hackathon-ready result is not merely a higher validation number.
-It is a baseline-beating, reproducible Pure submission whose official
-convergence is clear; whose agent independently runs observation, planning,
-implementation, evaluation, and reflection; whose faults are handled
-automatically in a pre-registered test; whose novel counterfactual and feature
-research paths are evidence-gated; and whose cost and provenance are visible in
-one generated judge packet.
+- observed failure or residual motivating the experiment;
+- mechanism and why it can reorder items within a user;
+- cited published method/public solution;
+- dataset-specific adaptation;
+- leakage analysis and expected failure mode;
+- control, treatment, seeds, cost, and promotion gate;
+- result and belief update.
+
+Use the random-exposure valid window as a clearly labeled diagnostic only. The
+measured random long-view rate differs sharply from the logged policy, while the
+official evaluator scores the logged distribution. Do not force IPS training or
+let random-log diagnostics promote a submission directly.
+
+## P2 - Ship a judge packet
+
+Create and generate these from the canonical manifest:
+
+1. `docs/JUDGE_GUIDE.md`: a three-minute route covering baseline, clean run,
+   tree/journal, final artifact, robustness, cost, and reproduction.
+2. `docs/DEVPOST_SUBMISSION.md`: problem, full-stack agent loop, key research
+   insight, score, autonomy, robust recovery, resources, limitations, tools,
+   libraries, dataset, and solo contribution.
+3. A pinned environment file (`requirements.txt` or `pyproject.toml`) and one
+   tested setup command from a clean environment.
+4. A valid `submission_test.csv` and adjacent manifest with row count, hashes,
+   eligible node, aggregation, and generation command.
+5. README fixes: real public repository URL, current four-tab dashboard, exact
+   commands, expected outputs, and no stale five-tab text.
+6. A short screen recording: start run, circular experiment tree grows, open an
+   experiment's hypothesis/diff/metrics, show recovery, verify incumbent, and
+   end on the one-page rubric mapping.
+
+## Clean Pure benchmark run
+
+Run only after P0 and P1 tests pass and the worktree is intentionally frozen:
+
+1. Archive prior logs without deleting final ensemble evidence.
+2. Record repository commit, dependency lock, dataset/evaluator hashes, model,
+   provider, prompt version, and competition profile.
+3. Run a smoke test with hidden-test access mechanically unavailable.
+4. Run `--competition --fresh` once with the baseline-first and early-ensemble
+   sequence.
+5. Regenerate manifest, results, judge guide, and valid submission from that run.
+6. Verify the official convergence node contains the selected artifact.
+7. Recompute the ensemble exactly and run starter-kit submission checks.
+8. Inspect the final diff and require a clean repository state.
+9. Only after the artifact is frozen, invoke the one-shot hidden-test command.
+10. Record the hidden result without triggering any retraining, reselection, or
+    second evaluation.
+
+Suggested valid-only checks before step 9:
+
+```bash
+python3 tests/test_harness.py
+python3 -m agent.verify_incumbent
+python3 -m agent.manifest --run-tests
+python3 -m agent.results_report --run-tests
+python3 -m agent.make_submission --split valid --score --ensemble
+python3 kuairand-starter-kit/submit.py --check submission_valid.csv --split valid
+```
+
+Verify each command and output path from the repository root; update filenames
+to the actual CLI contract rather than documenting commands that were not run.
+
+## Do not spend remaining time on
+
+- KuaiRand-1k or KuaiRand-27k in this cycle.
+- Any transductive validation/test aggregate.
+- IPS or random-log training merely to look counterfactual.
+- Another broad menu, architecture, negative-sampling, reweighting, or blend
+  sweep whose mechanism is already closed in `agent/experience.md`.
+- Lowering residual, paired-evidence, leakage, or provenance gates for a demo.
+- Choosing ensemble size, members, or weights after seeing validation scores.
+- Calling component simulations full autonomous recovery.
+- Polishing the dashboard before checkpoint eligibility and manifest truth.
+
+## Definition of hackathon-ready
+
+The project is ready when a clean KuaiRand-Pure run autonomously produces an
+artifact that exists by the first official convergence point; beats the public
+baseline with paired, reproducible validation evidence; preserves the one-shot
+hidden-test boundary; completes real recoveries with zero manual intervention;
+reports exact provider tokens and total wall-clock; and can be verified by a
+judge from one manifest and one three-minute guide.
+
+If Claude Code runs out of context before completing this brief, update
+`HANDOVER_FOR_CODEX.md` with completed commits, dirty files, exact commands and
+outputs, unresolved failures, and the next unchecked acceptance test. Never
+claim a phase complete merely because its code exists.

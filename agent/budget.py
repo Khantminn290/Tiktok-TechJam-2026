@@ -113,13 +113,21 @@ class Ledger:
         that never happened. `unique` is how many DISTINCT observations resulted;
         `duplicates` are repeat references to observations already counted, which
         add neither compute nor evidence.
+
+        A CRASHED run is charged as compute and excluded from evidence, which
+        is not a contradiction: the compute is spent and unrecoverable, but no
+        measurement came out of it. execution_events already encodes this --
+        FAILED_EXECUTION is in COSTS_COMPUTE and absent from IS_OBSERVATION --
+        and the two must not disagree, or the same crash counts as support here
+        and as nothing there.
         """
         self.training_runs += int(n)
         self.training_crashes += int(crashed)
         self.reused_artifacts += int(reused)
         self.duplicate_reuse += int(duplicates)
         self.unique_observations += int(
-            unique if unique is not None else n + reused)
+            unique if unique is not None
+            else max(0, int(n) - int(crashed)) + int(reused))
 
     def training_runs_left(self) -> int | None:
         if self.max_training_runs is None:
@@ -156,7 +164,7 @@ class Ledger:
                          "are previously completed members: real historical "
                          "evidence, no compute, excluded from the budget. "
                          "unique_observations is what evidence may rest on; "
-                         "duplicates add neither.")}
+                         "crashes and duplicates add neither.")}
 
 
 COUNTING_NOTE = (

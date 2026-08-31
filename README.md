@@ -80,6 +80,42 @@ Covers the safety gate, cross-axis validation, every search-policy branch
 the spend ceiling. **Run this before every real session** — it is free and catches
 the failures that would otherwise cost money to discover.
 
+### 1b. Fault and recovery suite
+
+```bash
+python3 -m agent.faults --live       # writes results/fault_report.json
+```
+
+Injects faults across the whole surface — a config missing an axis, wrong call
+arity, a capability's return shape misused, malformed model output, unparseable
+code, a broken feature builder, a training timeout, a prediction array full of
+NaN, a missing ensemble member, a duplicate member request, an exhausted repair
+chain, an unaffordable experiment, an invalid spec, a single seed offered as a
+discovery, crashes offered as convergence, and an unverifiable provenance stamp.
+
+Each one is checked on ten axes: detected, **named correctly**, **routed
+correctly**, bounded so it cannot repeat forever, charged to the compute budget
+if and only if compute was spent, kept out of the evidence, journalled,
+survivable, free of human intervention, and — where recovery is impossible —
+terminated cleanly.
+
+The routing distinction is the part worth reading. `repair` means the idea is
+fine and the artifact is broken; `pivot` means the approach itself cannot work.
+A timeout is a pivot, not a repair — re-running the same work would time out
+again — and a mechanism that cannot move a within-user ranking metric is not
+repairable either, because a fixed version of an inert idea is equally inert.
+
+`--live` additionally spawns real subprocesses through the real executor: one
+script that exits 0 while writing NaN predictions (a clean exit code is not
+evidence), and one that never returns.
+
+A full live agent run with a deliberate failure in it is recorded under
+`results/live_fault_run/`:
+
+```bash
+python3 run_agent.py --fresh --max-iterations 4 --inject-error-at 1 --max-training-runs 4
+```
+
 ### 2. Budget-capped smoke test (cheap, ~3 iterations)
 
 ```bash
@@ -154,7 +190,18 @@ the agent *resumes* the journal, which is how a crashed run continues),
 ```bash
 python3 -m agent.report              # per-iteration history, spend, tokens, GPU-hours
 python3 -m agent.results_report --run-tests   # regenerate RESULTS.md from artifacts
+python3 -m agent.manifest --run-tests         # the one canonical results/manifest.json
+python3 -m agent.judge_packet                 # writes results/JUDGE_PACKET.md
 ```
+
+`results/manifest.json` is the single source every other artifact reads —
+scores are recomputed from the stored member predictions at generation time,
+never quoted. `JUDGE_PACKET.md` is generated *from* it: the problem, the loop,
+the action space, how experiments are chosen, how confirmation and ensembling
+work, both results with their attribution, the run's cost, the fault suite, the
+convergence rules, the limitations, and the exact commands to reproduce all of
+it. A test asserts the packet's numbers move when the manifest moves, so it
+cannot quietly go stale.
 
 ### The dashboard (easiest way to see all of this)
 
@@ -163,13 +210,17 @@ python3 -m pip install streamlit
 streamlit run app.py                 # http://localhost:8501
 ```
 
-Five tabs, in the order someone actually evaluates this: **Live tree** (the
-search as it grows, with decisions, errors and recoveries), **Results** (the
-generated report, plus a button that re-verifies `0.60541` from the stored
-predictions), **Iterations** (every node, filterable, with the raw journal
-record and the script the agent wrote), **Judging criteria** (each competition
-criterion mapped to evidence in this repo, including what we are *not*
-claiming), and **Run** (start a run; the resolved configuration is shown first).
+Five tabs, in the order someone actually evaluates this: **Overview** (the
+result, how the loop works, and each competition criterion mapped to evidence
+in this repo — including what we are *not* claiming), **Watch it run** (the
+search as it grows, as a real parent-linked tree, with decisions, errors and
+recoveries), **Iteration log** (every node, filterable, with the raw journal
+record and the script the agent wrote), **Robustness** (every injected fault
+and what the agent did about it, plus the live run with a deliberate failure in
+it), and **Start a run** (the resolved configuration is shown first).
+
+Every headline figure in the dashboard is read from `results/manifest.json`,
+so the dashboard and this README cannot disagree with the artifacts.
 
 The dashboard is a window, not a decision-maker: evidence tiers are recomputed
 there, so a single-seed result displays as PRELIMINARY however good it looks,

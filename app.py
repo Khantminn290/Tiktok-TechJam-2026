@@ -210,7 +210,7 @@ if running:
     st.success("🟢 An agent run is in progress — see **Watch it run**.")
 
 tabs = st.tabs(["📌 Overview", "▶️ Watch it run", "📜 Iteration log",
-                "⚙️ Start a run"])
+                "🛡️ Robustness", "⚙️ Start a run"])
 
 
 # ---------------------------------------------------------------- overview ---
@@ -556,8 +556,107 @@ with tabs[2]:
                            "preflight-only events that use shared orchestration.")
 
 
-# --------------------------------------------------------------------- run ---
+# -------------------------------------------------------------- robustness ---
 with tabs[3]:
+    st.header("Robustness")
+    st.markdown(
+        "<span class='small'>An agent that stops at the first broken script is "
+        "not autonomous. What matters is not whether it notices a fault, but "
+        "what it does next — and whether its books still balance afterwards. "
+        "Every figure below is read from the generated manifest.</span>",
+        unsafe_allow_html=True)
+
+    _rb = _M.get("robustness") or {}
+    _fs = _rb.get("fault_suite") or {}
+    _lv = _rb.get("live_injected_failure_run") or {}
+
+    if not _fs.get("available"):
+        st.info("No fault report yet. Generate one with "
+                "`python3 -m agent.faults --live`, then "
+                "`python3 -m agent.manifest`.")
+    else:
+        m = st.columns(4)
+        m[0].metric("Faults injected", _fs.get("faults_injected"))
+        m[1].metric("Detected", f"{(_fs.get('detection_rate') or 0):.0%}")
+        m[2].metric("Recovered correctly",
+                    f"{(_fs.get('recovery_rate') or 0):.0%}")
+        m[3].metric("Manual interventions", _fs.get("manual_interventions"))
+
+        st.markdown("#### How it recovered")
+        r = st.columns(4)
+        for col, (label, key, why) in zip(r, [
+                ("Repaired", "automatic_repairs",
+                 "the idea was fine, the artifact was broken"),
+                ("Skipped", "automatic_skips",
+                 "not worth another attempt; the run continued"),
+                ("Pivoted", "automatic_pivots",
+                 "the approach itself could not work"),
+                ("Stopped cleanly", "clean_terminations",
+                 "recovery was impossible, so it stopped")]):
+            col.metric(label, _fs.get(key))
+            col.caption(why)
+
+        if _fs.get("invalid_candidate_promoted"):
+            st.error("An invalid candidate was promoted under fault. "
+                     "This must be fixed before submission.")
+        else:
+            st.success("No injected fault caused an invalid candidate to be "
+                       "promoted, and convergence stayed correct throughout.")
+
+        # The routing table, which is where the interesting judgement lives.
+        fr = read_json(os.path.join(ROOT, "results", "fault_report.json")) or {}
+        if fr.get("results"):
+            st.markdown("#### Every fault, and what the agent did about it")
+            st.caption("`repair` fix and re-attempt · `skip` abandon this "
+                       "experiment · `pivot` abandon this approach · `abort` "
+                       "stop cleanly. Getting repair and pivot the wrong way "
+                       "round is the expensive mistake: a timeout is not fixed "
+                       "by running the same work again.")
+            st.dataframe(
+                [{"fault": x["fault"], "what breaks": x["what_breaks"],
+                  "named as": x["expected_class"],
+                  "response": x["expected_response"],
+                  "bounded": "yes" if x["bounded"] else "NO",
+                  "budget ok": "yes" if x["budget_correct"] else "NO",
+                  "evidence ok": "yes" if x["evidence_correct"] else "NO",
+                  "recovered": "yes" if x["recovered"] else "NO"}
+                 for x in fr["results"]],
+                width="stretch", hide_index=True)
+
+    if _lv.get("available"):
+        st.divider()
+        st.markdown("#### The live run")
+        w = _lv.get("what_happened") or {}
+        led = _lv.get("ledger") or {}
+        st.markdown(
+            f"Unit tests show that components behave when handed a constructed "
+            f"input. This was the whole loop — real model calls, real training "
+            f"— with a failure injected at iteration "
+            f"**{_lv.get('injected_at_iteration')}**.")
+        c = st.columns(4)
+        c[0].metric("Training runs charged", led.get("training_runs_used"))
+        c[1].metric("Crashed", led.get("training_crashes"))
+        c[2].metric("Observations credited", led.get("unique_observations"))
+        c[3].metric("Manual interventions", _lv.get("manual_interventions"))
+        st.caption("A crash costs compute and earns no evidence. Both halves of "
+                   "that are recorded, which is why these three numbers differ.")
+        st.markdown(
+            f"- the injected fault was detected after "
+            f"**{w.get('compute_spent_before_it_crashed_s')}s** of training, "
+            f"correctly charged as spent\n"
+            f"- the agent's next move was **{w.get('agent_response')}** — "
+            f"*{(w.get('agent_reason') or '')[:130]}*\n"
+            f"- the run stopped on `{_lv.get('stop_reason')}`, not on a crash")
+        if w.get("unplanned_faults"):
+            st.warning(
+                f"**{w['unplanned_faults']} unplanned faults also occurred.** "
+                + (w.get("unplanned_fault_note") or ""))
+        st.caption(f"Artifacts: `{_lv.get('artifacts')}` · reproduce with "
+                   f"`{_lv.get('command')}`")
+
+
+# --------------------------------------------------------------------- run ---
+with tabs[4]:
     st.header("Start a run")
     if running:
         st.warning("A run is already in progress — see **Watch it run**.")
