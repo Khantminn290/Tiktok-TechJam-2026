@@ -25,7 +25,7 @@
       "failure_class": "evaluation_failure",
       "retry_worthwhile": true,
       "decide_reason": "extending global best node 0 (valid primary 0.6046); its neighborhood is not exhausted",
-      "error_head": "exit code 1\n--- stderr (tail) ---\nTraceback (most recent call last):\n  File \"/private/tmp/claude-501/-Users-khantminn-Desktop-Tiktok-TechJam-2026/f68ce099-a4fb-"
+      "error_head": "exit code 1\n--- stderr (tail) ---\nTraceback (most recent call last):\n  File \"/tmp/agent-sandbox/f68ce099-a4fb-"
     },
     {
       "id": 2,

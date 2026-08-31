@@ -58,4 +58,4 @@ NOT EVIDENCE as measured -- fix the design before believing it
   [FATAL] best of 3 comparisons: with NO real effect the max would sit about +0.00048 (+0.60 sigma) above zero by selection alone, against a claimed -0.00000
   [FATAL] the winner was chosen using the same data it is scored on. That number measures fit to this split, not generalisation -- confirm on a held-out partition or by resampling
 
-wrote /private/tmp/claude-501/-Users-khantminn-Desktop-Tiktok-TechJam-2026/f68ce099-a4fb-4cef-9181-f46e0ce58ede/scratchpad/tau_verification.json
+wrote /tmp/agent-sandbox/f68ce099-a4fb-4cef-9181-f46e0ce58ede/tau_verification.json

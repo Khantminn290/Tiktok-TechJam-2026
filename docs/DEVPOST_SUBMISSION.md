@@ -66,8 +66,9 @@ CPU-capable and all limits are explicit before a run starts.
 **Development tools.** VS Code as the editor; git for version control, with
 `git worktree` used to give each parallel agent worker an isolated checkout
 (`agent/worktree.py`); Streamlit for the live run dashboard (`app.py`); the
-standard `python3` toolchain, Python 3.12.10. Development was assisted by
-Claude Code and Codex working in the repository.
+standard `python3` toolchain, Python 3.12.10. AI coding assistants were used
+during development of the harness; the agent's own inference cost is
+instrumented and reported separately in the resource figures.
 
 **APIs.** One LLM provider API drives the agent loop: **openai `gpt-5.4`**, called
 through `agent/llm.py`. The module also supports Anthropic as an alternative

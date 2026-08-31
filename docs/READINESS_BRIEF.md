@@ -1,4 +1,4 @@
-# Claude Code Brief: Make the Pure Agent Hackathon-Ready
+# Readiness Brief: Make the Pure Agent Hackathon-Ready
 
 > ## STATUS: CLOSED — historical record, superseded 2026-08-31
 >
@@ -166,7 +166,7 @@ is promising but does not guarantee that the hidden-test primary beats
 
 ## Authoritative interpretation
 
-Claude Code must treat the pasted challenge statement and starter-kit code as
+The implementer must treat the pasted challenge statement and starter-kit code as
 authoritative. Preserve these invariants:
 
 1. Work on **KuaiRand-Pure only**. Do not spend this cycle on 1k or 27k.
@@ -512,7 +512,7 @@ later action without a human.
 
 ### Implement
 
-1. Preserve Claude's current fault-accounting work in `agent/faults.py`,
+1. Preserve the current fault-accounting work in `agent/faults.py`,
    `agent/failure.py`, `agent/budget.py`, and the associated tests. Do not
    overwrite these in-flight changes.
 2. Report three evidence levels separately:
@@ -699,7 +699,7 @@ hidden-test boundary; completes real recoveries with zero manual intervention;
 reports exact provider tokens and total wall-clock; and can be verified by a
 judge from one manifest and one three-minute guide.
 
-If Claude Code runs out of context before completing this brief, update
+If the implementer runs out of context before completing this brief, update
 `HANDOVER_FOR_CODEX.md` with completed commits, dirty files, exact commands and
 outputs, unresolved failures, and the next unchecked acceptance test. Never
 claim a phase complete merely because its code exists.

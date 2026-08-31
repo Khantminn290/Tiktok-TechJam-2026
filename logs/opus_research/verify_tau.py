@@ -15,7 +15,7 @@ import json
 import os
 import sys
 
-ROOT = "/Users/khantminn/Desktop/Tiktok-TechJam-2026"
+ROOT = "."
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "runtime"))
 sys.path.insert(0, os.path.join(ROOT, "kuairand-starter-kit"))

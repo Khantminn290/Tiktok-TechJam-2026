@@ -1,6 +1,6 @@
 # Results — generated
 
-Generated `2026-08-31T15:22:59Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
+Generated `2026-08-31T15:38:12Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
 
 Tiers: **VERIFIED** recomputed during this generation · **OBSERVED** measured in a run and journalled · **OPEN** not established.
 

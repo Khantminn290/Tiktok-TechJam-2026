@@ -22,7 +22,7 @@ RESOLVED CONFIGURATION — profile: competition
 preflight OK — provider=openai model=gpt-5.4 (key from $OPENAI_API_KEY, verified)
   rate card: $2.50/1M in, $15.00/1M out
   spend ceiling: $3.00 | draft_count=5 | max_iterations=5
-archived previous run to /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/archive_20260831_101013
+archived previous run to logs/archive_20260831_101013
 kept submission artifacts in place: ab_test, ensemble_results.json, feature_registry.jsonl, final_ensemble, opus_research, research_memory.jsonl
 agent run started: max_iterations=5, wall_clock_limit=1.0h, llm=openai:gpt-5.4, draft_count=5, spend_ceiling=$3.00 ($2.50/1M in, $15.00/1M out), ε=0.00048 (0.60σ), N=3
 [iter 0] action=draft — only 0 attempts exist (< draft_count=5); drafting a fresh combination, prioritizing untried high-priority axes
@@ -155,5 +155,5 @@ EXPERIMENT SPEC — multi_seed_replication
   }
 }
 
-best solution: /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/best_solution.py
+best solution: logs/best_solution.py
 generate a submission with: python3 -m agent.make_submission

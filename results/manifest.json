@@ -1,22 +1,50 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T15:23:01Z",
+  "generated_utc": "2026-08-31T15:38:14Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "2f3f5c2c07e41c0e9d20bf45b3d4f16c4307c02f",
-    "short_sha": "2f3f5c2c07e4",
+    "sha": "41bb9cae82a1c6b283106e2460b81c8d2dc790f6",
+    "short_sha": "41bb9cae82a1",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 5,
+    "dirty_files": 33,
     "source_dirty": true,
     "source_dirty_files": [
-      "README.md",
-      "agent/iteration_log.py",
-      "docs/DEVPOST_STORY.md"
+      "agent/devpost.py",
+      "agent/report.py",
+      "config/agent_config.json",
+      "docs/CLAUDE_HACKATHON_READINESS_BRIEF.md -> docs/READINESS_BRIEF.md"
     ],
     "generated_dirty_files": [
       "RESULTS.md",
-      "logs/ITERATION_LOG.md"
+      "docs/DEVPOST_SUBMISSION.md",
+      "logs/ab_test/arm_A_journal.jsonl",
+      "logs/ab_test/arm_B_journal.jsonl",
+      "logs/ab_test/arm_B_run.log",
+      "logs/journal.jsonl",
+      "logs/opus_research/agent_reproduced_incumbent.jsonl",
+      "logs/opus_research/beat_attempt_1.jsonl",
+      "logs/opus_research/beat_attempt_2.jsonl",
+      "logs/opus_research/beat_attempt_2.log",
+      "logs/opus_research/clean_autonomy_run.log",
+      "logs/opus_research/clean_run_1.jsonl",
+      "logs/opus_research/clean_run_2.jsonl",
+      "logs/opus_research/clean_run_3.jsonl",
+      "logs/opus_research/final_validation_run.jsonl",
+      "logs/opus_research/final_validation_run.log",
+      "logs/opus_research/phase3_run.jsonl",
+      "logs/opus_research/phase4_competition_run.jsonl",
+      "logs/opus_research/post_arch_run_1.jsonl",
+      "logs/opus_research/post_arch_run_2.jsonl",
+      "logs/opus_research/post_arch_run_3.jsonl",
+      "logs/opus_research/post_frontier_fix_run.jsonl",
+      "logs/opus_research/post_frontier_fix_run.log",
+      "logs/opus_research/rebuild_incumbent.py",
+      "logs/opus_research/selftest_run.log",
+      "logs/opus_research/tau_verification.log",
+      "logs/opus_research/verify_tau.py",
+      "results/live_fault_run/journal.jsonl",
+      "results/live_fault_run/report.json"
     ]
   },
   "dataset": {
@@ -587,7 +615,7 @@
     "executed": true,
     "passed": 1116,
     "failed": 0,
-    "seconds": 27.1
+    "seconds": 25.5
   },
   "submission_artifacts": {
     "valid": {

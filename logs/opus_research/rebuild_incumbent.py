@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-ROOT = "/Users/khantminn/Desktop/Tiktok-TechJam-2026"
+ROOT = "."
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "rebuild")
 for p in (ROOT, os.path.join(ROOT, "runtime"), os.path.join(ROOT, "kuairand-starter-kit")):
     if p not in sys.path:

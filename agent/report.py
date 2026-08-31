@@ -148,8 +148,8 @@ def render() -> str:
     lines.append(
         "NOTE on token accounting: the figure above is the AGENT's own LLM "
         "usage, measured from real API responses. It does NOT include tokens "
-        "spent by any human-driven development session (e.g. a Claude Code "
-        "session authoring/debugging this harness), which is not instrumented "
+        "spent by any human-driven development session that authored or "
+        "debugged this harness, which is not instrumented "
         "here and is typically far larger. Quote this number as 'agent "
         "inference cost', not 'total project LLM cost'.")
 
