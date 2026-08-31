@@ -151,7 +151,27 @@ def selection_rule_test(per_epoch_scores, users, labels, rules: dict,
     users = np.asarray(users)
     labels = np.asarray(labels)
     uniq = np.unique(users)
-    E = np.asarray(per_epoch_scores)          # (seeds, epochs, rows)
+    # np.asarray raises on ragged input BEFORE the shape check below ever
+    # runs, and its message -- "setting an array element with a sequence, the
+    # requested array has an inhomogeneous shape after 2 dimensions" -- says
+    # nothing about what the caller did wrong. Observed three times in live
+    # runs, each costing a full training run, and each time the cause was the
+    # same: the raw (epoch, valid_primary, scores) capture payload passed
+    # straight in. Static preflight cannot reliably catch it because the caller
+    # binds it to a differently-named variable first, so it is caught here.
+    try:
+        E = np.asarray(per_epoch_scores)      # (seeds, epochs, rows)
+    except ValueError as e:
+        raise ValueError(
+            f"per_epoch_scores could not be read as an array ({e}). This is "
+            f"almost always the raw capture payload: cfg['capture_epoch_scores'] "
+            f"is a LIST of (epoch, valid_primary, scores_valid) tuples, while "
+            f"this function needs a 3-D (seeds, epochs, rows) array of score "
+            f"vectors only.\n"
+            f"Use the adapter that converts it:\n"
+            f"    from research_tools import capture_selection_rule_test\n"
+            f"    out = capture_selection_rule_test("
+            f"cfg['capture_epoch_scores'], users, labels)") from e
     if E.ndim != 3:
         raise ValueError(
             f"per_epoch_scores must be (seeds, epochs, rows); got shape {E.shape}. "

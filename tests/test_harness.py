@@ -3205,6 +3205,16 @@ def test_streamlit_dashboard_executes():
 
     src = open(app).read()
     check("app.py parses", bool(__import__("ast").parse(src)))
+    check("Watch it run renders one connected node per experiment",
+          "def experiment_tree_dot" in src and "st.graphviz_chart" in src,
+          "the live journal should be a real parent-linked tree, not a card stack")
+    check("the experiment tree preserves parent edges",
+          "parent in ids" in src and "-> n" in src)
+    watch_tab = src.split("# ------------------------------------------------------------ watch it run ---")[1].split(
+        "# ----------------------------------------------------------- iteration log ---")[0]
+    check("live refresh is isolated from the other dashboard tabs",
+          "@st.fragment(run_every=3)" in watch_tab and "st.rerun()" not in watch_tab,
+          "a live run must not force a full-page rerun every three seconds")
 
     # It must not wire the one-shot hidden-test evaluation to a button.
     check("the one-time hidden-test eval is NOT behind a button",
@@ -3223,6 +3233,8 @@ def test_streamlit_dashboard_executes():
         "class N:\n"
         "    def __getattr__(self, k):\n"
         "        def fn(*a, **kw):\n"
+        "            if k == 'fragment':\n"
+        "                return lambda f: f\n"
         "            if k == 'columns':\n"
         "                n = a[0] if a else 1\n"
         "                n = len(n) if isinstance(n,(list,tuple)) else n\n"
@@ -3730,6 +3742,24 @@ def test_return_shape_contract():
                               "cfg['capture_epoch_scores'], u, l)\n"))
         check("the adapter itself is not flagged",
               r["failed_stage"] != P.RETURN_SHAPE)
+
+        # Static detection has a ceiling: the caller usually binds the capture
+        # payload to a differently-named variable first, so the check above
+        # cannot see it. Observed three times in live runs. The reliable catch
+        # is at the point of failure.
+        import numpy as _np
+        from research_tools import selection_rule_test as _srt
+        ragged = [(i, 0.6 + i * 1e-4, _np.zeros(5)) for i in range(20)]
+        try:
+            _srt(ragged, list(range(5)), _np.zeros(5), {"a": lambda p, sc: sc[0]})
+            raised = ""
+        except ValueError as e:
+            raised = str(e)
+        check("the raw capture payload raises a message that names the cause",
+              "LIST of (epoch" in raised,
+              "numpy's own 'inhomogeneous shape' error says nothing useful")
+        check("...and names the adapter that fixes it",
+              "capture_selection_rule_test" in raised)
 
         # A correctly-shaped tuple return must NOT be flagged.
         r = P.preflight(write("c.py", "cfg, enc = incumbent_cfg(s, m)\n"))
