@@ -246,6 +246,10 @@ def _run_facts(journal: str) -> dict:
         "llm_tokens_source": ("provider run summary"
                               if provider else "node-owned calls only"),
         "llm_calls": provider.get("calls"),
+        # Named so the Devpost writeup can state which model actually ran,
+        # read from the provider ledger rather than a default in the prose.
+        "llm_provider": provider.get("provider"),
+        "llm_model": provider.get("model"),
         "llm_tokens_node_owned": sum(node_tok.values()),
         "llm_spend_usd": (summary.get("spend") or {}).get("total_usd"),
         "gpu_hours": summary.get("gpu_hours", 0.0),

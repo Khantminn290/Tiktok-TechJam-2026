@@ -1,5 +1,27 @@
 # Claude Code Brief: Make the Pure Agent Hackathon-Ready
 
+> ## STATUS: CLOSED — historical record, superseded 2026-08-31
+>
+> **This document is kept as evidence of the review, not as a description of
+> the current submission.** Its central finding was correct and has since been
+> acted on; reading it as a live risk register would misstate where the project
+> now stands. For current facts see [`../RESULTS.md`](../RESULTS.md) and
+> [`../results/JUDGE_PACKET.md`](../results/JUDGE_PACKET.md).
+>
+> What changed since it was written:
+>
+> | Risk raised here | Outcome |
+> |---|---|
+> | The submitted ensemble was **ineligible** — the organizer rule fired at node 3, the ensemble was node 4 | **Resolved.** A clean competition run schedules the official baseline at node 0 and the ensemble at node 4; convergence now fires at node 8, so the eligible checkpoint *is* the ensemble at `0.60541`, with nothing higher-scoring after the stop. |
+> | Hidden-test performance unknown | **Resolved.** Evaluated once: primary `0.59810`, **+0.0035** over the baseline (4.37σ). |
+> | Eligibility not machine-checkable | **Resolved.** `convergence_report.report()` returns an `eligible_checkpoint` block, surfaced in the manifest and judge packet, pinned by `test_official_checkpoint_eligibility`. |
+> | Baseline reproduction not captured | **Resolved.** `logs/baseline/` holds stdout, parsed metrics, and SHA256 of the starter-kit scripts. |
+>
+> The one observation here that still stands is the note on ε = 0.002 against
+> roughly 0.004 of total headroom: the rule fires at the earliest legal window
+> in almost any run on this benchmark. That is a property of the rule, not of
+> this agent, and it is worth raising with the organizers.
+
 > ## Codex implementation status - 2026-08-31
 >
 > The recommendations below are retained as the decision record. Current code

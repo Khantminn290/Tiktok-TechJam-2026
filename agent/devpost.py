@@ -16,7 +16,29 @@ def build(d: dict) -> str:
     r = d.get("latest_run") or {}
     cl = ((d.get("robustness") or {}).get("closed_loop_recovery") or {})
     hp = s.get("how_produced") or {}
+    ht = d.get("hidden_test") or {}
+    htr = ht.get("result") or {}
+    _t, _dl = (htr.get("test") or {}), (htr.get("delta_test") or {})
+    # Deliverable 1 asks in as many words for tools, APIs, libraries and
+    # datasets. Generate the result and the provider/model from the run's own
+    # ledger so the writeup cannot quote a model the agent did not call.
+    prov = (d.get("latest_run") or {}).get("llm_provider") or "(not recorded)"
+    modl = (d.get("latest_run") or {}).get("llm_model") or "(not recorded)"
+    headline = ("The hidden test has not been evaluated yet."
+                if not _t else
+                f"Scored once on the hidden test set: primary "
+                f"**{_t.get('primary'):.5f}** against the official baseline's "
+                f"{(htr.get('baseline_test') or {}).get('primary')}, an "
+                f"absolute gain of **+{_dl.get('primary'):.4f}** "
+                f"(GAUC +{_dl.get('GAUC'):.4f}, nDCG@5 "
+                f"+{_dl.get('nDCG@5'):.4f}). The judged score is the mean "
+                f"absolute delta across the two metrics: "
+                f"**+{(_dl.get('GAUC', 0) + _dl.get('nDCG@5', 0)) / 2:.4f}**.")
     return f"""# Devpost Submission: Autonomous ML Research Agent
+
+## Result
+
+{headline}
 
 ## Inspiration
 
@@ -74,6 +96,36 @@ The latest run used {r.get('training_runs_spent')} training executions,
 {r.get('llm_tokens_total')} provider-reported tokens, ${r.get('llm_spend_usd')}
 in model spend, and {r.get('runtime_agent_s')} seconds wall-clock. Training is
 CPU-capable and all limits are explicit before a run starts.
+
+## Built with
+
+**Development tools.** VS Code as the editor; git for version control, with
+`git worktree` used to give each parallel agent worker an isolated checkout
+(`agent/worktree.py`); Streamlit for the live run dashboard (`app.py`); the
+standard `python3` toolchain, Python 3.12.10. Development was assisted by
+Claude Code and Codex working in the repository.
+
+**APIs.** One LLM provider API drives the agent loop: **{prov} `{modl}`**, called
+through `agent/llm.py`. The module also supports Anthropic as an alternative
+provider, selected by `.env`. No other external API is used — no search, no
+retrieval service, no hosted feature store.
+
+**Libraries and frameworks.** **NumPy** is the substrate: the submitted model is
+a factorization machine implemented in NumPy alone, matching the starter kit's
+reference engine. **PyTorch** backs the optional sequential/neural branches of
+the search space (`runtime/train_lib.py`). **Streamlit** renders the dashboard,
+and the **openai** / **anthropic** SDKs handle provider calls. Exact pins are in
+`requirements.txt`. Deliberately absent: no AutoML framework, no
+hyperparameter-search library, no recommender toolkit — the search policy is the
+contribution, so importing one would have replaced the thing being built.
+
+**Datasets and assets.** **KuaiRand-Pure** only, exactly as distributed in the
+organizers' starter kit — 1,141,112 train / 124,909 validation / 170,588 hidden
+test rows on the fixed date-based splits, with `long_view` as the positive label.
+No external training data, no pretrained weights, no augmentation, no manual
+labelling. The starter kit's `baseline.py`, `data.py` and `evaluate.py` are used
+unmodified; their SHA256 hashes are recorded in `logs/baseline/metrics.json` so
+a judge can verify they were not edited.
 
 ## Challenges and lessons
 

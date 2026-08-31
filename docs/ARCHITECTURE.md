@@ -389,7 +389,7 @@ elsewhere. **Absence of the answer is not absence of direction.**
 | **Reproduce** | `python3 -m agent.final_ensemble --seeds 16` |
 | **Provenance** | commit, branch, data fingerprint, config sha, seeds, aggregation rule, evaluation path |
 | **Dataset scope** | KuaiRand-Pure only. No 1K, no 27K, no external data, no transfer learning. |
-| **Hidden test** | never touched — no `results/final_evaluation.lock` exists |
+| **Hidden test** | evaluated once at final submission (primary 0.59810, +0.0035 over baseline); `results/final_evaluation.lock` present, second run refused |
 | **Main branch** | untouched |
 | **Research branch** | `opus-research-agent` |
 

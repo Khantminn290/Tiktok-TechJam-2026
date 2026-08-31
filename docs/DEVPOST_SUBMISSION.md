@@ -1,5 +1,9 @@
 # Devpost Submission: Autonomous ML Research Agent
 
+## Result
+
+Scored once on the hidden test set: primary **0.59810** against the official baseline's 0.5946, an absolute gain of **+0.0035** (GAUC +0.0041, nDCG@5 +0.0029). The judged score is the mean absolute delta across the two metrics: **+0.0035**.
+
 ## Inspiration
 
 Recommender-system progress is easy to overstate when one lucky seed, repeated
@@ -56,6 +60,36 @@ The latest run used 27 training executions,
 203602 provider-reported tokens, $0.718218
 in model spend, and 2567.3 seconds wall-clock. Training is
 CPU-capable and all limits are explicit before a run starts.
+
+## Built with
+
+**Development tools.** VS Code as the editor; git for version control, with
+`git worktree` used to give each parallel agent worker an isolated checkout
+(`agent/worktree.py`); Streamlit for the live run dashboard (`app.py`); the
+standard `python3` toolchain, Python 3.12.10. Development was assisted by
+Claude Code and Codex working in the repository.
+
+**APIs.** One LLM provider API drives the agent loop: **openai `gpt-5.4`**, called
+through `agent/llm.py`. The module also supports Anthropic as an alternative
+provider, selected by `.env`. No other external API is used — no search, no
+retrieval service, no hosted feature store.
+
+**Libraries and frameworks.** **NumPy** is the substrate: the submitted model is
+a factorization machine implemented in NumPy alone, matching the starter kit's
+reference engine. **PyTorch** backs the optional sequential/neural branches of
+the search space (`runtime/train_lib.py`). **Streamlit** renders the dashboard,
+and the **openai** / **anthropic** SDKs handle provider calls. Exact pins are in
+`requirements.txt`. Deliberately absent: no AutoML framework, no
+hyperparameter-search library, no recommender toolkit — the search policy is the
+contribution, so importing one would have replaced the thing being built.
+
+**Datasets and assets.** **KuaiRand-Pure** only, exactly as distributed in the
+organizers' starter kit — 1,141,112 train / 124,909 validation / 170,588 hidden
+test rows on the fixed date-based splits, with `long_view` as the positive label.
+No external training data, no pretrained weights, no augmentation, no manual
+labelling. The starter kit's `baseline.py`, `data.py` and `evaluate.py` are used
+unmodified; their SHA256 hashes are recorded in `logs/baseline/metrics.json` so
+a judge can verify they were not edited.
 
 ## Challenges and lessons
 

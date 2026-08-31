@@ -23,7 +23,7 @@ python3 -m agent.feature_lab           # the agent's own feature research log
 python3 -m agent.final_ensemble --seeds 16
 ```
 
-**The hidden test has never been evaluated.** That is a one-shot action; see §6.
+**The hidden test has been evaluated exactly once**, at final submission, after the configuration was frozen: primary `0.59810`, **+0.0035** over the official baseline (4.37σ). `results/final_evaluation.lock` now exists and refuses a second run. All development below used train + validation only; see §6.
 
 **Before you spend a day on an idea, run `python3 -m agent.frontier` and read §2.**
 Thirty-plus directions have been measured and ruled out *with mechanisms*. Most

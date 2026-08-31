@@ -19,6 +19,24 @@ BASELINE_VALID = 0.6016
 BASELINE_SEED_STD = 0.0008   # official FM baseline's own 5-seed std
 
 
+def _provider_tokens() -> dict:
+    """The agent's real provider-side token ledger, if the run recorded one.
+
+    logs/final_summary.json is written from llm.tokens_for_report(), i.e. the
+    usage the API itself reported across every call. That is the number the
+    resource-usage deliverable asks for, and the one the manifest and
+    RESULTS.md already quote -- so this report must not disagree with them.
+    """
+    p = os.path.join(LOGS, "final_summary.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p) as fh:
+            return (json.load(fh).get("total_llm_tokens") or {})
+    except (OSError, ValueError):
+        return {}
+
+
 def load_journal():
     path = os.path.join(LOGS, "journal.jsonl")
     if not os.path.exists(path):
@@ -50,11 +68,25 @@ def render() -> str:
             best = canonical
             if bm.get("reseed_verified"):
                 best_override = bm
-    tok = sum(n.get("tokens_used", 0) for n in nodes)
-    tb = {}
-    for n in nodes:
-        for k, v in (n.get("token_breakdown") or {}).items():
-            tb[k] = tb.get(k, 0) + v
+    # Per-node attribution undercounts: only nodes that reached a decision
+    # carry tokens_used, so calls spent on errored nodes and on planning are
+    # invisible to it. The deliverable asks for total tokens across the
+    # agent's LLM calls, which is the provider ledger. Prefer that, and keep
+    # the node sum only to show how much of it is attributable.
+    tok_attributed = sum(n.get("tokens_used", 0) for n in nodes)
+    tok, tok_source = tok_attributed, "attributed to journal nodes"
+    _prov = _provider_tokens()
+    if _prov.get("input_plus_output"):
+        tok, tok_source = _prov["input_plus_output"], "provider ledger"
+    # Break the headline down from the same source it came from, or the split
+    # would not add up to it.
+    tb = {k: _prov[k] for k in ("input_tokens", "output_tokens",
+                                "cache_creation_input_tokens",
+                                "cache_read_input_tokens") if k in _prov}
+    if not tb:
+        for n in nodes:
+            for k, v in (n.get("token_breakdown") or {}).items():
+                tb[k] = tb.get(k, 0) + v
     train_s = sum(n.get("wall_clock_seconds", 0.0) for n in nodes)
     errors = [n for n in nodes if n["status"] == "error"]
     recovered = sum(1 for n in nodes if n["action"] == "debug"
@@ -98,7 +130,13 @@ def render() -> str:
                      f"({BASELINE_SEED_STD}) - {verdict}"
                      + (" [using reseed mean, not single-seed]" if best_override else ""))
         lines.append(f"best menu choices: {json.dumps(best['menu_choices'])}")
-    lines.append(f"total LLM tokens (input+output, all types summed): {tok:,d}")
+    lines.append(f"total LLM tokens (input+output, all types summed): "
+                 f"{tok:,d}  [{tok_source}"
+                 + (f"; {tok_attributed:,d} attributable to journal nodes, the "
+                    f"rest spent on nodes that errored before scoring and on "
+                    f"planning calls]"
+                    if tok_source == "provider ledger"
+                    and tok_attributed and tok_attributed != tok else "]"))
     if tb:
         fresh = tb.get("input_tokens", 0) + tb.get("cache_creation_input_tokens", 0)
         lines.append(f"  of which: fresh input {fresh:,d} "

@@ -293,7 +293,7 @@ this section does.
 - `hist_tau_days` stays at its default 3.0 — the sweep above is why.
 - The convergence recalibration affects future runs only; it does not touch the
   submitted artifact.
-- **Hidden test never touched** — no `results/final_evaluation.lock` exists.
+- **Hidden test spent exactly once**, at final submission and after the configuration was frozen — `results/final_evaluation.lock` exists and a second run is refused. Every number in this evaluation is validation-only.
 - Test suite: **568 passed, 0 failed**.
 
 **One open provenance gap:** `logs/ensemble_results.json` carries `git_sha:

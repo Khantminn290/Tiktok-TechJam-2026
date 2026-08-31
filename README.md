@@ -17,18 +17,42 @@ mean. Official baseline: **0.6016** validation / **0.5946** test. The metric cei
 is **0.8484** / **0.8645**, not 1.0 — 27% of users have no positive label at all,
 so judge progress against that, not against a perfect score.
 
-**Result:** `0.60541` validation primary — a 16-seed rank-averaged ensemble of one
-configuration, **`+0.00381` over the 0.6016 baseline = `+4.76σ`** (σ = 0.0008, the
-baseline's own 5-seed spread). Individual members average 0.60463 ± 0.00032. `k=16`
-is *all* seeds trained, fixed before any score was seen, so the figure carries no
-selection bias. Rebuild it end-to-end with:
+## Result
 
-```bash
-python3 -m agent.final_ensemble --seeds 16
-```
+Scored once on the hidden test set, at final submission:
 
-The hidden test set has **never been evaluated**; everything above is
-train + validation only.
+| split | primary | GAUC | nDCG@5 |
+|---|---|---|---|
+| official baseline | 0.5946 | 0.6610 | 0.5282 |
+| **this submission** | **0.59810** | **0.66510** | **0.53110** |
+| **absolute delta** | **+0.0035** | **+0.0041** | **+0.0029** |
+
+**Judged score = +0.0035** — the mean absolute delta across GAUC and nDCG@5, at
+**4.37σ** on the baseline's own seed noise (σ = 0.0008).
+
+The submitted artifact is a 16-seed rank-averaged ensemble of one configuration,
+scoring `0.60541` on validation (`+0.00381` over the 0.6016 baseline). Members
+average 0.60463 ± 0.00032. `k=16` is *all* seeds trained, fixed before any score
+was seen, so the figure carries no selection bias.
+
+The validation-to-test drop is `-0.0073`. The official baseline loses `-0.0070`
+across the same two splits, so this is the ordinary generalisation gap rather
+than validation overfitting.
+
+The hidden test was evaluated **exactly once**, after the configuration was
+frozen — enforced by `results/final_evaluation.lock`, not by discipline. All
+development used train + validation only.
+
+### Where the deliverables are
+
+| Deliverable | File |
+|---|---|
+| Results summary + resource usage | [`RESULTS.md`](RESULTS.md) |
+| Per-iteration run log | [`logs/ITERATION_LOG.md`](logs/ITERATION_LOG.md) |
+| Machine-readable journal | [`logs/journal.jsonl`](logs/journal.jsonl) |
+| Full evidence packet for judges | [`results/JUDGE_PACKET.md`](results/JUDGE_PACKET.md) |
+| Final submission CSV | `submission_test.csv` (rebuild: see below) |
+| Official baseline, reproduced here | [`logs/baseline/`](logs/baseline/) |
 
 ---
 
@@ -296,6 +320,11 @@ python3 -m agent.make_submission --split valid --score --ensemble   # inspect fi
 python3 -m agent.make_submission --final-test-eval --ensemble       # THE one-time eval
 ```
 
+> **Already spent.** `results/final_evaluation.lock` is present; the result is in
+> [`RESULTS.md`](RESULTS.md). A second run refuses unless `--admin-override` is
+> passed, and logs the attempt either way. The commands below are documentation
+> of what was run, not an invitation to rerun it.
+
 `--final-test-eval` is the **single** hidden-test evaluation of the whole project.
 Everything before it develops on train + validation only. It writes
 `results/final_results.json` with test metrics, deltas over the baseline, and the
@@ -458,13 +487,50 @@ logs/                        journal.jsonl, solutions/, best_*, final_summary.js
 
 ## Reproducing the numbers
 
-Harness sanity checks (these should match before trusting anything else):
+### Start here, in a fresh clone
+
+The 16 ensemble members' prediction arrays are **not committed** — they are ~36 MB
+of floats that rebuild exactly from the recorded seeds. So in a fresh clone, build
+them first; everything else depends on them:
+
+```bash
+python3 -m agent.final_ensemble --seeds 16     # ~10 min CPU, writes logs/final_ensemble/
+python3 -m agent.verify_incumbent              # recomputes 0.60541 from those arrays
+```
+
+`verify_incumbent` fails with missing `scores_valid.npy` if you skip the first
+command. That is the intended order, not a bug.
+
+Then the rest:
+
+```bash
+python3 tests/test_harness.py                             # 1116 passed, 0 failed
+python3 -m agent.baseline_repro                           # reproduces the official baseline
+python3 -m agent.make_submission --split valid --score --ensemble
+python3 -m agent.iteration_log                            # regenerates the run log
+python3 -m agent.results_report                           # regenerates RESULTS.md
+```
+
+### Sanity checks
+
+These should match before trusting anything else:
 
 | Check | Expected |
 |---|---|
 | `python3 kuairand-starter-kit/baseline.py --model random` | test primary ≈ 0.4753 |
 | `python3 kuairand-starter-kit/baseline.py --model fm` | valid ≈ 0.6016, test ≈ 0.5946 |
 | Split sizes | 1,141,112 / 124,909 / 170,588 |
+
+### The hidden-test evaluation
+
+Already spent, and guarded so it cannot be spent twice:
+
+```bash
+python3 -m agent.make_submission --final-test-eval --ensemble
+```
+
+`results/final_evaluation.lock` exists, so a second run refuses unless
+`--admin-override` is passed — and logs the attempt either way.
 
 ## Limitations and what we'd improve
 
