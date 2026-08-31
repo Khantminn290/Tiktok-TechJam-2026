@@ -70,7 +70,13 @@ def verify(results_path: str = RESULTS, tol: float = 0.0) -> dict:
     if not os.path.isdir(members_dir):
         return {"ok": False, "issues": [f"members_dir missing: {members_dir}"]}
 
-    seed_dirs = sorted(d for d in os.listdir(members_dir) if d.startswith("seed_"))
+    # Publication keeps the generated ``seed_XX.py`` scripts beside the member
+    # directories for reproducibility. Only directories are ensemble members;
+    # counting same-prefix sidecars doubled k from 16 to 32 after the agent
+    # began publishing its own canonical artifact.
+    seed_dirs = sorted(
+        d for d in os.listdir(members_dir)
+        if d.startswith("seed_") and os.path.isdir(os.path.join(members_dir, d)))
     expected_k = rec.get("k")
     if expected_k is not None and len(seed_dirs) != expected_k:
         issues.append(f"expected {expected_k} members, found {len(seed_dirs)}")

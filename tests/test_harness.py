@@ -5408,6 +5408,8 @@ def test_incumbent_still_reproduces():
     v = VI.verify()
     check("all 16 ensemble members are present", v.get("k") == 16,
           f"found {v.get('k')}")
+    check("generated seed scripts are not miscounted as ensemble members",
+          not any("expected 16 members" in issue for issue in v.get("issues", [])))
     check("the reported metrics recompute exactly from stored predictions",
           v["ok"], "; ".join(v.get("issues", [])))
     for key in ("primary", "GAUC", "nDCG@5"):
