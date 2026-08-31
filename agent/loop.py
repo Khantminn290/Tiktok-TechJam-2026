@@ -135,7 +135,10 @@ class AgentLoop:
         # post-process. Once per run: it is k training runs and the
         # result is deterministic, so repeating it buys nothing.
         self._ensemble_done = False
-        self._ensemble_k = 8
+        # Fixed in advance, deliberately, and set to match the scale the
+        # submitted ensemble uses. k is never chosen after seeing scores --
+        # picking the k that happens to look best is selection on validation.
+        self._ensemble_k = int(os.environ.get("AGENT_ENSEMBLE_K", "16"))
         # Training executions are a SEPARATE budget from outer-loop decisions.
         # A paired 3-seed confirmation is 1 node and 6 training runs; conflating
         # them under-counts compute six-fold. See agent.budget.COUNTING_NOTE.
