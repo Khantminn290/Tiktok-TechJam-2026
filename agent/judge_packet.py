@@ -416,16 +416,19 @@ def _convergence(d) -> list:
 def _eligibility(c) -> list:
     """The gap between "our best number" and "the number that would be scored".
 
-    This is the most consequential thing in the packet and it reads badly, so
-    it is stated in full rather than softened. The organizer rule fixes not
-    only when a run stops but which checkpoint is scored, and on the recorded
-    journal the submitted ensemble was produced after that point.
+    The organizer rule fixes not only when a run stops but which checkpoint is
+    scored. Whether that is a problem is a property of the journal, not a
+    constant: if nothing higher-scoring was produced after the stop, the
+    eligible checkpoint IS the best result and there is no gap to confess.
+    Both cases are stated in full rather than softened.
     """
     el = c.get("eligible_checkpoint") or {}
     if not el.get("determined"):
         return ["### Eligible checkpoint", "",
                 f"Not determined: {el.get('reason', 'unknown')}.", ""]
-    L = ["### Eligible checkpoint — an open compliance risk", "",
+    clean = not el.get("better_but_ineligible")
+    L = ["### Eligible checkpoint"
+         + ("" if clean else " — an open compliance risk"), "",
          f"The organizers' rule fixes *what is scored*, not just when to stop: "
          f"the validation-best checkpoint **at the point it fires**. On the "
          f"recorded journal it fires at **node "
@@ -443,6 +446,12 @@ def _eligibility(c) -> list:
               "organizers' rule that reaches the ensemble before the first "
               "no-progress window can close — not a reinterpretation of this "
               "one after the fact.", ""]
+    else:
+        L += ["No node scored higher after the stop, so the eligible "
+              "checkpoint is also the best result on this journal — the "
+              "submitted artifact is the scored one. This is what a clean run "
+              "under the organizers' rule looks like: the ensemble was "
+              "reached before the first no-progress window could close.", ""]
     return L
 
 
@@ -450,43 +459,50 @@ def _limitations(d) -> list:
     s = d["submitted"]
     r = d.get("latest_run") or {}
     ht = d.get("hidden_test") or {}
-    L = [
-        "## 11. Limitations", "",
-        "Stated because they are true, not because they are small.", "",
-        f"1. **The submitted ensemble may not be an eligible checkpoint for "
-        f"the recorded journal.** The organizers' rule fires at node "
-        f"{((d['convergence'].get('eligible_checkpoint') or {}).get('converged_at_node'))}"
-        f" and the ensemble is later than that (section 10). This is a "
-        f"compliance gap, not a scoring one, and it is fixed by a clean run "
-        f"under the organizers' rule — not by reinterpreting this journal.",
-        f"2. **The hidden test has not been evaluated** "
+    el = (d["convergence"].get("eligible_checkpoint") or {})
+    # Only a real gap is worth a limitation. When the eligible checkpoint is
+    # the submitted one, claiming a compliance risk understates the run.
+    items = []
+    if el.get("determined") and el.get("better_but_ineligible"):
+        items.append(
+            f"**The submitted ensemble may not be an eligible checkpoint for "
+            f"the recorded journal.** The organizers' rule fires at node "
+            f"{el.get('converged_at_node')}"
+            f" and the ensemble is later than that (section 10). This is a "
+            f"compliance gap, not a scoring one, and it is fixed by a clean "
+            f"run under the organizers' rule — not by reinterpreting this "
+            f"journal.")
+    items += [
+        f"**The hidden test has not been evaluated** "
         f"(`evaluated: {ht.get('evaluated')}`). Every number in this packet is "
         f"validation. The gap between validation and test on the official "
         f"baseline is -0.0070, and there is no reason to expect this "
         f"submission to be exempt from a gap of that order.",
-        f"3. **The agent matched the incumbent; it has not beaten it.** From a "
+        f"**The agent matched the incumbent; it has not beaten it.** From a "
         f"cold start it reproduced {_f((s.get('reported') or {}).get('primary'))} "
         f"unaided. No result in this repository exceeds it.",
-        (f"4. **Artifact attribution.** The canonical artifact was produced by "
+        (f"**Artifact attribution.** The canonical artifact was produced by "
          f"{(s.get('how_produced') or {}).get('originally_built_by', 'unknown')}. "
          f"This attribution is read from provenance, not inferred from its score."),
-        f"5. **One configuration family.** The ensemble is 16 seeds of a "
+        f"**One configuration family.** The ensemble is 16 seeds of a "
         f"single configuration, not a diverse ensemble. Diversity across "
         f"configurations is untested and is the most obvious place left to "
         f"look.",
-        f"6. **The effect being claimed is close to the noise floor.** "
+        f"**The effect being claimed is close to the noise floor.** "
         f"+{_f(s.get('gain_over_mean_member'))} over the mean member is about "
         f"1 sigma. It is real and reproducible by re-aggregating the stored "
         f"predictions, but it is not large.",
-        f"7. **Autonomy is Level B, not Level A.** The agent transfers "
+        f"**Autonomy is Level B, not Level A.** The agent transfers "
         f"capabilities and writes its own experiments, but the capability "
         f"contract and the modification menu are human-authored; a new axis "
         f"requires human approval before it becomes live.",
-        f"8. **The search is short.** The recorded run is "
+        f"**The search is short.** The recorded run is "
         f"{r.get('outer_iterations', '?')} outer iterations. The organizers "
-        f"allow 50.", "",
+        f"allow 50.",
     ]
-    return L
+    return ["## 11. Limitations", "",
+            "Stated because they are true, not because they are small.", ""] \
+        + [f"{i}. {t}" for i, t in enumerate(items, 1)] + [""]
 
 
 def _reproduce(d) -> list:

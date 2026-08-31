@@ -24,6 +24,15 @@ runtime/cache_sandbox/
 # recorded seeds via `python3 -m agent.final_ensemble --seeds 16`. The result
 # JSON and each member's metrics.json/solution.py stay committed.
 logs/final_ensemble/*/scores_*.npy
+# same rationale for the superseded ensemble experiment, and for the raw
+# per-epoch capture (results/epoch_sensitivity.json is derived from
+# logs/opus_research/epoch_primaries.json, not from the raw array).
+logs/ensemble_exp/*/*/scores_*.npy
+logs/opus_research/epoch_scores.npy
+# atomic-publish safety net: the PREVIOUS ensemble is copied here when a
+# new one is published (agent/loop.py). Local rollback insurance, and a
+# duplicate of artifacts already recorded -- not submission evidence.
+logs/submission_history/
 # per-iteration run outputs (large score arrays; journal + solutions + best_* stay committed)
 logs/runs/
 logs/archive_*/

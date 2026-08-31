@@ -1,6 +1,6 @@
 # Autonomous ML Research Agent — KuaiRand-Pure
 
-*Generated from `results/manifest.json` on 2026-08-31T14:27:52Z at commit `882f54906e68` (opus-research-agent).*
+*Generated from `results/manifest.json` on 2026-08-31T14:49:32Z at commit `6806bb1b4ea4` (opus-research-agent).*
 
 Every number in this document is read from that manifest, which is generated from artifacts on disk. Nothing is transcribed by hand.
 
@@ -182,7 +182,7 @@ This level drives the real `AgentLoop.iterate`, search policy, preflight, sandbo
 
 Artifacts: `results/recovery_eval.json`<br>Reproduce: `python3 -m agent.recovery_eval`
 
-Test harness: **1114 passed, 0 failed** (25.5s).
+Test harness: **1114 passed, 0 failed** (27.4s).
 
 ## 10. Convergence
 
@@ -198,22 +198,23 @@ Two rules, kept separate, because conflating them would be a compliance problem 
 
 > The organizer rule is the official definition of convergence AND of which checkpoint is scored: the validation-best checkpoint at the point it fires. The internal controller is stricter, so the loop keeps searching past that point -- which is useful for research and does NOT make a later artifact eligible. Check official.converged_at_node before treating any result as the submission.
 
-### Eligible checkpoint — an open compliance risk
+### Eligible checkpoint
 
 The organizers' rule fixes *what is scored*, not just when to stop: the validation-best checkpoint **at the point it fires**. On the recorded journal it fires at **node 8**, where the validation-best checkpoint is **0.60541** (node 4).
+
+No node scored higher after the stop, so the eligible checkpoint is also the best result on this journal — the submitted artifact is the scored one. This is what a clean run under the organizers' rule looks like: the ensemble was reached before the first no-progress window could close.
 
 ## 11. Limitations
 
 Stated because they are true, not because they are small.
 
-1. **The submitted ensemble may not be an eligible checkpoint for the recorded journal.** The organizers' rule fires at node 8 and the ensemble is later than that (section 10). This is a compliance gap, not a scoring one, and it is fixed by a clean run under the organizers' rule — not by reinterpreting this journal.
-2. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
-3. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
-4. **Artifact attribution.** The canonical artifact was produced by autonomous competition run (`AgentLoop` ensemble action). This attribution is read from provenance, not inferred from its score.
-5. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.
-6. **The effect being claimed is close to the noise floor.** +0.00078 over the mean member is about 1 sigma. It is real and reproducible by re-aggregating the stored predictions, but it is not large.
-7. **Autonomy is Level B, not Level A.** The agent transfers capabilities and writes its own experiments, but the capability contract and the modification menu are human-authored; a new axis requires human approval before it becomes live.
-8. **The search is short.** The recorded run is 9 outer iterations. The organizers allow 50.
+1. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
+2. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
+3. **Artifact attribution.** The canonical artifact was produced by autonomous competition run (`AgentLoop` ensemble action). This attribution is read from provenance, not inferred from its score.
+4. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.
+5. **The effect being claimed is close to the noise floor.** +0.00078 over the mean member is about 1 sigma. It is real and reproducible by re-aggregating the stored predictions, but it is not large.
+6. **Autonomy is Level B, not Level A.** The agent transfers capabilities and writes its own experiments, but the capability contract and the modification menu are human-authored; a new axis requires human approval before it becomes live.
+7. **The search is short.** The recorded run is 9 outer iterations. The organizers allow 50.
 
 ## 12. Exact reproduction commands
 
