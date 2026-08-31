@@ -3062,6 +3062,61 @@ def _profile_args(**kw):
     return ns
 
 
+def test_frontier_never_condemns_the_shipped_config():
+    """No component of the submitted configuration may render as KNOWN_BAD.
+
+    Found by asking why the agent kept choosing temporal=none. The frontier was
+    labelling `temporal=hour_plus_dow` KNOWN_BAD/HIGH even though it is IN the
+    submitted config and holds the highest recorded score (0.60497 vs 0.60434).
+    The dead-end text it matched literally reads "hour_plus_dow already in the
+    best config" -- a positive mention, matched lexically as evidence against.
+
+    There was already a guard for this, but it checked the JOURNAL's current
+    best, which after a --fresh run is whatever that run happened to score
+    highest. The option that actually ships was unprotected.
+    """
+    print("\n[frontier vs the shipped config]")
+    from agent.frontier import KNOWN_BAD, from_root
+
+    res = os.path.join(_ROOT, "logs", "ensemble_results.json")
+    if not os.path.exists(res):
+        check("submitted config available to test against", False)
+        return
+    with open(res) as fh:
+        submitted = (json.load(fh).get("config") or {})
+
+    f = from_root(_ROOT)
+    check("the frontier knows what the submitted configuration is",
+          f.submitted_config == submitted and bool(submitted))
+
+    condemned = [f"{ax}={val}" for ax, val in submitted.items()
+                 if f._dead_end_hit(ax, val) is not None]
+    check("no component of the shipped configuration is marked a dead end",
+          not condemned,
+          f"condemned: {condemned}" if condemned else "all 10 clear")
+
+    # The specific regression, pinned by name.
+    check("temporal=hour_plus_dow is not a dead end",
+          f._dead_end_hit("temporal", "hour_plus_dow") is None,
+          "it is in the submitted config and has the highest recorded score")
+
+    rows = {}
+    for line in f.render(limit=60).splitlines():
+        parts = line.split()
+        if parts and "=" in parts[0]:
+            rows[parts[0]] = parts[1] if len(parts) > 1 else ""
+    bad = [k for k, v in rows.items()
+           if v == KNOWN_BAD and k.split("=", 1)[0] in submitted
+           and submitted[k.split("=", 1)[0]] == k.split("=", 1)[1]]
+    check("...and nothing shipped renders as KNOWN_BAD to the agent",
+          not bad, f"rendered bad: {bad}" if bad else "clean")
+
+    # A genuine dead end must still be caught -- the fix must not disarm it.
+    check("a real dead end is still flagged",
+          f._dead_end_hit("loss", "lambdarank_ndcg") is not None,
+          "exempting the shipped config must not exempt everything")
+
+
 def test_ensembling_is_an_agent_action():
     """Ensembling must be something the agent can DO, not a human post-process.
 
@@ -4781,6 +4836,7 @@ if __name__ == "__main__":
               test_submission_matches_reported_result,
               test_evidence_strength, test_policy_replay,
               test_autonomy_eval,
+              test_frontier_never_condemns_the_shipped_config,
               test_ensembling_is_an_agent_action,
               test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,

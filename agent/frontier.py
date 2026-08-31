@@ -62,7 +62,23 @@ class Frontier:
         self.axes = (self.menu.get("axes") or {})
         self.dead_ends = ((self.menu.get("notes") or {}).get("tested_dead_ends") or [])
         self.best_config = best_config or self._best_config()
+        # The configuration actually being submitted. It demonstrably works, so
+        # no lexical dead-end match may condemn one of its components.
+        self.submitted_config = self._submitted_config()
         self.directions = self._build()
+
+    @staticmethod
+    def _submitted_config() -> dict:
+        """menu_choices of the submitted ensemble, if one has been built."""
+        import json as _json
+        import os as _os
+        here = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+        p = _os.path.join(here, "logs", "ensemble_results.json")
+        try:
+            with open(p) as fh:
+                return _json.load(fh).get("config") or {}
+        except (OSError, _json.JSONDecodeError):
+            return {}
 
     def _best_config(self) -> dict:
         if not self.scored:
@@ -143,6 +159,20 @@ class Frontier:
         # option the current best configuration actually uses demonstrably
         # works, whatever some other experiment's write-up mentions.
         if self.best_config.get(axis) == value:
+            return None
+        # ...and neither is anything the SUBMITTED configuration uses. The guard
+        # above reads the current journal's best, which after a --fresh run is
+        # whatever this run happened to score highest -- so the option that
+        # actually ships was not protected by it.
+        #
+        # Measured consequence: `temporal=hour_plus_dow` is in the submitted
+        # config and holds the highest recorded score (0.60497 vs 0.60434 for
+        # temporal=none), yet it was rendered to the agent as KNOWN_BAD/HIGH.
+        # The dead-end text it matched literally reads "hour_plus_dow already in
+        # the best config" -- a positive mention, matched as evidence against.
+        # The agent then chose temporal=none in run after run and never reached
+        # the incumbent's configuration.
+        if self.submitted_config.get(axis) == value:
             return None
         import re
         # Whole-token match: plain substring made multitask=aux_click_like_forward
