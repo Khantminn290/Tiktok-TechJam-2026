@@ -553,8 +553,26 @@ python3 -m agent.make_submission --final-test-eval --ensemble
 - Bonus benchmarks (KuaiRand-1k / 27k) are not attempted; the data cache would need
   chunking to scale.
 
-## Team
+## Team and contributions
 
-Solo participant. Every agent-authored script is journaled per iteration in
-`logs/journal.jsonl` with its hypothesis, and the full source is kept in
-`logs/solutions/`.
+**The submitted result is solo work.** Every commit on the submitted branch
+(`opus-research-agent`) is by Kaung Khant Minn: the agent architecture, the
+search policy, the evidence and convergence machinery, the safety and data
+boundary, the deliverables, and the run that produced the scored artifact.
+
+The repository also contains **exploratory branches by two other people**, none
+of which are part of the submitted result. Their commits are not ancestors of
+the submitted branch — verifiable with `git merge-base --is-ancestor`:
+
+| Contributor | Branch | Work | In the submission? |
+|---|---|---|---|
+| Min Wai Phyo | `feat/recency-prior-search-continuation` (merged to `main` via PR #1) | Recency-prior search extension, experiment-node artifact consolidation | **No** |
+| Bill Sujith Kumaar | `codex-independent-search` | An independent ranking-pipeline build, with pinned provenance | **No** |
+
+Both lines were tried and not carried forward; they are kept in the repository
+because deleting explored branches would misrepresent what was actually
+attempted. A judge reading `git log --all` will see them, so they are named
+here rather than left to be discovered.
+
+Every agent-authored script is journaled per iteration in `logs/journal.jsonl`
+with its hypothesis, and the full source is kept in `logs/solutions/`.
