@@ -3337,14 +3337,17 @@ def test_autonomous_ensembling():
     from agent import manifest as MF
     mani = MF.load() or MF.build()
     hp = mani["submitted"]["how_produced"]
-    check("the manifest records that the original was human-invoked",
-          "human-invoked" in hp["originally_built_by"],
+    check("the manifest records that the canonical artifact is agent-produced",
+          hp["agent_produced"] is True
+          and "autonomous competition run" in hp["originally_built_by"],
           hp["originally_built_by"])
-    check("...and that the agent has since reproduced it unaided",
+    source = next(n for n in (json.loads(line) for line in open(
+        os.path.join(_ROOT, "logs", "journal.jsonl")))
+                  if n.get("iteration_id") == rec["source_node"])
+    check("...and the journal contains the unaided ensemble action",
           hp["agent_can_reproduce"] is True
-          and os.path.exists(os.path.join(
-              _ROOT, "logs", "opus_research",
-              "agent_reproduced_incumbent.jsonl")))
+          and source.get("action") == "ensemble"
+          and source.get("status") == "success")
 
     # The reproduction journal is the evidence for that claim, so it has to say
     # what the claim says: the agent queued the ensemble ITSELF and ran it.
@@ -6008,8 +6011,9 @@ def test_judge_packet_is_generated():
     check("...and that the hidden test is NOT evaluated",
           d["hidden_test"]["evaluated"] is False
           and "has not been evaluated" in text)
-    check("...and that the original artifact was human-invoked",
-          "human-invoked" in text)
+    attribution = s["how_produced"]["originally_built_by"]
+    check("...and that artifact ownership matches the manifest",
+          attribution in text and "autonomous competition run" in attribution)
     check("...and that the agent matched rather than beat it",
           "did not beat it" in text and "no new improvement is claimed" in text)
     check("...and that ensembling is measured against the MEAN member",

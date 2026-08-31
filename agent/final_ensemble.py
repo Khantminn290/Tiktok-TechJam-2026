@@ -99,8 +99,13 @@ def load_best(retarget: bool = False) -> dict:
         if res.get("config") and res.get("source_node") is not None:
             code = os.path.join(ROOT, "logs", "solutions",
                                 f"node_{res['source_node']:03d}.py")
-            member = os.path.join(OUT_DIR, f"seed_{(res.get('seeds_used') or [0])[0]:02d}",
-                                  "solution.py")
+            seed = (res.get("seeds_used") or [0])[0]
+            # The autonomous publisher stores each frozen script beside its
+            # member directory; the standalone builder stores it inside the
+            # directory as solution.py. Support both canonical layouts.
+            sidecar = os.path.join(OUT_DIR, f"seed_{seed:02d}.py")
+            nested = os.path.join(OUT_DIR, f"seed_{seed:02d}", "solution.py")
+            member = sidecar if os.path.exists(sidecar) else nested
             # prefer a member's own frozen script: logs/solutions/ belongs to
             # whichever search run is currently on disk and drifts the same way.
             if os.path.exists(member):
