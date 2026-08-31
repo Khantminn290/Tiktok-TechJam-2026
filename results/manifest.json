@@ -1,10 +1,10 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T15:38:54Z",
+  "generated_utc": "2026-08-31T15:55:19Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "d6adf72ac2f251c0e9bc79a743a8bb2824102d84",
-    "short_sha": "d6adf72ac2f2",
+    "sha": "c2a375f7f1c98620c56f88a9b5e002ed9578707b",
+    "short_sha": "c2a375f7f1c9",
     "branch": "opus-research-agent",
     "dirty": false,
     "dirty_files": 0,
@@ -580,7 +580,7 @@
     "executed": true,
     "passed": 1116,
     "failed": 0,
-    "seconds": 27.3
+    "seconds": 23.0
   },
   "submission_artifacts": {
     "valid": {
