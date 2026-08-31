@@ -96,10 +96,18 @@ class Ledger:
         self.max_training_runs = max_training_runs
         self.training_runs = 0
         self.training_crashes = 0
+        # Reuse is a real observation but costs nothing, so it is tracked
+        # separately and never charged against the training-run budget.
+        self.cache_hits = 0
 
-    def record_training(self, n: int = 1, crashed: int = 0) -> None:
+    def record_training(self, n: int = 1, crashed: int = 0,
+                        reused: int = 0) -> None:
+        """`n` is compute actually spent. `reused` is observations obtained for
+        free and must NOT be charged -- an ensemble over members already on
+        disk was previously reporting spend that never happened."""
         self.training_runs += int(n)
         self.training_crashes += int(crashed)
+        self.cache_hits += int(reused)
 
     def training_runs_left(self) -> int | None:
         if self.max_training_runs is None:
@@ -128,7 +136,10 @@ class Ledger:
                 "max_training_runs": self.max_training_runs,
                 "training_runs_used": self.training_runs,
                 "training_runs_left": self.training_runs_left(),
-                "training_crashes": self.training_crashes}
+                "training_crashes": self.training_crashes,
+                "cache_hits": self.cache_hits,
+                "note": ("training_runs_used is COMPUTE SPENT; cache_hits are "
+                         "free observations and are excluded from it")}
 
 
 COUNTING_NOTE = (

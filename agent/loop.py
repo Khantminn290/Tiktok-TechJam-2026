@@ -755,9 +755,13 @@ class AgentLoop:
             return node
 
         res, ev = out["result"], out["evidence"]
-        trained = len(out["members"])
+        tally = out.get("execution_tally") or {}
+        fresh = tally.get("training_runs_spent", len(out["members"]))
+        reused = tally.get("cache_hits", 0)
         if getattr(self, "ledger", None):
-            self.ledger.record_training(trained, crashed=max(0, k - trained))
+            self.ledger.record_training(
+                fresh, crashed=max(0, k - fresh - reused), reused=reused)
+        events.extend(out.get("events") or [])
         events.append({"type": "ensemble_result", "result": res,
                        "evidence": ev, "promote": out["promote"]})
 

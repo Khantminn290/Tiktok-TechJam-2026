@@ -3191,8 +3191,12 @@ def test_ensembling_is_an_agent_action():
           '_ensemble_done", True)' in src and "can_afford(k)" in src,
           "ensembling is worth ~1 sigma and no single run can show it, so the "
           "convergence rule would end the search with it unattempted")
-    check("it charges every member to the training-run budget",
-          "record_training(trained" in src)
+    check("it charges only members it actually trained",
+          "record_training(\n                fresh" in src
+          or "record_training(fresh" in src,
+          "charging reused members reported compute that was never spent")
+    check("...and records reused members separately",
+          "reused=reused" in src)
 
 
 def test_streamlit_dashboard_executes():
@@ -3221,6 +3225,10 @@ def test_streamlit_dashboard_executes():
     check("the experiment tree has a Start Run root and circular experiment nodes",
           "START\\\\nRUN" in src and "node [shape=circle" in src
           and "start -> n" in src)
+    check("iteration log explains its raw and executable audit artifacts",
+          "Raw journal record" in src and "Executable script" in src
+          and "Experiment brief" in src,
+          "a judge should get a readable experiment summary before raw JSON")
     watch_tab = src.split("# ------------------------------------------------------------ watch it run ---")[1].split(
         "# ----------------------------------------------------------- iteration log ---")[0]
     check("live refresh is isolated from the other dashboard tabs",
@@ -3256,6 +3264,10 @@ def test_streamlit_dashboard_executes():
         "            if k == 'button': return False\n"
         "            if k == 'selectbox': return a[1][0] if len(a)>1 and a[1] else None\n"
         "            if k == 'number_input': return a[3] if len(a)>3 else 1\n"
+        "            if k in ('fragment','cache_data','cache_resource','dialog'):\n"
+        "                def deco(f=None, **kk):\n"
+        "                    return f if callable(f) else (lambda g: g)\n"
+        "                return deco\n"
         "            return None\n"
         "        return fn\n"
         "    def __enter__(self): return self\n"
@@ -3421,6 +3433,121 @@ def test_experiment_tree_visualisation():
 
     check("an empty journal renders without crashing",
           "No nodes" in V.render([], "t"))
+
+
+def test_execution_events_separate_compute_from_evidence():
+    """A reused result is evidence, not compute. It was being charged as both."""
+    print("\n[execution events]")
+    from agent import budget as B
+    from agent import execution_events as EX
+
+    fresh = EX.event(EX.FRESH_EXECUTION, seed=0, seconds=70)
+    reuse = EX.event(EX.CACHE_REUSE, seed=1)
+    fail = EX.event(EX.FAILED_EXECUTION, seed=2, seconds=40)
+    manual = EX.event(EX.MANUAL_EXECUTION, seed=3, seconds=70)
+
+    check("a fresh execution costs compute and is an observation",
+          fresh["costs_compute"] and fresh["is_observation"])
+    check("a cache hit is an observation but costs NO compute",
+          reuse["is_observation"] and not reuse["costs_compute"],
+          "the member was trained once at that seed; reusing it spends nothing")
+    check("a crash costs compute but yields no observation",
+          fail["costs_compute"] and not fail["is_observation"],
+          "that time is spent and unrecoverable")
+    check("a human-run execution never counts toward autonomy",
+          not manual["is_autonomous"])
+    try:
+        EX.event("made_up_kind")
+        bad = True
+    except ValueError:
+        bad = False
+    check("an unknown event kind is rejected", not bad)
+
+    t = EX.tally([fresh, reuse, fail, manual])
+    check("compute counts only what was actually spent",
+          t["training_runs_spent"] == 3, f"got {t['training_runs_spent']}")
+    check("cache hits are counted separately", t["cache_hits"] == 1)
+    check("observations exclude the crash",
+          t["independent_observations"] == 3)
+    check("fresh and reused seeds are distinguishable",
+          t["distinct_fresh_seeds"] == [0, 2, 3]
+          and t["distinct_reused_seeds"] == [1])
+
+    # The ledger must not charge reuse. Measured bug: a 16-member ensemble over
+    # 14 members already on disk reported 16 training runs and spent 2.
+    led = B.Ledger(max_training_runs=20)
+    led.record_training(2, reused=14)
+    d = led.as_dict()
+    check("the ledger charges only compute actually spent",
+          d["training_runs_used"] == 2 and d["training_runs_left"] == 18,
+          "a 16-member ensemble over 14 existing members costs 2 runs")
+    check("...and still reports the reuse",
+          d["cache_hits"] == 14)
+    check("...and says which number is which",
+          "COMPUTE SPENT" in d["note"])
+
+    src = open(os.path.join(_ROOT, "agent", "ensemble_experiment.py")).read()
+    check("the ensemble runner emits a cache-reuse event",
+          "EX.CACHE_REUSE" in src and "no compute" in src)
+
+
+def test_results_manifest_is_the_single_source():
+    """One generated manifest; the surfaces read it rather than restating it."""
+    print("\n[results manifest]")
+    from agent import manifest as MF
+
+    d = MF.build(run_tests=False)
+    for key in ("schema", "repository", "dataset", "baseline", "submitted",
+                "convergence", "latest_run", "tests", "hidden_test",
+                "distinctions", "reproduce"):
+        check(f"manifest carries `{key}`", key in d)
+
+    sub = d["submitted"]
+    check("the submitted result is recomputed, not quoted",
+          sub.get("verified") is True,
+          str(sub.get("verify_issues") or sub.get("verify_error")))
+    check("...and matches 0.60541",
+          (sub.get("reported") or {}).get("primary") == 0.60541)
+    check("the baseline delta is derived, not typed",
+          sub.get("delta_vs_baseline") == round(0.60541 - 0.6016, 5))
+
+    check("the official convergence rule is the organizers'",
+          d["convergence"]["official"]["rule"] == "epsilon=0.002, N=3")
+    check("the internal rule is labelled as not official",
+          "NOT the organizer rule" in d["convergence"]["internal"]["source"])
+
+    check("the hidden test is reported unevaluated",
+          d["hidden_test"]["evaluated"] is False)
+
+    # The five distinctions that have each been got wrong here before.
+    for k in ("validation_vs_hidden_test", "single_seed_vs_ensemble",
+              "agent_vs_human", "fresh_vs_cache", "preliminary_vs_confirmed"):
+        check(f"manifest states the `{k}` distinction",
+              bool(d["distinctions"].get(k)))
+
+    run = d["latest_run"]
+    if run.get("available"):
+        check("compute and reuse are separate fields in the run facts",
+              "training_runs_spent" in run and "cache_hits" in run)
+        check("manual interventions are reported",
+              run.get("manual_interventions") is not None)
+        check("a single-seed best is labelled PRELIMINARY",
+              run["best_single_seed"]["evidence"] == "PRELIMINARY")
+
+    check("an unexecuted test count is not asserted",
+          d["tests"]["executed"] is False and "passed" not in d["tests"])
+
+    # It must be writable and re-readable, and the dashboard must consume it.
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "m.json")
+        MF.write(p)
+        back = MF.load(p)
+        check("the manifest round-trips to disk", back["schema"] == d["schema"])
+    app = open(os.path.join(_ROOT, "app.py")).read()
+    check("the dashboard reads the manifest instead of hardcoding the score",
+          "from agent import manifest as MF" in app
+          and "INCUMBENT = 0.60541" not in app,
+          "a typed-in score is exactly what goes stale")
 
 
 def test_organizer_convergence_is_not_our_own_rule():
@@ -4984,6 +5111,8 @@ if __name__ == "__main__":
               test_ensembling_is_an_agent_action,
               test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,
+              test_execution_events_separate_compute_from_evidence,
+              test_results_manifest_is_the_single_source,
               test_organizer_convergence_is_not_our_own_rule,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,

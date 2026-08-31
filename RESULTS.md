@@ -1,6 +1,6 @@
 # Results — generated
 
-Generated `2026-08-31T05:23:57Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
+Generated `2026-08-31T05:34:31Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
 
 Tiers: **VERIFIED** recomputed during this generation · **OBSERVED** measured in a run and journalled · **OPEN** not established.
 
@@ -22,7 +22,7 @@ Provenance: commit `024238f2b9ec` on `opus-research-agent`, data fingerprint `60
 
 ## Harness
 
-`python3 tests/test_harness.py` → **888 passed, 0 failed** (12.0s) — **VERIFIED**
+**OPEN** — test harness did not complete successfully:     print("\n[complete cfg]")                    ^^^^^^^^^^^   File "/Users/khantminn/Desktop/Tiktok-TechJam-2026/runtime/train_lib.py", line 178, in load_cache     build_cache(cache_dir=cache_dir)   File "/Users/khantminn/Desktop/Tiktok-TechJam-2026/runtime/train_lib.py", line 102, in build_cache     with open(os.path.join(data_dir, "video_features_basic_pure.csv")) as fh:          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ PermissionError: [Errno 13] Permission denied: '/Use
 
 ## Convergence
 

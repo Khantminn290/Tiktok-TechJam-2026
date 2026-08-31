@@ -31,10 +31,20 @@ if ROOT not in sys.path:
 
 from agent import live as L  # noqa: E402
 
-BASELINE = 0.6016
-BASELINE_TEST = 0.5946
-INCUMBENT = 0.60541
 NOISE = 0.0008
+
+# Every headline number comes from the generated manifest, never from a literal
+# typed here. Stale dashboard figures were a real problem: the app once showed a
+# test count and a tab layout that the repository had moved past.
+from agent import manifest as MF  # noqa: E402
+
+_M = MF.load() or {}
+if not _M:
+    _M = MF.write()
+BASELINE = (_M.get("baseline", {}).get("validation", {}).get("primary") or 0.6016)
+BASELINE_TEST = (_M.get("baseline", {}).get("hidden_test", {}).get("primary") or 0.5946)
+_SUB = _M.get("submitted", {}) or {}
+INCUMBENT = (_SUB.get("reported", {}) or {}).get("primary") or 0.60541
 
 st.set_page_config(page_title="Autonomous ML Research Agent",
                    page_icon="🔬", layout="wide")
@@ -75,6 +85,16 @@ font-size:.75rem;font-weight:800;white-space:nowrap}
 .criterion p{margin:.6rem 0 0;color:#64748b;font-size:.87rem;line-height:1.55}
 .criterion .evidence{display:inline-block;margin-top:.7rem;color:#0f766e;font-size:.76rem;
 font-weight:700}
+.log-guide{padding:14px 16px;border:1px solid #dbe4ea;border-radius:12px;
+background:linear-gradient(135deg,#f8fafc,#ffffff);height:100%}
+.log-guide b{display:block;color:#172554;margin-bottom:4px}
+.log-guide span{color:#64748b;font-size:.84rem;line-height:1.45}
+.iteration-brief{padding:18px;border:1px solid #dbe4ea;border-radius:14px;
+background:#ffffff;margin-top:12px}
+.iteration-brief h3{margin:0 0 .45rem !important;color:#172554}
+.iteration-brief p{margin:.35rem 0;color:#475569;font-size:.9rem;line-height:1.55}
+.iteration-brief .label{font-size:.7rem;font-weight:800;letter-spacing:.08em;
+text-transform:uppercase;color:#0f766e}
 </style>""", unsafe_allow_html=True)
 
 
@@ -286,7 +306,9 @@ with tabs[0]:
     c[1].metric("Evidence scale", f"+{(INCUMBENT - BASELINE) / NOISE:.2f}σ",
                 help="σ = 0.0008, the official baseline's own 5-seed spread.")
     c[2].metric("Official baseline", f"{BASELINE:.4f}")
-    c[3].metric("Hidden test", "not yet evaluated",
+    c[3].metric("Hidden test",
+                "evaluated" if _M.get("hidden_test", {}).get("evaluated")
+                else "not yet evaluated",
                 help="Scored exactly once, at final submission.")
     st.markdown("<div class='proof-strip'><b>16-seed fixed ensemble.</b> GAUC "
                 "0.67212 · nDCG@5 0.53870 · every seed is included, with no "
@@ -407,6 +429,25 @@ with tabs[2]:
     if not js:
         st.info("No run on disk yet.")
     else:
+        st.markdown("#### Iteration audit trail")
+        st.markdown("<span class='small'>Start with the readable summary below. "
+                    "The raw journal and script are retained as proof: they show "
+                    "exactly what the agent recorded and executed, without a "
+                    "human rewrite.</span>", unsafe_allow_html=True)
+        guide = st.columns(2)
+        guide[0].markdown(
+            "<div class='log-guide'><b>Raw journal record</b><span>The unedited "
+            "JSON entry written after this decision. It contains the hypothesis, "
+            "chosen action, metrics, costs, errors, evidence events, and parent "
+            "link used to build the experiment tree. Open it when auditing the "
+            "claim or reproducing the run.</span></div>", unsafe_allow_html=True)
+        guide[1].markdown(
+            "<div class='log-guide'><b>Executable script</b><span>The exact Python "
+            "source sent to the sandbox for this iteration. It lets you verify that "
+            "the implementation matches the hypothesis. Confirmations and ensemble "
+            "nodes may use a shared deterministic runner instead, so they do not "
+            "always have a standalone script here.</span></div>", unsafe_allow_html=True)
+
         pick = st.selectbox("Run", list(js), key="iter_journal")
         nodes = L._load_jsonl(js[pick])
         rows = []
@@ -431,21 +472,88 @@ with tabs[2]:
             df = df[df["Experiment"].str.contains("Confirm|Ensemble")]
         st.dataframe(df, width="stretch", hide_index=True)
 
-        st.markdown("<span class='small'>This is the competition's required "
-                    "iteration log, unedited. Pick a row to see the raw record "
-                    "and the exact script the agent wrote.</span>",
-                    unsafe_allow_html=True)
         ids = [n["iteration_id"] for n in nodes]
         if ids:
-            nid = st.selectbox("Experiment", ids, key="node_detail")
+            summaries = {n["iteration_id"]: L.summarise(n, nodes) for n in nodes}
+
+            def _experiment_label(node_id):
+                summary = summaries[node_id]
+                action = ACTION_LABEL.get(summary["action"], summary["action"])
+                score = (f" · {summary['primary']:.5f}"
+                         if summary["primary"] is not None else " · no score")
+                return f"#{node_id} · {action}{score}"
+
+            nid = st.selectbox("Inspect an experiment", ids, key="node_detail",
+                               format_func=_experiment_label)
             rec = next(n for n in nodes if n["iteration_id"] == nid)
-            with st.expander("Raw journal record"):
+            summary = summaries[nid]
+
+            st.markdown("#### Experiment brief")
+            metrics = st.columns(4)
+            metrics[0].metric("Primary", "—" if summary["primary"] is None
+                              else f"{summary['primary']:.5f}")
+            metrics[1].metric("Delta vs baseline", "—" if summary["delta"] is None
+                              else f"{summary['delta']:+.5f}")
+            metrics[2].metric("Evidence", (summary["evidence"] or {}).get("state", "Not scored"))
+            metrics[3].metric("Wall-clock", f"{summary['seconds']:.1f}s")
+
+            st.markdown("<div class='iteration-brief'><div class='label'>Why this "
+                        "experiment exists</div><h3>" +
+                        ACTION_LABEL.get(summary["action"], summary["action"]) +
+                        "</h3><p>" +
+                        (summary["question"] or summary["plan"] or
+                         "No research question was recorded for this node.") +
+                        "</p></div>", unsafe_allow_html=True)
+
+            detail = st.columns(2)
+            with detail[0]:
+                st.markdown("**What the agent tried**")
+                st.write(rec.get("hypothesis") or "No hypothesis recorded.")
+                if summary["observation"]:
+                    st.caption("Observation that motivated it")
+                    st.write(summary["observation"])
+                if summary["hypotheses"]:
+                    st.caption("Competing explanations")
+                    for hypothesis in summary["hypotheses"]:
+                        st.write(f"- {hypothesis}")
+            with detail[1]:
+                st.markdown("**What happened**")
+                if summary["outcome"]:
+                    st.write(summary["outcome"])
+                elif summary["error"]:
+                    st.error(summary["error"])
+                elif summary["primary"] is not None:
+                    st.write("The sandbox completed and returned official validation metrics.")
+                else:
+                    st.write("This node did not produce a scored training result.")
+                if summary["evidence"]:
+                    st.caption((summary["evidence"] or {}).get("why") or "")
+                if summary["paired"]:
+                    paired = summary["paired"]
+                    st.caption("Paired confirmation result")
+                    st.write(f"Control {paired['control']:.5f} -> treatment "
+                             f"{paired['treatment']:.5f}; "
+                             f"delta {paired['delta']:+.5f} across {paired['n']} seeds.")
+
+            with st.expander("Configuration used for this experiment"):
+                st.caption("The structured settings passed to the training pipeline.")
+                st.json(rec.get("menu_choices") or {})
+
+            with st.expander("Raw journal record (unaltered audit evidence)"):
+                st.caption("This is the complete JSON line from the required iteration "
+                           "log. The dashboard does not edit or summarise it here.")
                 st.json(rec, expanded=False)
             cp = rec.get("code_path") or ""
             if cp and os.path.exists(cp):
-                with st.expander("The script the agent wrote"):
+                with st.expander("Executable script sent to the sandbox"):
+                    st.caption("This is the literal source for this node, retained so "
+                               "the implementation can be audited against its claim.")
                     with open(cp) as fh:
                         st.code(fh.read(), language="python")
+            else:
+                st.caption("No standalone script is attached to this node. This is "
+                           "expected for some paired confirmations, ensembles, or "
+                           "preflight-only events that use shared orchestration.")
 
 
 # --------------------------------------------------------------------- run ---

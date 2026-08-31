@@ -1,0 +1,364 @@
+{
+  "schema": "results_manifest/1",
+  "generated_utc": "2026-08-31T05:34:16Z",
+  "generator": "python3 -m agent.manifest",
+  "repository": {
+    "sha": "4b877da597bc681680c7dbe87d716ef018c346e4",
+    "short_sha": "4b877da597bc",
+    "branch": "opus-research-agent",
+    "dirty": true,
+    "dirty_files": 8
+  },
+  "dataset": {
+    "name": "KuaiRand-Pure",
+    "scope": "Pure only",
+    "fingerprint": {
+      "available": true,
+      "sha256": "60fa8bc44d1e3d59",
+      "splits": {
+        "train": {
+          "rows": 1141112,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        },
+        "valid": {
+          "rows": 124909,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        },
+        "test": {
+          "rows": 170588,
+          "columns": [
+            "author",
+            "date",
+            "duration_ms",
+            "hourmin",
+            "is_click",
+            "is_comment",
+            "is_follow",
+            "is_forward",
+            "is_hate",
+            "is_like",
+            "is_profile_enter",
+            "long_view",
+            "play_time_ms",
+            "tab",
+            "time_ms",
+            "user",
+            "user_raw",
+            "video"
+          ]
+        }
+      },
+      "dataset": "KuaiRand-Pure"
+    }
+  },
+  "baseline": {
+    "validation": {
+      "primary": 0.6016,
+      "GAUC": 0.6674,
+      "nDCG@5": 0.5357
+    },
+    "hidden_test": {
+      "primary": 0.5946,
+      "GAUC": 0.661,
+      "nDCG@5": 0.5282
+    },
+    "source": "kuairand-starter-kit/baseline_scores.json"
+  },
+  "submitted": {
+    "kind": "ensemble",
+    "members": 16,
+    "aggregation": "rank_normalise_then_mean",
+    "reported": {
+      "primary": 0.60541,
+      "GAUC": 0.67212,
+      "nDCG@5": 0.5387
+    },
+    "single_member_mean": 0.60463,
+    "single_member_std": 0.00032,
+    "gain_over_mean_member": 0.00078,
+    "config": {
+      "loss": "bpr_pairwise",
+      "neg_sampling": "uniform_1",
+      "user_history": "recency_weighted_pool",
+      "multitask": "none",
+      "model": "fm_numpy",
+      "temporal": "hour_plus_dow",
+      "training": "lower_lr_longer",
+      "data_extras": "none",
+      "sample_weighting": "per_row",
+      "regularization": "l2_default"
+    },
+    "provenance": {
+      "schema": "provenance/1",
+      "stamped_utc": "2026-08-30T07:27:48Z",
+      "git": {
+        "sha": "024238f2b9ec52f2b66976fab592772fd80370d7",
+        "short_sha": "024238f2b9ec",
+        "branch": "opus-research-agent",
+        "dirty": true,
+        "dirty_files": 2
+      },
+      "data": {
+        "available": true,
+        "sha256": "60fa8bc44d1e3d59",
+        "splits": {
+          "train": {
+            "rows": 1141112,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          },
+          "valid": {
+            "rows": 124909,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          },
+          "test": {
+            "rows": 170588,
+            "columns": [
+              "author",
+              "date",
+              "duration_ms",
+              "hourmin",
+              "is_click",
+              "is_comment",
+              "is_follow",
+              "is_forward",
+              "is_hate",
+              "is_like",
+              "is_profile_enter",
+              "long_view",
+              "play_time_ms",
+              "tab",
+              "time_ms",
+              "user",
+              "user_raw",
+              "video"
+            ]
+          }
+        },
+        "dataset": "KuaiRand-Pure"
+      },
+      "config_sha": "81de49d8b7af7421",
+      "seeds": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15
+      ],
+      "code": {
+        "agent/final_ensemble.py": "9820a3ce2b696609",
+        "agent/ensemble.py": "ee3e8e4433c4ae07",
+        "runtime/train_lib.py": "9cf4dd7adc0fb108"
+      },
+      "evaluation": "kuairand-starter-kit/evaluate.py on the valid split",
+      "dataset_scope": "KuaiRand-Pure only",
+      "aggregation": "rank_normalise_then_mean",
+      "members_dir": "logs/final_ensemble",
+      "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+      "verified": "recomputed from stored member predictions; metrics matched the reported values exactly"
+    },
+    "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+    "split": "validation",
+    "verified": true,
+    "recomputed": {
+      "primary": 0.60541,
+      "GAUC": 0.67212,
+      "nDCG@5": 0.5387
+    },
+    "verify_issues": [],
+    "delta_vs_baseline": 0.00381,
+    "sigma_vs_baseline": 4.76
+  },
+  "convergence": {
+    "official": {
+      "rule": "epsilon=0.002, N=3",
+      "source": "competition brief",
+      "scored_iterations": 8,
+      "converged": true,
+      "converged_at_node": 3,
+      "gain_over_window": 0.001672,
+      "best_primary": 0.60541
+    },
+    "internal": {
+      "rule": "epsilon=0.00048, N=3",
+      "source": "internal research controller (NOT the organizer rule)",
+      "scored_iterations": 8,
+      "converged": true,
+      "converged_at_node": 4,
+      "gain_over_window": 0.000442,
+      "best_primary": 0.60541,
+      "epsilon_sigma": 0.6,
+      "rationale": "calibrated to the upward drift a running maximum shows by luck over N iterations. Stricter than the organizer rule, so it can only extend a search, never end one early."
+    },
+    "caps": {
+      "iterations": 50,
+      "wall_clock_hours": 6.0
+    },
+    "note": "The organizer rule is the official definition of convergence and of which checkpoint is scored. The internal controller is STRICTER, so the loop stops no earlier than the organizer rule would; it never skips a scored checkpoint. Both are reported so neither is mistaken for the other."
+  },
+  "latest_run": {
+    "available": true,
+    "journal": "logs/journal.jsonl",
+    "outer_iterations": 8,
+    "iterations_charged": 8,
+    "training_runs_spent": 28,
+    "training_runs_cap": 150,
+    "cache_hits": 0,
+    "fresh_seeds": [],
+    "reused_seeds": [],
+    "execution_events": {
+      "fresh_execution": 0,
+      "cache_reuse": 0,
+      "failed_execution": 0,
+      "repaired_execution": 0,
+      "manual_execution": 0
+    },
+    "confirmations_run": 1,
+    "candidates_rejected": 1,
+    "promotions": 0,
+    "failures": 0,
+    "preflight_rejections": 0,
+    "automatic_recoveries": 0,
+    "manual_interventions": 0,
+    "runtime_training_s": 2321.5,
+    "runtime_agent_s": 2545.4,
+    "llm_tokens": {
+      "input_tokens": 131323,
+      "output_tokens": 6123,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    },
+    "llm_tokens_total": 137446,
+    "llm_spend_usd": 0.913193,
+    "gpu_hours": 0.0,
+    "devices": [
+      "cpu"
+    ],
+    "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
+    "best_single_seed": {
+      "primary": 0.60541,
+      "evidence": "PRELIMINARY",
+      "note": "one draw; cannot change the submission"
+    },
+    "best_ensemble": {
+      "primary": 0.60541,
+      "evidence": "CONFIRMED",
+      "note": "agent-run ensemble of one configuration"
+    }
+  },
+  "tests": {
+    "executed": true,
+    "passed": 930,
+    "failed": 0,
+    "seconds": 14.5
+  },
+  "hidden_test": {
+    "evaluated": false,
+    "lock_present": false,
+    "policy": "exactly one evaluation, at final submission only",
+    "command": "python3 -m agent.make_submission --final-test-eval --ensemble"
+  },
+  "distinctions": {
+    "validation_vs_hidden_test": "Every score in this manifest is VALIDATION unless a field says hidden_test. The hidden test has not been evaluated.",
+    "single_seed_vs_ensemble": "A single-seed score is one draw and is PRELIMINARY. The submitted number is an ensemble of all seeds trained for one configuration.",
+    "agent_vs_human": "The submitted configuration was discovered by an agent run, and the agent has since reproduced the full pipeline (discovery, confirmation, 16-member ensemble) unaided. The originally submitted artifact was built by a human-invoked command.",
+    "fresh_vs_cache": "training_runs_spent is compute actually used. cache_hits are observations reused from disk: real and independent, but free, and never counted as new observations.",
+    "preliminary_vs_confirmed": "Only CONFIRMED evidence may change the submission. A single seed is PRELIMINARY at any effect size."
+  },
+  "reproduce": {
+    "tests": "python3 tests/test_harness.py",
+    "verify_incumbent": "python3 -m agent.verify_incumbent",
+    "rebuild_ensemble": "python3 -m agent.final_ensemble --seeds 16",
+    "regenerate_manifest": "python3 -m agent.manifest --run-tests",
+    "regenerate_report": "python3 -m agent.results_report --run-tests",
+    "valid_submission": "python3 -m agent.make_submission --split valid --score --ensemble",
+    "dashboard": "streamlit run app.py",
+    "agent_run": "python3 run_agent.py --competition --fresh --wall-clock-limit-h 2.0"
+  }
+}

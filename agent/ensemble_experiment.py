@@ -55,30 +55,42 @@ def _flush(*a, **k):
 def train_members(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
                   log=_flush) -> dict:
     """Train one member per seed. Returns {seed: {metrics, scores_valid path}}."""
+    from . import execution_events as EX
+
     with open(SEED_SOLUTION) as fh:
         src = fh.read()
     os.makedirs(work_dir, exist_ok=True)
-    out = {}
+    out, events = {}, []
     for s in seeds:
         d = os.path.join(work_dir, f"seed_{s:02d}")
         sv = os.path.join(d, "scores_valid.npy")
         if os.path.exists(sv) and os.path.exists(os.path.join(d, "metrics.json")):
+            # A real independent observation -- it WAS trained once at this
+            # seed -- but no compute is being spent now. Charging it as a
+            # training run reported spend that never happened.
             with open(os.path.join(d, "metrics.json")) as fh:
                 out[s] = {"metrics": json.load(fh), "dir": d}
-            log(f"    [member] seed {s}  (reusing)")
+            events.append(EX.event(EX.CACHE_REUSE, seed=s,
+                                   detail="member already on disk"))
+            log(f"    [member] seed {s}  (reusing — no compute)")
             continue
         t0 = time.time()
         res = run_solution(src, os.path.join(work_dir, f"seed_{s:02d}.py"),
                            choices, d, timeout_s=timeout_s, seed=s)
+        el = time.time() - t0
         if res.ok and res.metrics:
             out[s] = {"metrics": {k: float(res.metrics[k])
                                   for k in ("GAUC", "nDCG@5", "primary")},
                       "dir": d}
+            events.append(EX.event(EX.FRESH_EXECUTION, seed=s, seconds=el))
             log(f"    [member] seed {s}  primary {out[s]['metrics']['primary']:.5f}"
-                f"  {time.time() - t0:.0f}s")
+                f"  {el:.0f}s")
         else:
             head = (res.error_trace or "")[:110].replace("\n", " ")
+            events.append(EX.event(EX.FAILED_EXECUTION, seed=s, seconds=el,
+                                   detail=head))
             log(f"    [member] seed {s}  FAILED — {head}")
+    out["_events"] = events
     return out
 
 
@@ -94,6 +106,7 @@ def combine(members: dict, log=_flush) -> dict:
     from evaluate import evaluate
     from .ensemble import rank_normalise
 
+    members = {k: v for k, v in members.items() if k != "_events"}
     if len(members) < 2:
         return {"usable": False, "reason": f"only {len(members)} member(s) trained"}
 
@@ -158,6 +171,7 @@ def run(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
         log=_flush) -> dict:
     log(f"  [ensemble] training {len(list(seeds))} members")
     members = train_members(choices, seeds, work_dir, timeout_s, log)
+    events = members.get("_events", [])
     res = combine(members, log)
     ev = grade(res)
     if res.get("usable"):
@@ -166,7 +180,14 @@ def run(choices: dict, seeds, work_dir: str, timeout_s: int = 1800,
             f"(gain {res['gain_over_mean_member']:+.5f}, "
             f"{res['gain_sigma']:+.2f}σ)")
     log(f"  [ensemble] {ev['state']} — {ev['why']}")
-    return {"members": members, "result": res, "evidence": ev,
+    from . import execution_events as EX
+    tally = EX.tally(events)
+    if tally["cache_hits"]:
+        log(f"  [ensemble] {tally['training_runs_spent']} fresh, "
+            f"{tally['cache_hits']} reused (no compute)")
+    return {"members": {k: v for k, v in members.items() if k != "_events"},
+            "result": res, "evidence": ev, "events": events,
+            "execution_tally": tally,
             "promote": bool(ev.get("actionable"))}
 
 
