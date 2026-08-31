@@ -1,55 +1,24 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T14:49:32Z",
+  "generated_utc": "2026-08-31T14:58:04Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "6806bb1b4ea41c90d45f10c4694742416763dd8e",
-    "short_sha": "6806bb1b4ea4",
+    "sha": "3c97bb168de7058570ef660cc33b18c8e2b8f4c5",
+    "short_sha": "3c97bb168de7",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 38,
+    "dirty_files": 7,
     "source_dirty": true,
     "source_dirty_files": [
-      ".gitignore",
-      "agent/judge_packet.py"
+      "agent/judge_packet.py",
+      "agent/manifest.py",
+      "tests/test_harness.py"
     ],
     "generated_dirty_files": [
-      "logs/ensemble_exp/node_004/seed_00/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_00/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_01/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_01/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_02/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_02/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_03/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_03/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_04/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_04/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_05/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_05/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_06/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_06/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_07/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_07/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_08/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_08/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_09/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_09/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_10/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_10/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_11/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_11/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_12/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_12/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_13/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_13/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_14/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_14/scores_valid.npy",
-      "logs/ensemble_exp/node_004/seed_15/scores_test.npy",
-      "logs/ensemble_exp/node_004/seed_15/scores_valid.npy",
-      "logs/opus_research/epoch_scores.npy",
       "results/JUDGE_PACKET.md",
       "results/manifest.json",
-      "logs/submission_history/"
+      "results/final_evaluation.lock",
+      "results/final_results.json"
     ]
   },
   "dataset": {
@@ -616,9 +585,9 @@
   },
   "tests": {
     "executed": true,
-    "passed": 1114,
+    "passed": 1116,
     "failed": 0,
-    "seconds": 27.4
+    "seconds": 26.3
   },
   "submission_artifacts": {
     "valid": {
@@ -629,8 +598,11 @@
       "generation_command": "python3 -m agent.make_submission --split valid --ensemble --score"
     },
     "test": {
-      "available": false,
-      "expected_path": "submission_test.csv"
+      "available": true,
+      "path": "submission_test.csv",
+      "sha256": "e362441e389419907c0cbdeec64ecaabc9dcd67115f21471cac5b74b612e2c4c",
+      "data_rows": 170588,
+      "generation_command": "python3 -m agent.make_submission --split test --ensemble"
     }
   },
   "robustness": {
@@ -853,13 +825,37 @@
     "note": "end-to-end means a proposed feature cleared the probe AND was retrained from its stored source in a paired experiment"
   },
   "hidden_test": {
-    "evaluated": false,
-    "lock_present": false,
+    "evaluated": true,
+    "lock_present": true,
     "policy": "exactly one evaluation, at final submission only",
-    "command": "python3 -m agent.make_submission --final-test-eval --ensemble"
+    "command": "python3 -m agent.make_submission --final-test-eval --ensemble",
+    "result": {
+      "test": {
+        "GAUC": 0.6650986284593119,
+        "nDCG@5": 0.531100655425979,
+        "primary": 0.5980996419426454
+      },
+      "baseline_test": {
+        "GAUC": 0.661,
+        "nDCG@5": 0.5282,
+        "primary": 0.5946
+      },
+      "delta_test": {
+        "GAUC": 0.0041,
+        "nDCG@5": 0.0029,
+        "primary": 0.0035
+      },
+      "delta_primary_in_baseline_sigmas": 4.37,
+      "validation_for_comparison": {
+        "GAUC": 0.67212,
+        "nDCG@5": 0.5387,
+        "primary": 0.60541
+      },
+      "source": "results/final_results.json"
+    }
   },
   "distinctions": {
-    "validation_vs_hidden_test": "Every score in this manifest is VALIDATION unless a field says hidden_test. The hidden test has not been evaluated.",
+    "validation_vs_hidden_test": "Every score in this manifest is VALIDATION unless a field says hidden_test. The hidden test has been evaluated exactly once; its result is in hidden_test.result.",
     "single_seed_vs_ensemble": "A single-seed score is one draw and is PRELIMINARY. The submitted number is an ensemble of all seeds trained for one configuration.",
     "agent_vs_human": "The canonical artifact was produced by the autonomous competition run and stamped from its ensemble action.",
     "fresh_vs_reuse": "fresh_executions is compute actually spent. reused_artifacts are previously completed ensemble members on disk: real historical evidence, but free. unique_observations is what evidence may rest on, keyed by (configuration, seed), so reusing the same member twice adds nothing. There is no general execution cache in this repository.",

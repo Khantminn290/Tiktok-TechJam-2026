@@ -3850,8 +3850,21 @@ def test_results_manifest_is_the_single_source():
     check("the internal rule is labelled as not official",
           "NOT the organizer rule" in d["convergence"]["internal"]["source"])
 
-    check("the hidden test is reported unevaluated",
-          d["hidden_test"]["evaluated"] is False)
+    # Not "is it unevaluated" -- that flips the day the one shot is spent.
+    # The invariant is that the manifest agrees with the lock on disk, and
+    # that a spent evaluation carries its result rather than just a flag.
+    _lock = os.path.exists(os.path.join(_ROOT, "results",
+                                        "final_evaluation.lock"))
+    check("the hidden-test flag matches the lock on disk",
+          d["hidden_test"]["evaluated"] is _lock
+          and d["hidden_test"]["lock_present"] is _lock)
+    if _lock:
+        _r = d["hidden_test"].get("result") or {}
+        check("...and a spent evaluation records its result",
+              bool(_r.get("test") and _r.get("delta_test")),
+              "hidden_test.result must carry test + delta_test")
+        check("...sourced from the file the evaluation wrote, not retyped",
+              _r.get("source") == "results/final_results.json")
 
     # The five distinctions that have each been got wrong here before.
     for k in ("validation_vs_hidden_test", "single_seed_vs_ensemble",
@@ -6008,9 +6021,16 @@ def test_judge_packet_is_generated():
     s = d["submitted"]
     check("the packet states the submitted score the manifest recomputed",
           f"{s['reported']['primary']:.5f}" in text)
-    check("...and that the hidden test is NOT evaluated",
-          d["hidden_test"]["evaluated"] is False
-          and "has not been evaluated" in text)
+    # The packet must agree with the manifest either way, and must never
+    # print the "not evaluated" sentence once the shot has been spent.
+    if d["hidden_test"]["evaluated"]:
+        _t = ((d["hidden_test"].get("result") or {}).get("test") or {})
+        check("...and that the packet reports the hidden-test result",
+              f"{_t.get('primary'):.5f}" in text
+              and "has not been evaluated" not in text)
+    else:
+        check("...and that the hidden test is NOT evaluated",
+              "has not been evaluated" in text)
     attribution = s["how_produced"]["originally_built_by"]
     check("...and that artifact ownership matches the manifest",
           attribution in text and "autonomous competition run" in attribution)
@@ -6025,7 +6045,9 @@ def test_judge_packet_is_generated():
 
     # Limitations must be real limitations, not a modesty paragraph.
     lim = text.split("## 11. Limitations")[1].split("## 12.")[0]
-    for needed in ("hidden test has not been evaluated",
+    for needed in (("hidden test has not been evaluated"
+                    if not d["hidden_test"]["evaluated"]
+                    else "hidden-test gain is real but small"),
                    "has not beaten it", "Artifact attribution",
                    "One configuration family", "close to the noise floor",
                    "Level B, not Level A"):

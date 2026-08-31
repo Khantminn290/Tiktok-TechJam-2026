@@ -1,0 +1,56 @@
+{
+  "submission_source": "submitted ensemble, k=16 seeds [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] of node 4 (no selection)",
+  "best_node": 4,
+  "menu_choices": {
+    "loss": "bpr_pairwise",
+    "neg_sampling": "uniform_1",
+    "user_history": "recency_weighted_pool",
+    "multitask": "none",
+    "model": "fm_numpy",
+    "temporal": "hour_plus_dow",
+    "training": "lower_lr_longer",
+    "data_extras": "none",
+    "sample_weighting": "per_row",
+    "regularization": "l2_default"
+  },
+  "ensemble_used": true,
+  "ensemble_members": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15
+  ],
+  "valid": {
+    "GAUC": 0.67212,
+    "nDCG@5": 0.5387,
+    "primary": 0.60541
+  },
+  "test": {
+    "GAUC": 0.6650986284593119,
+    "nDCG@5": 0.531100655425979,
+    "primary": 0.5980996419426454
+  },
+  "baseline_test": {
+    "GAUC": 0.661,
+    "nDCG@5": 0.5282,
+    "primary": 0.5946
+  },
+  "delta_test": {
+    "GAUC": 0.0041,
+    "nDCG@5": 0.0029,
+    "primary": 0.0035
+  },
+  "delta_test_primary_in_baseline_seed_sigmas": 4.37
+}

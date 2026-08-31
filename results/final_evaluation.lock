@@ -1,0 +1,11 @@
+{
+  "submission_path": "submission_test.csv",
+  "submission_sha256": "e362441e389419907c0cbdeec64ecaabc9dcd67115f21471cac5b74b612e2c4c",
+  "timestamp": 1788187997.5119731,
+  "timestamp_iso": "2026-08-31T14:53:17Z",
+  "metrics": {
+    "GAUC": 0.6650986284593119,
+    "nDCG@5": 0.531100655425979,
+    "primary": 0.5980996419426454
+  }
+}

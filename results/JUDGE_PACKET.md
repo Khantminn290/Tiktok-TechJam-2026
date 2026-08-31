@@ -1,6 +1,6 @@
 # Autonomous ML Research Agent — KuaiRand-Pure
 
-*Generated from `results/manifest.json` on 2026-08-31T14:49:32Z at commit `6806bb1b4ea4` (opus-research-agent).*
+*Generated from `results/manifest.json` on 2026-08-31T14:58:04Z at commit `3c97bb168de7` (opus-research-agent).*
 
 Every number in this document is read from that manifest, which is generated from artifacts on disk. Nothing is transcribed by hand.
 
@@ -8,7 +8,7 @@ Every number in this document is read from that manifest, which is generated fro
 
 ## Three-minute judge route
 
-1. **0:00 - Result and boundary.** Verify the validation artifact (0.60541, 16 fixed seeds) and confirm the hidden-test lock is unspent.
+1. **0:00 - Result and boundary.** Verify the validation artifact (0.60541, 16 fixed seeds) and confirm the hidden-test lock is spent.
 2. **0:30 - Autonomous loop.** Open the dashboard's **Watch it run** tab: START RUN is the root; each child preserves its hypothesis, complete executable, official metrics, evidence state, and next action.
 3. **1:15 - Official eligibility.** Read section 10. The competition profile uses the organizer rule during execution and freezes the best artifact available when it first fires.
 4. **1:45 - Robustness.** Read section 9. Component routing, real subprocess termination, and full-loop recovery are reported separately; the deterministic full-loop suite currently recovers 3/3 scenarios to a later scored action.
@@ -91,7 +91,17 @@ Steps, as recorded in the manifest:
 
 ## 7. Results
 
-All scores are **validation**. The hidden test has not been evaluated; see section 11.
+**Hidden test — evaluated once, at final submission.** This is the number the primary judging metric is computed from.
+
+| split | primary | GAUC | nDCG@5 |
+|---|---|---|---|
+| official baseline | 0.59460 | 0.6610 | 0.5282 |
+| **this submission** | **0.59810** | **0.6651** | **0.5311** |
+| delta | **+0.0035** | +0.0041 | +0.0029 |
+
+Mean absolute delta across GAUC and nDCG@5: **+0.0035** (4.37 sigma on the baseline's own seed noise).
+
+The tables below are **validation**, retained because the search was driven by them.
 
 | result | primary | GAUC | nDCG@5 | vs baseline | evidence |
 |---|---|---|---|---|---|
@@ -182,7 +192,7 @@ This level drives the real `AgentLoop.iterate`, search policy, preflight, sandbo
 
 Artifacts: `results/recovery_eval.json`<br>Reproduce: `python3 -m agent.recovery_eval`
 
-Test harness: **1114 passed, 0 failed** (27.4s).
+Test harness: **1116 passed, 0 failed** (26.3s).
 
 ## 10. Convergence
 
@@ -208,7 +218,7 @@ No node scored higher after the stop, so the eligible checkpoint is also the bes
 
 Stated because they are true, not because they are small.
 
-1. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
+1. **The hidden-test gain is real but small.** +0.0035 primary over the official baseline. The validation-to-test drop was 0.59810 against 0.60541 on validation -- in line with the -0.0070 the baseline itself loses between the two splits, not evidence of a further edge.
 2. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
 3. **Artifact attribution.** The canonical artifact was produced by autonomous competition run (`AgentLoop` ensemble action). This attribution is read from provenance, not inferred from its score.
 4. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.

@@ -377,6 +377,31 @@ def _robustness() -> dict:
     return out
 
 
+def _hidden_test_result() -> dict:
+    """The one-shot result, if it has been spent. Empty dict if not.
+
+    Sourced from results/final_results.json -- the file the evaluation itself
+    wrote -- so a number here can never be a hand-typed claim.
+    """
+    p = os.path.join(RESULTS, "final_results.json")
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p) as fh:
+            r = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    if not r.get("test"):
+        return {}
+    return {"result": {"test": r.get("test"),
+                       "baseline_test": r.get("baseline_test"),
+                       "delta_test": r.get("delta_test"),
+                       "delta_primary_in_baseline_sigmas": r.get(
+                           "delta_test_primary_in_baseline_seed_sigmas"),
+                       "validation_for_comparison": r.get("valid"),
+                       "source": "results/final_results.json"}}
+
+
 def build(journal: str | None = None, run_tests: bool = False) -> dict:
     from agent import convergence_report as CR
     from agent import provenance as PR
@@ -429,17 +454,23 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
 
         "path_b": RR.path_b(),
 
-        "hidden_test": {
-            "evaluated": os.path.exists(lock),
-            "lock_present": os.path.exists(lock),
-            "policy": "exactly one evaluation, at final submission only",
-            "command": ("python3 -m agent.make_submission --final-test-eval "
-                        "--ensemble")},
+        "hidden_test": dict(
+            {"evaluated": os.path.exists(lock),
+             "lock_present": os.path.exists(lock),
+             "policy": "exactly one evaluation, at final submission only",
+             "command": ("python3 -m agent.make_submission --final-test-eval "
+                         "--ensemble")},
+            # The result itself, once spent. Read from the recorded evaluation
+            # rather than retyped, so the manifest cannot drift from the lock.
+            **_hidden_test_result()),
 
         "distinctions": {
             "validation_vs_hidden_test":
-                "Every score in this manifest is VALIDATION unless a field says "
-                "hidden_test. The hidden test has not been evaluated.",
+                ("Every score in this manifest is VALIDATION unless a field "
+                 "says hidden_test."
+                 + ("" if not os.path.exists(lock) else
+                    " The hidden test has been evaluated exactly once; its "
+                    "result is in hidden_test.result.")),
             "single_seed_vs_ensemble":
                 "A single-seed score is one draw and is PRELIMINARY. The "
                 "submitted number is an ensemble of all seeds trained for one "

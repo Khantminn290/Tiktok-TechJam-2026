@@ -217,8 +217,7 @@ def _results(d) -> list:
     hp = s.get("how_produced", {})
     L = [
         "## 7. Results", "",
-        "All scores are **validation**. The hidden test has not been "
-        "evaluated; see section 11.", "",
+    ] + _hidden_test_headline(d) + [
         "| result | primary | GAUC | nDCG@5 | vs baseline | evidence |",
         "|---|---|---|---|---|---|",
         f"| official baseline | {_f(b['primary'])} | {_f(b['GAUC'], 4)} | "
@@ -455,6 +454,41 @@ def _eligibility(c) -> list:
     return L
 
 
+def _hidden_test_headline(d) -> list:
+    """The hidden-test result, stated first, or its absence stated plainly.
+
+    Before the one shot is spent this section must not imply a test number
+    exists. After it is spent, burying the result under validation tables
+    would be the opposite error -- it is the number the deliverable is
+    judged on.
+    """
+    ht = d.get("hidden_test") or {}
+    if not ht.get("evaluated"):
+        return ["All scores are **validation**. The hidden test has not been "
+                "evaluated; see section 11.", ""]
+    r = ht.get("result") or {}
+    t, base, dl = (r.get("test") or {}), (r.get("baseline_test") or {}), \
+        (r.get("delta_test") or {})
+    sig = r.get("delta_primary_in_baseline_sigmas")
+    return [
+        "**Hidden test — evaluated once, at final submission.** This is the "
+        "number the primary judging metric is computed from.", "",
+        "| split | primary | GAUC | nDCG@5 |",
+        "|---|---|---|---|",
+        f"| official baseline | {_f(base.get('primary'))} | "
+        f"{_f(base.get('GAUC'), 4)} | {_f(base.get('nDCG@5'), 4)} |",
+        f"| **this submission** | **{_f(t.get('primary'))}** | "
+        f"**{_f(t.get('GAUC'), 4)}** | **{_f(t.get('nDCG@5'), 4)}** |",
+        f"| delta | **+{_f(dl.get('primary'), 4)}** | "
+        f"+{_f(dl.get('GAUC'), 4)} | +{_f(dl.get('nDCG@5'), 4)} |", "",
+        f"Mean absolute delta across GAUC and nDCG@5: "
+        f"**+{_f((dl.get('GAUC', 0) + dl.get('nDCG@5', 0)) / 2, 4)}**"
+        + (f" ({sig} sigma on the baseline's own seed noise)."
+           if sig is not None else "."), "",
+        "The tables below are **validation**, retained because the search was "
+        "driven by them.", ""]
+
+
 def _limitations(d) -> list:
     s = d["submitted"]
     r = d.get("latest_run") or {}
@@ -472,12 +506,24 @@ def _limitations(d) -> list:
             f"compliance gap, not a scoring one, and it is fixed by a clean "
             f"run under the organizers' rule — not by reinterpreting this "
             f"journal.")
+    if not ht.get("evaluated"):
+        items.append(
+            f"**The hidden test has not been evaluated** "
+            f"(`evaluated: {ht.get('evaluated')}`). Every number in this "
+            f"packet is validation. The gap between validation and test on "
+            f"the official baseline is -0.0070, and there is no reason to "
+            f"expect this submission to be exempt from a gap of that order.")
+    else:
+        _r = (ht.get("result") or {}).get("delta_test") or {}
+        items.append(
+            f"**The hidden-test gain is real but small.** "
+            f"+{_f(_r.get('primary'), 4)} primary over the official baseline. "
+            f"The validation-to-test drop was "
+            f"{_f((ht.get('result') or {}).get('test', {}).get('primary'), 5)} "
+            f"against {_f((ht.get('result') or {}).get('validation_for_comparison', {}).get('primary'), 5)} "
+            f"on validation -- in line with the -0.0070 the baseline itself "
+            f"loses between the two splits, not evidence of a further edge.")
     items += [
-        f"**The hidden test has not been evaluated** "
-        f"(`evaluated: {ht.get('evaluated')}`). Every number in this packet is "
-        f"validation. The gap between validation and test on the official "
-        f"baseline is -0.0070, and there is no reason to expect this "
-        f"submission to be exempt from a gap of that order.",
         f"**The agent matched the incumbent; it has not beaten it.** From a "
         f"cold start it reproduced {_f((s.get('reported') or {}).get('primary'))} "
         f"unaided. No result in this repository exceeds it.",
