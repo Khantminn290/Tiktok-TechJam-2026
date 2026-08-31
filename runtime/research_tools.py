@@ -148,6 +148,28 @@ def selection_rule_test(per_epoch_scores, users, labels, rules: dict,
     evaluated on the same data now being used to score the winner.
     """
     from evaluate import evaluate
+    # `rules` is a MAPPING name -> callable, not a list of names. Passing a list
+    # fails later with "'list' object has no attribute 'items'", which does not
+    # say what was expected. Same class as the payload error below: caught here
+    # because the caller usually builds it in a variable that no static check
+    # can recognise.
+    if not isinstance(rules, dict):
+        raise TypeError(
+            f"rules must be a dict mapping a name to a callable, not "
+            f"{type(rules).__name__}. Each callable takes "
+            f"(per_epoch_primaries, per_epoch_scores) and returns one score "
+            f"vector; the FIRST entry is the reference the others are measured "
+            f"against. For example:\n"
+            f"    rules = {{\n"
+            f"        'argmax_epoch': lambda prim, sc: sc[int(np.argmax(prim))],\n"
+            f"        'mean_top3':    lambda prim, sc: np.mean(\n"
+            f"                            [sc[i] for i in np.argsort(prim)[-3:]], axis=0),\n"
+            f"    }}")
+    bad = [k for k, v in rules.items() if not callable(v)]
+    if bad:
+        raise TypeError(
+            f"these rules are not callable: {bad}. A rule is a function of "
+            f"(per_epoch_primaries, per_epoch_scores), not a string or a score.")
     users = np.asarray(users)
     labels = np.asarray(labels)
     uniq = np.unique(users)

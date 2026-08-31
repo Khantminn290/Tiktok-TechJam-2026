@@ -3210,6 +3210,9 @@ def test_streamlit_dashboard_executes():
           "the live journal should be a real parent-linked tree, not a card stack")
     check("the experiment tree preserves parent edges",
           "parent in ids" in src and "-> n" in src)
+    check("the experiment tree has a Start Run root and circular experiment nodes",
+          "START\\\\nRUN" in src and "node [shape=circle" in src
+          and "start -> n" in src)
     watch_tab = src.split("# ------------------------------------------------------------ watch it run ---")[1].split(
         "# ----------------------------------------------------------- iteration log ---")[0]
     check("live refresh is isolated from the other dashboard tabs",
@@ -3760,6 +3763,27 @@ def test_return_shape_contract():
               "numpy's own 'inhomogeneous shape' error says nothing useful")
         check("...and names the adapter that fixes it",
               "capture_selection_rule_test" in raised)
+
+        # Same class: `rules` must be a mapping, and the caller usually builds
+        # it in a variable, so only a runtime check catches it reliably.
+        try:
+            _srt(_np.zeros((1, 2, 5)), list(range(5)), _np.zeros(5),
+                 ["argmax", "mean_top3"])
+            rules_err = ""
+        except TypeError as e:
+            rules_err = str(e)
+        check("a list of rule NAMES is rejected with an explanation",
+              "dict mapping a name to a callable" in rules_err,
+              "'list object has no attribute items' says nothing useful")
+        check("...and shows a worked rules mapping", "argmax_epoch" in rules_err)
+        try:
+            _srt(_np.zeros((1, 2, 5)), list(range(5)), _np.zeros(5),
+                 {"a": "not a function"})
+            noncallable = ""
+        except TypeError as e:
+            noncallable = str(e)
+        check("a non-callable rule is named specifically",
+              "not callable: ['a']" in noncallable)
 
         # A correctly-shaped tuple return must NOT be flagged.
         r = P.preflight(write("c.py", "cfg, enc = incumbent_cfg(s, m)\n"))
