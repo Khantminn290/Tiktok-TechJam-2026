@@ -66,6 +66,15 @@ text-transform:uppercase;color:#0f766e}
 border-radius:0 12px 12px 0;color:#134e4a;font-size:.88rem}
 .flow-proof{background:#ffffff;border:1px solid #dbe4ea;border-left:4px solid #0f766e;
 color:#475569}
+.criterion{min-height:154px;padding:17px 18px;border:1px solid #dbe4ea;
+border-radius:13px;background:#ffffff;margin-bottom:12px}
+.criterion-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.criterion h3{margin:0 !important;color:#172554;font-size:1rem !important}
+.criterion .weight{padding:3px 9px;border-radius:99px;background:#e0f2fe;color:#075985;
+font-size:.75rem;font-weight:800;white-space:nowrap}
+.criterion p{margin:.6rem 0 0;color:#64748b;font-size:.87rem;line-height:1.55}
+.criterion .evidence{display:inline-block;margin-top:.7rem;color:#0f766e;font-size:.76rem;
+font-weight:700}
 </style>""", unsafe_allow_html=True)
 
 
@@ -181,11 +190,16 @@ if running:
     st.success("🟢 An agent run is in progress — see **Watch it run**.")
 
 tabs = st.tabs(["📌 Overview", "▶️ Watch it run", "📜 Iteration log",
-                "⚖️ Judging criteria", "⚙️ Start a run"])
+                "⚙️ Start a run"])
 
 
 # ---------------------------------------------------------------- overview ---
 with tabs[0]:
+    fs = read_json(os.path.join(LOGS, "final_summary.json")) or {}
+    led = fs.get("budget_ledger") or {}
+    spend = fs.get("spend") or {}
+    interventions = L._load_jsonl(os.path.join(LOGS, "interventions.jsonl"))
+
     st.markdown(
         "<div class='overview-hero'><div class='eyebrow'>Autonomous ML research</div>"
         "<h2>Ask a sharper question. Run a safer experiment.</h2>"
@@ -221,6 +235,48 @@ with tabs[0]:
             st.markdown(f"<div class='capability'><div class='cap-kicker'>{kicker}</div>"
                         f"<h3>{title}</h3><p>{body}</p></div>",
                         unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown("#### Why this is competition-ready")
+    st.caption("The rubric is the organiser's. Each claim below is tied to a "
+               "visible artifact, live view, or reproducible check.")
+    criteria = [
+        ("Technical execution", "35%",
+         f"The agent improves the official validation primary from {BASELINE:.4f} "
+         f"to {INCUMBENT:.5f} (+{(INCUMBENT - BASELINE) / NOISE:.2f}σ), while the "
+         "official scorer and one-shot hidden-test boundary remain unchanged.",
+         "Proof: fixed 16-seed ensemble, preflight, sandbox, and Verify button."),
+        ("Innovation and insight", "20%",
+         "The capability contract keeps the prompt, runtime surface, and preflight "
+         "in agreement. The allocator values information, not just a lucky score, "
+         "and research memory records what failed and why.",
+         "Proof: capability contract, evidence tiers, and research log."),
+        ("Autonomy and relevance", "20%",
+         f"{len(interventions)} manual interventions are logged. Each experiment "
+         "records its question, competing hypotheses, selected action, result, and "
+         "whether the evidence was strong enough to act on.",
+         "Proof: live experiment tree and append-only journal."),
+        ("Feasibility and practicality", "15%",
+         f"The latest run reports ${spend.get('total_usd', 0):.2f} LLM spend, "
+         f"{fs.get('total_agent_wall_clock_s', 0):.0f}s wall-clock, and "
+         f"{led.get('training_runs_used', 0)} training runs under explicit caps. "
+         "It runs on CPU with measured resource accounting.",
+         "Proof: generated results, budget ledger, and resource artifacts."),
+        ("Presentation and communication", "10%",
+         "A judge can watch the agent form a branch, reject broken code before it "
+         "spends compute, inspect every script, and independently reproduce the "
+         "submitted result from stored prediction arrays.",
+         "Proof: this dashboard, RESULTS.md, README.md, and static tree."),
+    ]
+    rows = [criteria[:2], criteria[2:4], criteria[4:]]
+    for row in rows:
+        columns = st.columns(len(row))
+        for col, (title, weight, body, evidence) in zip(columns, row):
+            with col:
+                st.markdown(f"<div class='criterion'><div class='criterion-top'>"
+                            f"<h3>{title}</h3><span class='weight'>{weight}</span>"
+                            f"</div><p>{body}</p><span class='evidence'>{evidence}</span>"
+                            f"</div>", unsafe_allow_html=True)
 
     st.divider()
     st.markdown("#### What was submitted")
@@ -392,59 +448,8 @@ with tabs[2]:
                         st.code(fh.read(), language="python")
 
 
-# ----------------------------------------------------------------- judging ---
-with tabs[3]:
-    fs = read_json(os.path.join(LOGS, "final_summary.json")) or {}
-    led = fs.get("budget_ledger") or {}
-    spend = fs.get("spend") or {}
-    interventions = L._load_jsonl(os.path.join(LOGS, "interventions.jsonl"))
-
-    st.header("How this maps to the criteria")
-    st.markdown("<span class='small'>Weights are the organisers'. Every row "
-                "points at something in this repository you can open and "
-                "check.</span>", unsafe_allow_html=True)
-
-    def crit(title, weight, body):
-        with st.container(border=True):
-            a, b = st.columns([5, 1])
-            a.markdown(f"**{title}**")
-            b.markdown(f"<div style='text-align:right'><b>{weight}</b></div>",
-                       unsafe_allow_html=True)
-            st.markdown(f"<span class='small'>{body}</span>",
-                        unsafe_allow_html=True)
-
-    crit("Technical Execution", "35%",
-         f"Validation <b>{INCUMBENT}</b> vs baseline {BASELINE} = "
-         f"<b>+{INCUMBENT - BASELINE:.5f} ({(INCUMBENT - BASELINE) / NOISE:.2f}σ)</b>. "
-         f"Hidden test baseline is {BASELINE_TEST} and has <b>not been "
-         f"evaluated</b> — it is a one-shot and deliberately unspent. "
-         f"The Overview tab recomputes the number from stored predictions.")
-    crit("↳ Robustness (part of the above)", "—",
-         "An 8-stage preflight rejects broken scripts for <b>zero compute</b>; "
-         "failed experiments are repaired by feeding the traceback back; a "
-         "killed run restores file permissions on SIGTERM. Crashes and "
-         "recoveries are visible in <b>Watch it run</b>.")
-    crit("Innovation & Problem Insight", "20%",
-         "A capability contract the agent can read at runtime; evidence tiers "
-         "that refuse to promote a single seed; a transparent utility allocator; "
-         "paired multi-seed confirmation. 28 measured dead ends with numbers in "
-         "<code>docs/RESEARCH_LOG.md</code>.")
-    crit("Impact & Relevance (autonomy)", "20%",
-         f"<b>{len(interventions)} manual interventions</b> logged. Every "
-         f"decision is journalled with the question that motivated it, the "
-         f"competing hypotheses, and the evidence tier of the result.")
-    crit("Feasibility & Practicality", "15%",
-         f"Last run: <b>${spend.get('total_usd', 0):.2f}</b> LLM spend, "
-         f"<b>{fs.get('total_agent_wall_clock_s', 0):.0f}s</b> wall-clock, "
-         f"<b>{led.get('training_runs_used', 0)}</b> training runs, "
-         f"<b>{fs.get('gpu_hours', 0)}</b> GPU-hours — CPU only, no accelerator.")
-    crit("Presentation & Communication", "10%",
-         "This dashboard, <code>README.md</code>, and a "
-         "<code>RESULTS.md</code> generated from artifacts rather than typed.")
-
-
 # --------------------------------------------------------------------- run ---
-with tabs[4]:
+with tabs[3]:
     st.header("Start a run")
     if running:
         st.warning("A run is already in progress — see **Watch it run**.")

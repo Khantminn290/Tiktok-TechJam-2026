@@ -353,7 +353,6 @@ tests/test_harness.py        harness self-tests, no model calls, no training
 docs/
   ARCHITECTURE.md            design, measured before/after, honest autonomy level
   RESEARCH_LOG.md            dead ends with evidence, and what is still open
-  TRANSFER_PLAN.md           KuaiRand-1K/27K plan (blocked: not available locally)
 RESULTS.md                   generated -- do not hand-edit
 logs/                        journal.jsonl, solutions/, best_*, final_summary.json
 ```
