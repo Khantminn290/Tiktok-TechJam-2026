@@ -3211,6 +3211,8 @@ def test_streamlit_dashboard_executes():
 
     src = open(app).read()
     check("app.py parses", bool(__import__("ast").parse(src)))
+    check("judging evidence is merged into the Overview",
+          "Why this is competition-ready" in src and "⚖️ Judging criteria" not in src)
     check("Watch it run renders one connected node per experiment",
           "def experiment_tree_dot" in src and "st.graphviz_chart" in src,
           "the live journal should be a real parent-linked tree, not a card stack")
@@ -4511,6 +4513,29 @@ def test_evidence_states():
                      n_candidates_compared=8)["state"] == E.UNCONFIRMED)
     check("an effect under half the noise floor is REJECTED, not 'small'",
           E.classify(delta=0.0002, n_seeds=6, paired=True)["state"] == E.REJECTED)
+
+    # "Is it real?" and "is it worth much?" are different questions, and the
+    # rule above answers only the second. A deterministic post-process measured
+    # paired on identical predictions has its OWN variance, far below the seed
+    # floor. Measured live: a reranker at +0.000170 with 16/16 wins and a spread
+    # of 0.000055 -- t=12 -- was being reported as absent.
+    real_but_small = E.classify(delta=0.000170, n_seeds=16, paired=True,
+                                seed_sd=0.000055)
+    check("a small but statistically solid effect is not called absent",
+          real_but_small["state"] == E.CONFIRMED,
+          "t=12 with 16/16 wins is not 'no result whatever its sign'")
+    check("...and it says plainly that it is small",
+          "small against the seed-noise floor" in real_but_small["why"])
+    check("...and warns not to expect much from it",
+          "not expect it to move the headline" in real_but_small["next_step"])
+    check("without a measured spread the same delta stays REJECTED",
+          E.classify(delta=0.000170, n_seeds=16, paired=True)["state"]
+          == E.REJECTED,
+          "you cannot claim precision you did not measure")
+    check("a tiny effect with a weak t is still REJECTED",
+          E.classify(delta=0.00002, n_seeds=16, paired=True,
+                     seed_sd=0.00005)["state"] == E.REJECTED,
+          "the fix must not become a way to promote anything")
     check("a cheap probe is PROBED, never CONFIRMED",
           E.classify(delta=0.002, n_seeds=3, trained=False)["state"] == E.PROBED)
     check("'works alone, adds nothing here' is expressible as REDUNDANT",

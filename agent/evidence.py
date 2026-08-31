@@ -136,10 +136,32 @@ def classify(delta: float | None, n_seeds: int = 0, paired: bool = False,
                     "the winner of the comparison.")
 
     t = abs(delta) / (sd / math.sqrt(n_seeds))
+
+    # Two DIFFERENT questions, which this used to conflate:
+    #
+    #   is it real?        -> t against the variance actually measured
+    #   is it worth much?  -> the effect against the benchmark's noise floor
+    #
+    # The old rule answered only the second and applied it to everything, so a
+    # deterministic post-process measured paired on identical predictions was
+    # REJECTED at t=9.60 with 16/16 wins, because its +0.00017 sat under half
+    # the SEED-noise floor. But seed noise is not that comparison's variance --
+    # its measured spread was 0.000055, fourteen times smaller. An effect can be
+    # statistically certain and practically small, and saying so is more useful
+    # than calling it absent.
+    measured = seed_sd is not None and seed_sd > 0
     if abs(delta) < NOISE / 2:
+        if measured and t >= T_CONFIRM:
+            return _out(CONFIRMED, delta, n_seeds,
+                        f"{delta:+.5f} is small against the seed-noise floor "
+                        f"({NOISE}), but this comparison's own spread is "
+                        f"{sd:.6f}, giving t={t:.2f} over {n_seeds} paired "
+                        f"measurements -- the effect is real, just small",
+                        "Worth taking if it is free; do not expect it to move "
+                        "the headline much.")
         return _out(REJECTED, delta, n_seeds,
-                    f"{delta:+.5f} is under half the noise floor; this is not a "
-                    f"result whatever its sign",
+                    f"{delta:+.5f} is under half the noise floor and is not "
+                    f"separable from it",
                     "Stop spending runs here; the effect is absent, not small.")
     if t < T_CONFIRM:
         return _out(UNCONFIRMED, delta, n_seeds,
