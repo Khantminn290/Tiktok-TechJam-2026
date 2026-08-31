@@ -553,6 +553,16 @@ class AgentLoop:
         per_seed = {str(s): round(float(members[s]["metrics"]["primary"]), 5)
                     for s in sorted(members)}
         from . import provenance
+        prov = provenance.stamp(
+            config=spec.treatment, seeds=spec.seeds,
+            code_paths=("agent/loop.py", "agent/ensemble_experiment.py",
+                        "agent/ensemble.py", "runtime/train_lib.py"),
+            evaluation="starter-kit evaluate.py on validation only",
+            extra={"aggregation": "rank_normalise_then_mean",
+                   "members_dir": "logs/final_ensemble",
+                   "source_node": it,
+                   "agent_produced": True})
+        data = prov.get("data") or {}
         record = {
             "primary": metrics["primary"],
             "GAUC": metrics["GAUC"],
@@ -565,6 +575,9 @@ class AgentLoop:
             "worst_individual_seed": min(per_seed.values()),
             "per_seed_primary": per_seed,
             "gain_over_mean_member": result.get("gain_over_mean_member"),
+            "k_curve_diagnostic_only": result.get(
+                "k_curve_diagnostic_only", {}),
+            "duplicate_arrays_dropped": [],
             "delta_vs_baseline": round(
                 metrics["primary"] - BASELINE_VALID_PRIMARY, 5),
             "sigma_vs_baseline": round(
@@ -575,24 +588,21 @@ class AgentLoop:
             "members_dir": "logs/final_ensemble",
             "selection_bias": ("NONE -- all seeds were fixed before training; "
                                "no member, subset, or weight was selected on "
-                               "validation"),
+                               "validation. k_curve is diagnostic only."),
             "reproduce": ("python3 -m agent.final_ensemble --seeds "
                           f"{len(spec.seeds)}"),
             "timestamp_utc": time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "code_version": (prov.get("git") or {}).get("sha"),
+            "data_version": {
+                "fingerprint": data.get("sha256"),
+                "valid_rows": ((data.get("splits") or {}).get("valid") or {})
+                              .get("rows")},
             "evaluator": "kuairand-starter-kit/evaluate.py (never modified)",
             "hidden_test_used": False,
             "produced_by": "autonomous competition run",
             "official_candidate_node": it,
-            "provenance": provenance.stamp(
-                config=spec.treatment, seeds=spec.seeds,
-                code_paths=("agent/loop.py", "agent/ensemble_experiment.py",
-                            "agent/ensemble.py", "runtime/train_lib.py"),
-                evaluation="starter-kit evaluate.py on validation only",
-                extra={"aggregation": "rank_normalise_then_mean",
-                       "members_dir": "logs/final_ensemble",
-                       "source_node": it,
-                       "agent_produced": True}),
+            "provenance": prov,
         }
         tmp_record = old_record + ".tmp"
         with open(tmp_record, "w") as fh:

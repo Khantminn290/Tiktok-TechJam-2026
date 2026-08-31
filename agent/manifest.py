@@ -158,7 +158,10 @@ def _run_facts(journal: str) -> dict:
     if not nodes:
         return {"available": False, "note": "no journal on disk"}
     m = RM.compute(nodes, "latest")
-    summary = _load(os.path.join(LOGS, "final_summary.json")) or {}
+    canonical_journal = os.path.join(LOGS, "journal.jsonl")
+    summary = (_load(os.path.join(LOGS, "final_summary.json")) or {}
+               if os.path.realpath(journal) == os.path.realpath(canonical_journal)
+               else {})
     led = summary.get("budget_ledger") or {}
 
     ex_events = [e for n in nodes for e in (n.get("events") or [])

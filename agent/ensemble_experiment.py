@@ -116,8 +116,18 @@ def combine(members: dict, log=_flush) -> dict:
     seeds = sorted(members)
     arrays = [np.load(os.path.join(members[s]["dir"], "scores_valid.npy"))
               for s in seeds]
-    agg = np.mean([rank_normalise(a) for a in arrays], axis=0)
+    ranked = [rank_normalise(a) for a in arrays]
+    agg = np.mean(ranked, axis=0)
     m = evaluate(list(va["user_raw"]), va["long_view"], agg)
+    # Report every fixed prefix for diagnosis, never for choosing k. The action
+    # always submits all pre-registered seeds; selecting the best prefix here
+    # would tune ensemble size on validation.
+    curve = {
+        str(k): round(float(evaluate(
+            list(va["user_raw"]), va["long_view"],
+            np.mean(ranked[:k], axis=0))["primary"]), 5)
+        for k in range(1, len(ranked) + 1)
+    }
 
     singles = [members[s]["metrics"]["primary"] for s in seeds]
     mean_member = statistics.mean(singles)
@@ -139,6 +149,7 @@ def combine(members: dict, log=_flush) -> dict:
         "gain_over_mean_member": round(ens - mean_member, 5),
         "gain_sigma": round((ens - mean_member) / EV.NOISE, 2),
         "gain_over_best_member": round(ens - max(singles), 5),
+        "k_curve_diagnostic_only": curve,
     }
 
 
