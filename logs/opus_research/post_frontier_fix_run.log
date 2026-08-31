@@ -1,0 +1,159 @@
+==========================================================================
+RESOLVED CONFIGURATION — profile: competition
+==========================================================================
+  capabilities
+    data_tools                  True      [profile]   measure the data before hypothesising about it
+    research_state              True      [profile]   carry evidence between iterations
+    feature_discovery           True      [profile]   Path B: invent and probe features
+    n_candidates                4         [profile]   score several proposals instead of taking the first
+    min_branching_iterations    3         [profile]   let the search branch before it may converge
+  resource caps
+    max_iterations              5         [cli]   outer-loop decisions
+    max_training_runs           30        [cli]   TOTAL training executions, the real compute budget
+    wall_clock_limit_h          1.0       [cli]   hard stop so a run cannot hang overnight
+    max_spend_usd               3.0       [cli]   LLM ceiling
+    exec_timeout                1800      [profile]   per-training-run timeout
+    draft_count                 5         [profile]   drafts before the policy may branch
+    seed                        0         [profile]   base seed; confirmations use a fixed multi-seed set
+  safety
+    allow_locked_options        False     [cli]     locked/leakage-sensitive options stay OFF in this profile
+    fresh                       True      [cli]     archives previous search logs; submission artifacts survive
+==========================================================================
+preflight OK — provider=openai model=gpt-5.4 (key from $OPENAI_API_KEY, verified)
+  rate card: $2.50/1M in, $15.00/1M out
+  spend ceiling: $3.00 | draft_count=5 | max_iterations=5
+archived previous run to /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/archive_20260831_101013
+kept submission artifacts in place: ab_test, ensemble_results.json, feature_registry.jsonl, final_ensemble, opus_research, research_memory.jsonl
+agent run started: max_iterations=5, wall_clock_limit=1.0h, llm=openai:gpt-5.4, draft_count=5, spend_ceiling=$3.00 ($2.50/1M in, $15.00/1M out), ε=0.00048 (0.60σ), N=3
+[iter 0] action=draft — only 0 attempts exist (< draft_count=5); drafting a fresh combination, prioritizing untried high-priority axes
+  [allocator] ensemble_construction (utility -0.055)
+  [research policy] objective=exploitation (no stronger signal; refine the incumbent)
+  [data tools] agent requested 4: ['hardcoded_constants', 'get_within_user_auc', 'get_within_user_auc', 'get_user_history_stats']
+  [feature discovery] declined: The current evidence argues against proposing a new feature now. The only user-by-key fami
+  [inquiry] Is the remaining headroom in the incumbent mostly blocked by noisy within-run model selection rather
+  [planner] 4 candidates (1 path-B), selected: #0 path=A util=0.00054
+  [mechanism audit] warning: MECHANISM NOT EVIDENCED -- the hypothesis claims ensembling but the code shows no sign of it.
+[iter 0] SUCCESS primary 0.6049 (GAUC 0.6719 nDCG@5 0.5379) | best=0.6049 (node 0) | 73s train, 21370 tok
+[iter 0] spend $0.1399 / $3.00 ceiling (5%) | next est $0.0624 | openai:gpt-5.4
+[iter 1] action=draft — only 1 attempts exist (< draft_count=5); drafting a fresh combination, prioritizing untried high-priority axes
+  [allocator] multi_seed_replication (utility 0.840)
+  [confirm] queued paired confirmation of node 0 (6 runs)
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [data tools] agent requested 4: ['get_within_user_auc', 'get_within_user_auc', 'get_within_user_auc', 'get_user_history_stats']
+  [feature discovery] declined: No new feature currently clears the bar. The remaining evaluation-feasible user-by-KEY cho
+  [inquiry] Is the remaining uncertainty mainly seed/selection noise around one effectively-solved FM+BPR regime
+  [planner] 4 candidates (1 path-B), selected: #2 path=B util=0.00004
+[iter 1] SUCCESS primary 0.6053 (GAUC 0.6723 nDCG@5 0.5383) | best=0.6053 (node 1) | 74s train, 23467 tok
+[iter 1] spend $0.3071 / $3.00 ceiling (10%) | next est $0.0861 | openai:gpt-5.4
+[iter 2] action=confirm — paired multi_seed_replication, 6 runs over seeds [0, 1, 2]
+EXPERIMENT SPEC — multi_seed_replication
+  hypothesis   Node 0 scored 0.60493 on ONE seed (+4.17 sigma over baseline). Does it hold against the incumbent when both arms run the same seeds?
+  seeds        [0, 1, 2]  (6 training runs)
+  paired       True
+  expects      primary +0.00333 (GAUC +0.00000, nDCG@5 +0.00000)
+  accepts if   |delta| >= 0.00040 and state reaches confirmed_only
+  on failure   keep_incumbent
+  [confirm] multi_seed_replication: 6 training runs across seeds [0, 1, 2]
+    [control] seed 0  primary 0.60497  72s
+    [control] seed 1  primary 0.60393  58s
+    [control] seed 2  primary 0.60449  68s
+    [treatment] seed 0  primary 0.60493  73s
+    [treatment] seed 1  primary 0.60454  60s
+    [treatment] seed 2  primary 0.60479  71s
+EXPERIMENT SPEC — multi_seed_replication
+  hypothesis   Node 0 scored 0.60493 on ONE seed (+4.17 sigma over baseline). Does it hold against the incumbent when both arms run the same seeds?
+  seeds        [0, 1, 2]  (6 training runs)
+  paired       True
+  expects      primary +0.00333 (GAUC +0.00000, nDCG@5 +0.00000)
+  accepts if   |delta| >= 0.00040 and state reaches confirmed_only
+  on failure   keep_incumbent
+
+  RESULT over 3 paired seeds [0, 1, 2]
+    control    0.60446
+    treatment  0.60475
+    delta      +0.00029 (+0.36 sigma)  t=1.92  wins 2/3
+    per seed   {0: -3e-05, 1: 0.00061, 2: 0.0003}
+  EVIDENCE: REJECTED — +0.00029 is under half the noise floor; this is not a result whatever its sign
+  PROMOTE:  NO
+    keep_incumbent: the submitted system is unchanged.
+[iter 2] CONFIRM REJECTED primary 0.60475 | promote=False
+[iter 3] action=draft — only 3 attempts exist (< draft_count=5); drafting a fresh combination, prioritizing untried high-priority axes
+  [allocator] multi_seed_replication (utility 0.872)
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [data tools] agent requested 4: ['hardcoded_constants', 'get_within_user_auc', 'get_within_user_auc', 'get_user_history_stats']
+  [feature discovery] declined: The evidence does not support a new feature with a strong enough chance of positive residu
+  [inquiry] Is the apparent edge of node 1 over the replicated node-0 BPR+FM family a real single-model improvem
+  [planner] 4 candidates (2 path-B), selected: #2 path=A util=0.00002
+[iter 3] SUCCESS primary 0.6040 (GAUC 0.6707 nDCG@5 0.5373) | best=0.6053 (node 1) | 38s train, 22139 tok
+[iter 3] spend $0.4556 / $3.00 ceiling (15%) | next est $0.0861 | openai:gpt-5.4
+[branching gate] convergence deferred -- branching not yet exercised: still owed improve, 3 more branching iteration(s)
+[iter 4] action=draft — only 4 attempts exist (< draft_count=5); drafting a fresh combination, prioritizing untried high-priority axes
+  [allocator] improvement (utility 0.026)
+  [research policy] objective=confirmation (what we currently believe is not yet statistically established)
+  [data tools] agent requested 4: ['get_within_user_auc', 'get_within_user_auc', 'get_within_user_auc', 'get_user_history_stats']
+  [feature discovery] declined: The current evidence does not justify a new feature proposal. The only user-by-key familie
+  [inquiry] Is the remaining uncertainty primarily about training-time selection within one run (best epoch vs c
+  [planner] 4 candidates (1 path-B), selected: #1 path=A util=0.00000
+[iter 4] SUCCESS primary 0.6049 (GAUC 0.6719 nDCG@5 0.5379) | best=0.6053 (node 1) | 74s train, 44411 tok
+[iter 4] spend $0.6185 / $3.00 ceiling (21%) | next est $0.0861 | openai:gpt-5.4
+
+=== RUN FINISHED ===
+{
+  "stop_reason": "iteration cap reached (5)",
+  "journal_nodes": 5,
+  "iterations_used": 5,
+  "iteration_cap": 5,
+  "best_node": 1,
+  "best_valid_metrics": {
+    "GAUC": 0.6722885728946539,
+    "nDCG@5": 0.538253811788693,
+    "primary": 0.6052711923416735
+  },
+  "delta_valid_primary_over_baseline": 0.0037,
+  "total_llm_tokens": {
+    "input_tokens": 162151,
+    "output_tokens": 13873,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 20224,
+    "calls": 17,
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "input_plus_output": 196248
+  },
+  "total_training_wall_clock_s": 661.8,
+  "delta_in_baseline_seed_sigmas": 4.59,
+  "total_agent_wall_clock_s": 829.2,
+  "gpu_hours": 0.0,
+  "gpu_seconds_measured": 0.0,
+  "devices_used": [
+    "cpu"
+  ],
+  "spend": {
+    "provider": "openai",
+    "model": "gpt-5.4",
+    "total_usd": 0.618529,
+    "ceiling_usd": 3.0,
+    "iterations_billed": 16,
+    "mean_usd_per_iteration": 0.038658,
+    "max_usd_per_iteration": 0.086117,
+    "rate_card": "$2.50/1M in, $15.00/1M out"
+  },
+  "draft_count": 5,
+  "manual_interventions": 0,
+  "budget_ledger": {
+    "max_iterations": 5,
+    "max_training_runs": 30,
+    "training_runs_used": 10,
+    "training_runs_left": 20,
+    "training_crashes": 0
+  },
+  "budget_counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
+  "convergence_rule": {
+    "epsilon": 0.00047746678414832246,
+    "N": 3,
+    "counted_iterations": "scored (successful) only"
+  }
+}
+
+best solution: /Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/best_solution.py
+generate a submission with: python3 -m agent.make_submission

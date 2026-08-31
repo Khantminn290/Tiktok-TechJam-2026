@@ -20,13 +20,14 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
         metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
         metrics_path = os.path.join(args.output_dir, 'metrics.json')
-        if not os.path.exists(metrics_path):
+        if isinstance(metrics, dict):
             with open(metrics_path, 'w') as f:
                 json.dump({k: float(v) for k, v in metrics.items()}, f)
+        return 0
     except Exception as e:
         print(f'ERROR: {e}', file=sys.stderr)
         raise
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

@@ -1,6 +1,6 @@
 --- runtime/seed_solution.py
 +++ logs/solutions/node_001.py
-@@ -1,35 +1,40 @@
+@@ -1,35 +1,161 @@
 -"""Reference solution script — the interface every generated solution must follow.
 -
 -Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
@@ -18,10 +18,100 @@
  import json
  import os
  import sys
++import traceback
  
 -sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 -import train_lib  # noqa: E402
++import numpy as np
++
 +import train_lib
++from research_tools import incumbent_cfg, capture_selection_rule_test
++from evaluate import evaluate
++
++
++def parse_args():
++    p = argparse.ArgumentParser()
++    p.add_argument('--menu-choices', type=str, required=True)
++    p.add_argument('--output-dir', type=str, required=True)
++    p.add_argument('--seed', type=int, default=0)
++    return p.parse_args()
++
++
++def write_outputs(output_dir, metrics, scores_valid, scores_test):
++    os.makedirs(output_dir, exist_ok=True)
++    with open(os.path.join(output_dir, 'metrics.json'), 'w') as f:
++        json.dump({k: float(v) for k, v in metrics.items()}, f)
++    np.save(os.path.join(output_dir, 'scores_valid.npy'), np.asarray(scores_valid, dtype=np.float32))
++    np.save(os.path.join(output_dir, 'scores_test.npy'), np.asarray(scores_test, dtype=np.float32))
++
++
++def rank_normalize(x):
++    order = np.argsort(x, kind='mergesort')
++    ranks = np.empty_like(order, dtype=np.float64)
++    ranks[order] = np.arange(len(x), dtype=np.float64)
++    if len(x) > 1:
++        ranks /= (len(x) - 1)
++    return ranks
++
++
++def average_scores(arrs):
++    if len(arrs) == 1:
++        return np.asarray(arrs[0], dtype=np.float64)
++    stacked = np.vstack([np.asarray(a, dtype=np.float64) for a in arrs])
++    return stacked.mean(axis=0)
++
++
++def build_epoch_rules(epoch_records):
++    # epoch_records: list[(epoch, primary, scores_valid)]
++    sorted_records = sorted(epoch_records, key=lambda t: t[1], reverse=True)
++    rules = {}
++    best_epoch, _, best_scores = sorted_records[0]
++    rules['best_epoch'] = np.asarray(best_scores, dtype=np.float64)
++    max_k = min(5, len(sorted_records))
++    for k in range(2, max_k + 1):
++        topk = sorted_records[:k]
++        rules[f'top{k}_avg'] = average_scores([rec[2] for rec in topk])
++    return rules, best_epoch
++
++
++def crossfit_pick_rule(user_ids, labels, candidate_scores):
++    # Try to use the provided helper if available; otherwise do deterministic user 2-fold cross-fit.
++    rule_names = list(candidate_scores.keys())
++    all_scores = [candidate_scores[n] for n in rule_names]
++    try:
++        res = capture_selection_rule_test(user_ids, labels, all_scores, rule_names)
++        best_name = None
++        best_val = -1e18
++        if isinstance(res, dict) and 'rules' in res:
++            for name, info in res['rules'].items():
++                val = info.get('mean_primary', info.get('primary', info.get('score', -1e18)))
++                if val is not None and val > best_val:
++                    best_val = val
++                    best_name = name
++        if best_name in candidate_scores:
++            return best_name, res
++    except Exception:
++        res = None
++
++    users = np.asarray(user_ids)
++    labels = np.asarray(labels)
++    uniq = np.unique(users)
++    uniq_sorted = np.sort(uniq)
++    fold_assign = {u: (i % 2) for i, u in enumerate(uniq_sorted)}
++    mask0 = np.array([fold_assign[u] == 0 for u in users], dtype=bool)
++    mask1 = ~mask0
++
++    def eval_mask(scores, mask):
++        return evaluate(users[mask], labels[mask], scores[mask])['primary']
++
++    results = {}
++    for name, scores in candidate_scores.items():
++        p01 = eval_mask(scores, mask1)
++        p10 = eval_mask(scores, mask0)
++        results[name] = {'mean_primary': float((p01 + p10) / 2.0), 'fold0_on1': float(p01), 'fold1_on0': float(p10)}
++
++    best_name = max(results.items(), key=lambda kv: kv[1]['mean_primary'])[0]
++    return best_name, {'reference_rule': 'best_epoch', 'n_evaluations': 2, 'rules': results}
  
  
  def main():
@@ -33,33 +123,64 @@
 -    choices = json.loads(a.menu_choices)
 -    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
 -    print(json.dumps(metrics))
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument('--menu-choices', type=str, required=True)
-+    parser.add_argument('--output-dir', type=str, required=True)
-+    parser.add_argument('--seed', type=int, default=0)
-+    args = parser.parse_args()
-+
++    args = parse_args()
++    os.makedirs(args.output_dir, exist_ok=True)
 +    try:
-+        menu_choices = json.loads(args.menu_choices)
-+        if not isinstance(menu_choices, dict):
-+            raise ValueError('--menu-choices must decode to a JSON object')
++        menu = json.loads(args.menu_choices)
++        splits, meta = train_lib.load_cache()
 +
-+        os.makedirs(args.output_dir, exist_ok=True)
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
++        cfg, enc = incumbent_cfg(splits, meta)
++        cfg.update({
++            'loss': 'bpr_pairwise',
++            'neg_sampling': 'uniform_1',
++            'user_history': 'recency_weighted_pool',
++            'multitask': 'none',
++            'model': 'fm_numpy',
++            'temporal': 'hour_plus_dow',
++            'training': 'lower_lr_longer',
++            'data_extras': 'none',
++            'sample_weighting': 'per_row',
++            'regularization': 'l2_default',
++            'n_checkpoints': 5,
++            'checkpoint_combine': True,
++            'seed': int(args.seed),
++        })
++        # Allow harmless overrides from menu JSON if provided.
++        for k, v in menu.items():
++            cfg[k] = v
 +
-+        metrics_path = os.path.join(args.output_dir, 'metrics.json')
-+        if not os.path.exists(metrics_path):
-+            with open(metrics_path, 'w') as f:
-+                json.dump({k: float(v) for k, v in metrics.items()}, f)
++        cfg['capture_epoch_scores'] = []
++        res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
 +
-+        required = ['metrics.json', 'scores_valid.npy', 'scores_test.npy']
-+        missing = [name for name in required if not os.path.exists(os.path.join(args.output_dir, name))]
-+        if missing:
-+            raise RuntimeError('train_lib.run completed but did not create required outputs: ' + ', '.join(missing))
++        epoch_records = cfg['capture_epoch_scores']
++        if not epoch_records:
++            raise RuntimeError('No per-epoch scores were captured; cannot run held-out checkpoint rule selection.')
++
++        candidate_scores, best_epoch = build_epoch_rules(epoch_records)
++        valid_user_ids = splits['valid']['user_raw']
++        valid_labels = splits['valid']['long_view']
++
++        chosen_rule, rule_diag = crossfit_pick_rule(valid_user_ids, valid_labels, candidate_scores)
++        final_valid_scores = candidate_scores[chosen_rule]
++        metrics = evaluate(valid_user_ids, valid_labels, final_valid_scores)
++
++        # No per-epoch test predictions are exposed by the training primitive, so keep the trained model's normal test output.
++        final_test_scores = res['scores_test']
++
++        write_outputs(args.output_dir, metrics, final_valid_scores, final_test_scores)
++
++        with open(os.path.join(args.output_dir, 'selection_rule_diagnostics.json'), 'w') as f:
++            json.dump({
++                'chosen_rule': chosen_rule,
++                'best_epoch_by_full_valid': int(best_epoch),
++                'candidate_rules': list(candidate_scores.keys()),
++                'diagnostics': rule_diag,
++            }, f)
 +
 +    except Exception as e:
-+        print(f'ERROR: {e}', file=sys.stderr)
-+        raise
++        sys.stderr.write('ERROR: ' + str(e) + '\n')
++        traceback.print_exc(file=sys.stderr)
++        sys.exit(1)
  
  
 -if __name__ == "__main__":

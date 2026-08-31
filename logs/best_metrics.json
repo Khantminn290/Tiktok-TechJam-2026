@@ -1,29 +1,12 @@
 {
-  "iteration_id": 6,
-  "menu_choices": {
-    "loss": "bpr_pairwise",
-    "neg_sampling": "uniform_1",
-    "user_history": "recency_weighted_pool",
-    "multitask": "none",
-    "model": "fm_numpy",
-    "temporal": "none",
-    "training": "lower_lr_longer",
-    "data_extras": "none",
-    "sample_weighting": "per_row",
-    "regularization": "l2_default",
-    "k": 4,
-    "lr": 0.0005,
-    "epochs": 20,
-    "patience": 5,
-    "n_checkpoints": 5,
-    "checkpoint_combine": true
-  },
-  "hypothesis": "The recent local incumbent is likely being held back by an explicitly strong L2 override rather than by its FM+BPR recipe itself. Re-running the same confirmation-style FM+BPR+recency configuration but switching from regularization=l2_1e3 with l2=0.001 to regularization=l2_default should restore the score toward the saturated frontier region around 0.6049, because the broader measured frontier says strong L2 is a null-to-harm direction while the target node's 0.5982 is far below both the official 0.6016 baseline and repeated l2_default FM runs around 0.6038. If this rebounds, it still remains only PRELIMINARY and should trigger paired confirmation next.",
+  "iteration_id": 1,
+  "menu_choices": {},
+  "hypothesis": "The likely remaining lever is not a new model family but a less biased checkpoint-selection rule: train the incumbent FM+BPR+recency+hour_plus_dow configuration once, capture per-epoch validation predictions, and choose between single-best-epoch and top-5-epoch averaging using held-out user splits from validation rather than the same users used for the final score. This directly tests whether the current same-validation checkpoint rule is overfitting; if so, cross-fitted selection could recover a small real gain (~0.0003-0.0008 primary), and if not it will provide a cleaner confirmation that checkpoint combining is already saturated. After this run, a paired multi-seed CONFIRM is due before acting on any tiny gain.",
   "valid_metrics": {
-    "GAUC": 0.6708821256332423,
-    "nDCG@5": 0.537165179473899,
-    "primary": 0.6040236525535707
+    "GAUC": 0.6722885728946539,
+    "nDCG@5": 0.538253811788693,
+    "primary": 0.6052711923416735
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_006.py",
-  "timestamp": 1788113889.345004
+  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_001.py",
+  "timestamp": 1788142444.600009
 }
