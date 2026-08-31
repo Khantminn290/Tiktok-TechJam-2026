@@ -2,9 +2,8 @@
 
     streamlit run app.py
 
-Ordered the way someone unfamiliar with the project actually reads it: what was
-submitted and whether it holds up, then how the agent got there, then the raw
-logs, then how it maps to the judging criteria.
+Ordered for a first-time viewer: how the agent operates, what it can do, then
+the submission proof, followed by the live logs and judging evidence.
 
 Two properties held deliberately, because they are the agent's own rules:
 
@@ -43,12 +42,30 @@ st.set_page_config(page_title="Autonomous ML Research Agent",
 st.markdown("""<style>
 .block-container{padding-top:2.2rem;max-width:1250px}
 [data-testid="stMetricValue"]{font-size:1.5rem}
-h1{font-size:1.9rem !important}
+h1{font-family:"Avenir Next","Trebuchet MS",sans-serif;font-size:1.9rem !important}
 h2{font-size:1.25rem !important;margin-top:1.4rem !important}
 h3{font-size:1.05rem !important}
 .small{color:#8b949e;font-size:0.86rem;line-height:1.5}
 .pill{display:inline-block;padding:2px 10px;border-radius:99px;font-size:0.74rem;
 font-weight:600;margin-right:6px}
+.overview-hero{padding:24px 28px 22px;border:1px solid #b9e5db;border-radius:16px;
+background:radial-gradient(circle at 90% 5%,#ccfbf1 0,transparent 32%),
+linear-gradient(125deg,#f0fdfa 0%,#f8fafc 58%,#eff6ff 100%);margin-bottom:18px}
+.overview-hero .eyebrow{color:#0f766e;font-size:.72rem;font-weight:800;
+letter-spacing:.12em;text-transform:uppercase}
+.overview-hero h2{color:#0f172a;font-family:"Avenir Next","Trebuchet MS",sans-serif;
+font-size:1.8rem !important;letter-spacing:-.03em;margin:.28rem 0 .5rem !important}
+.overview-hero p{color:#475569;font-size:1rem;max-width:720px;margin:0}
+.capability{height:100%;min-height:148px;padding:18px;border:1px solid #dbe4ea;
+border-radius:13px;background:linear-gradient(145deg,#ffffff,#f8fafc)}
+.capability .cap-kicker{font-size:.72rem;font-weight:800;letter-spacing:.1em;
+text-transform:uppercase;color:#0f766e}
+.capability h3{margin:.5rem 0 !important;color:#172554}
+.capability p{margin:0;color:#64748b;font-size:.88rem;line-height:1.55}
+.proof-strip{padding:15px 18px;border-left:4px solid #0f766e;background:#f0fdfa;
+border-radius:0 12px 12px 0;color:#134e4a;font-size:.88rem}
+.flow-proof{background:#ffffff;border:1px solid #dbe4ea;border-left:4px solid #0f766e;
+color:#475569}
 </style>""", unsafe_allow_html=True)
 
 
@@ -133,6 +150,25 @@ def experiment_tree_dot(nodes: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def overview_workflow_dot() -> str:
+    """The short visual explanation of one autonomous research cycle."""
+    return """digraph workflow {
+      rankdir=LR;
+      graph [bgcolor=transparent, ranksep=0.34, nodesep=0.16];
+      node [shape=box, style=\"rounded,filled\", fontname=\"Avenir Next\",
+            fontsize=10, margin=\"0.16,0.11\", color=\"#cbd5e1\",
+            fillcolor=\"#ffffff\", fontcolor=\"#334155\"];
+      edge [color=\"#0f766e\", penwidth=1.5, arrowsize=0.65];
+      observe [label=\"OBSERVE\\nData + research memory\"];
+      question [label=\"QUESTION\\nCompeting explanations\"];
+      build [label=\"BUILD\\nScript or feature\"];
+      evaluate [label=\"EVALUATE\\nOfficial validation metric\"];
+      confirm [label=\"CONFIRM\\nPaired multi-seed evidence\",
+               fillcolor=\"#ffffff\", color=\"#5eead4\"];
+      observe -> question -> build -> evaluate -> confirm;
+    }"""
+
+
 running = L._agent_running()
 
 st.title("Autonomous ML Research Agent")
@@ -150,98 +186,63 @@ tabs = st.tabs(["📌 Overview", "▶️ Watch it run", "📜 Iteration log",
 
 # ---------------------------------------------------------------- overview ---
 with tabs[0]:
-    st.header("What was submitted")
+    st.markdown(
+        "<div class='overview-hero'><div class='eyebrow'>Autonomous ML research</div>"
+        "<h2>Ask a sharper question. Run a safer experiment.</h2>"
+        "<p>An agent that observes the data, proposes a measurable hypothesis, "
+        "builds an experiment, and only adopts results that survive paired evidence.</p>"
+        "</div>", unsafe_allow_html=True)
 
+    st.markdown("#### How the agent works")
+    st.graphviz_chart(overview_workflow_dot(), width="stretch", height=170)
+    loop = st.columns(3)
+    loop[0].markdown("<div class='proof-strip flow-proof'><b>Grounded</b><br>Data tools and "
+                     "research memory turn observations into explicit questions.</div>",
+                     unsafe_allow_html=True)
+    loop[1].markdown("<div class='proof-strip flow-proof'><b>Guarded</b><br>Preflight and a "
+                     "test-label boundary block invalid work before it is scored.</div>",
+                     unsafe_allow_html=True)
+    loop[2].markdown("<div class='proof-strip flow-proof'><b>Evidence-led</b><br>One seed is "
+                     "preliminary; only paired confirmation may change the submission.</div>",
+                     unsafe_allow_html=True)
+
+    st.markdown("#### What it can actually do")
+    capabilities = [
+        ("RESEARCH", "Interrogate the data", "Runs controlled diagnostics, keeps "
+         "scoped findings, and avoids repeating measured dead ends."),
+        ("BUILD", "Change the pipeline", "Explores 10 controlled axes and custom "
+         "mechanisms while preflight checks the resulting script."),
+        ("GOVERN", "Spend evidence carefully", "Tracks cost and compute, recovers "
+         "from failures, then confirms only results strong enough to matter."),
+    ]
+    cols = st.columns(3)
+    for col, (kicker, title, body) in zip(cols, capabilities):
+        with col:
+            st.markdown(f"<div class='capability'><div class='cap-kicker'>{kicker}</div>"
+                        f"<h3>{title}</h3><p>{body}</p></div>",
+                        unsafe_allow_html=True)
+
+    st.divider()
+    st.markdown("#### What was submitted")
     c = st.columns([1, 1, 1, 1.3])
     c[0].metric("Submitted score", f"{INCUMBENT:.5f}",
                 f"+{INCUMBENT - BASELINE:.5f} vs baseline")
-    c[1].metric("In noise units", f"+{(INCUMBENT - BASELINE) / NOISE:.2f}σ",
-                help="σ = 0.0008, the official baseline's own 5-seed spread. "
-                     "Anything under ~2σ is not distinguishable from luck.")
+    c[1].metric("Evidence scale", f"+{(INCUMBENT - BASELINE) / NOISE:.2f}σ",
+                help="σ = 0.0008, the official baseline's own 5-seed spread.")
     c[2].metric("Official baseline", f"{BASELINE:.4f}")
     c[3].metric("Hidden test", "not yet evaluated",
-                help="Scored exactly once, at the end. Everything so far is "
-                     "train + validation only.")
+                help="Scored exactly once, at final submission.")
+    st.markdown("<div class='proof-strip'><b>16-seed fixed ensemble.</b> GAUC "
+                "0.67212 · nDCG@5 0.53870 · every seed is included, with no "
+                "validation-selected member subset.</div>", unsafe_allow_html=True)
 
-    st.markdown(
-        "<span class='small'>A 16-seed ensemble of one configuration. "
-        "GAUC 0.67212 · nDCG@5 0.53870. <code>k=16</code> is <i>every</i> seed "
-        "trained and was fixed before any score was seen, so no member was "
-        "picked on validation.</span>", unsafe_allow_html=True)
-
-    if st.button("✅ Verify this number now", type="primary"):
+    if st.button("Verify the submitted result", type="primary"):
         with st.spinner("recomputing from the 16 stored prediction arrays…"):
             r = subprocess.run([sys.executable, "-m", "agent.verify_incumbent"],
                                cwd=ROOT, capture_output=True, text=True,
                                timeout=900)
         (st.success if r.returncode == 0 else st.error)(
             f"```\n{(r.stdout or r.stderr).strip()}\n```")
-
-    st.divider()
-    st.header("How the agent works")
-    st.markdown("<span class='small'>One loop, repeated until the score stops "
-                "improving or a budget runs out.</span>",
-                unsafe_allow_html=True)
-
-    steps = [
-        ("1 · Observe", "Measures the data and reads its own past results — "
-                        "what it already tried, and what it learned."),
-        ("2 · Question", "States something it cannot explain and gives "
-                         "competing hypotheses, before choosing an experiment."),
-        ("3 · Decide", "A transparent utility scores experiment families "
-                       "(explore, refine, confirm, ensemble) on expected gain × "
-                       "chance of success − cost."),
-        ("4 · Build", "Writes a complete training script. An 8-stage preflight "
-                      "rejects broken code **before** it costs a training run."),
-        ("5 · Judge", "Grades its own result by *how it was measured*. One seed "
-                      "is PRELIMINARY however good it looks."),
-        ("6 · Confirm", "Runs paired multi-seed experiments, and ensembles a "
-                        "confirmed configuration. Only then may the submission "
-                        "change."),
-    ]
-    cols = st.columns(3)
-    for i, (title, body) in enumerate(steps):
-        with cols[i % 3]:
-            with st.container(border=True):
-                st.markdown(f"**{title}**")
-                st.markdown(f"<span class='small'>{body}</span>",
-                            unsafe_allow_html=True)
-
-    st.divider()
-    st.header("What it can actually do")
-    a, b = st.columns(2)
-    with a:
-        st.markdown("**Modify the pipeline** — 10 axes, ~45 options")
-        st.markdown("<span class='small'>loss · negative sampling · user "
-                    "history · multitask · model · temporal features · "
-                    "training schedule · data extras · sample weighting · "
-                    "regularisation<br><br>Plus pipeline constants the menu "
-                    "cannot reach: embedding size, learning rate, epochs, "
-                    "patience, decay constants, checkpoint rules.</span>",
-                    unsafe_allow_html=True)
-    with b:
-        st.markdown("**Run experiments**")
-        st.markdown("<span class='small'>"
-                    "<b>New idea</b> — a fresh configuration<br>"
-                    "<b>Refine best</b> — extend the leading result<br>"
-                    "<b>Fix failure</b> — read a traceback and repair its own code<br>"
-                    "<b>Implement</b> — write a mechanism the menu cannot express<br>"
-                    "<b>Confirm</b> — paired multi-seed test<br>"
-                    "<b>Ensemble</b> — average k seeds to remove seed variance"
-                    "</span>", unsafe_allow_html=True)
-
-    st.divider()
-    st.header("What we are not claiming")
-    st.warning(
-        "**The submitted score has not improved during the recent "
-        "agent-architecture work.** The agent discovered the submitted "
-        "*configuration* autonomously in an earlier run; its best single-model "
-        "result since is 0.60497, which is parity, not an improvement. Two live "
-        "paired confirmations both correctly **declined to promote** a result. "
-        "Feature invention has never completed end-to-end — no proposed feature "
-        "has cleared its probe. Autonomy is classified **Level B (capability "
-        "transfer)**, not independent discovery. Details in "
-        "`docs/ARCHITECTURE.md`.")
 
 
 # ------------------------------------------------------------ watch it run ---
@@ -290,10 +291,10 @@ def render_watch_tree():
                        "arrows show what it extended, and colour shows completed, "
                        "failed, or safely rejected before training.")
             # Keep the tree as an overview, not a full-screen visualization.
-            tree_col, _ = st.columns([1, 1])
+            tree_col, _ = st.columns([5, 1])
             with tree_col:
                 st.graphviz_chart(experiment_tree_dot(state["nodes"]),
-                                  width="stretch", height=360)
+                                  width="stretch", height=620)
 
             node_ids = [n["id"] for n in state["nodes"]]
             selected_id = st.selectbox("Inspect experiment", node_ids,

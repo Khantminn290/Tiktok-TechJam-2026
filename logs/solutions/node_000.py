@@ -8,7 +8,7 @@ import train_lib
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--menu-choices', required=True, help='JSON dict of menu choices')
+    parser.add_argument('--menu-choices', required=True)
     parser.add_argument('--output-dir', required=True)
     parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args()

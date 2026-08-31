@@ -1,17 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [NEUTRAL] iter 4 -- Confirm the stronger incumbent-style FM branch in a fresh single run: fm_numpy with BPR, recency-wei
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6038 vs the then-best 0.6032 (+0.00054 = +0.7 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
-### [HELPED] iter 0 -- A standalone GRU4Rec-style sequential model with BPR and a conservative longer/lower-LR schedule may
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6031 as the first scored node (no prior best to compare against).
-
-### [HELPED] iter 0 -- The remaining menu-side headroom is most plausibly in pipeline constants rather than a new mechanism
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001} scored 0.5980 as the first scored node (no prior best to compare against).
-
-### [DEAD_END] iter 1 -- A clean single-axis ablation of the current FM+recency bundle should show whether the apparent value
-menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001} scored 0.5873 vs the then-best 0.5980 (-0.01074 = -13.4 sigma) -- worse beyond seed noise, not worth repeating as-is.
-
 ### [NEUTRAL] iter 2 -- A single-run confirmation of the selected incumbent-like FM+BPR recipe should test whether our local
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_1e3", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "l2": 0.001, "n_checkpoints": 5, "checkpoint_combine": true} scored 0.5982 vs the then-best 0.5980 (+0.00011 = +0.1 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 
@@ -38,4 +26,16 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [DEAD_END] iter 9 -- Run the matched in-pipeline FM anchor that reverts the node-1 bundle back toward the official baseli
 menu_choices={"loss": "pointwise_logloss", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "default", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6015 vs the then-best 0.6050 (-0.00349 = -4.4 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [HELPED] iter 0 -- A standalone GRU4Rec-style sequential scorer, using the selected conservative BPR setup, may extract
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "gru4rec_seq", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6033 as the first scored node (no prior best to compare against).
+
+### [HELPED] iter 1 -- Re-run the globally strongest menu branch — FM with BPR, recency-weighted pooled history, hour+dow t
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6050 from 0.6033 (+0.00167 = +2.1 sigma).
+
+### [DEAD_END] iter 5 -- Single-axis confirmation by removal: test whether recency_weighted_pool is actually contributing in
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "none", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} scored 0.6042 vs the then-best 0.6054 (-0.00122 = -1.5 sigma) -- worse beyond seed noise, not worth repeating as-is.
+
+### [NEUTRAL] iter 6 -- Confirm the incumbent FM+BPR+recency branch while slightly de-biasing noisy single-run epoch selecti
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "n_checkpoints": 3, "checkpoint_combine": true} scored 0.6051 vs the then-best 0.6054 (-0.00032 = -0.4 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
 

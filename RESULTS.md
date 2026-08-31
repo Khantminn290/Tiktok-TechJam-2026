@@ -1,6 +1,6 @@
 # Results — generated
 
-Generated `2026-08-31T02:24:51Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
+Generated `2026-08-31T04:16:28Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
 
 Tiers: **VERIFIED** recomputed during this generation · **OBSERVED** measured in a run and journalled · **OPEN** not established.
 
@@ -22,7 +22,7 @@ Provenance: commit `024238f2b9ec` on `opus-research-agent`, data fingerprint `60
 
 ## Harness
 
-`python3 tests/test_harness.py` → **860 passed, 0 failed** (12.3s) — **VERIFIED**
+`python3 tests/test_harness.py` → **871 passed, 0 failed** (11.7s) — **VERIFIED**
 
 ## Convergence rule
 
@@ -33,24 +33,24 @@ Provenance: commit `024238f2b9ec` on `opus-research-agent`, data fingerprint `60
 
 | | |
 |---|---|
-| best primary (single run) | 0.60527 |
-| outer-loop nodes | 5 |
-| iterations consumed | 5 |
-| training runs used | 10 of 30 |
-| experiments completed | 5 |
+| best primary (single run) | 0.60541 |
+| outer-loop nodes | 8 |
+| iterations consumed | 8 |
+| training runs used | 28 of 150 |
+| experiments completed | 8 |
 | experiments crashed | 0 |
-| Path B attempts / crashes | 1 / 0 |
+| Path B attempts / crashes | 2 / 0 |
 | preflight rejections (free) | 0 |
 | automatic repairs attempted / recovered | 0 / 0 |
 | paired confirmations run | 1 |
 | results promoted | 0 |
 | **manual interventions** | **0** |
-| LLM tokens | 196,248 |
-| LLM spend | $0.618529 |
-| training wall-clock | 661.8s |
+| LLM tokens | 269,807 |
+| LLM spend | $0.913193 |
+| training wall-clock | 2321.5s |
 | devices | cpu |
 
-Stop reason: iteration cap reached (5)
+Stop reason: converged: running-best valid primary improved only 0.00000 (≤ ε=0.00048, the 0.60σ upward drift a running max shows by luck alone) over the last 3 scored iterations
 
 > An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.
 

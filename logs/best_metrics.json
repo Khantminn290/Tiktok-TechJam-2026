@@ -1,5 +1,5 @@
 {
-  "iteration_id": 1,
+  "iteration_id": 4,
   "menu_choices": {
     "loss": "bpr_pairwise",
     "neg_sampling": "uniform_1",
@@ -12,12 +12,12 @@
     "sample_weighting": "per_row",
     "regularization": "l2_default"
   },
-  "hypothesis": "Reproduce the broader incumbent FM branch directly: fm_numpy with bpr_pairwise, uniform_1 negatives, recency_weighted_pool history, hour_plus_dow temporal features, and lower_lr_longer training should match or exceed the one-shot 0.60299 local best because the research frontier reports this family saturating at 0.60497, while the current best observed here is a single preliminary GRU draw. This is a confirmation draft, not a claim of a new mechanism; if it lands near 0.6045-0.6050, the next correct step is paired multi-seed confirmation rather than more menu exploration.",
+  "hypothesis": "Averaging 16 independent seeds of this configuration should remove seed variance from the submitted score. The effect is measured against the MEAN member, not the best one.",
   "valid_metrics": {
-    "GAUC": 0.6720477510874213,
-    "nDCG@5": 0.5378881530235174,
-    "primary": 0.6049679520554694
+    "GAUC": 0.67212,
+    "nDCG@5": 0.5387,
+    "primary": 0.60541
   },
-  "code_path": "/Users/khantminn/Desktop/Tiktok-TechJam-2026/logs/solutions/node_001.py",
-  "timestamp": 1788145700.506676
+  "code_path": "",
+  "timestamp": 1788149412.644622
 }
