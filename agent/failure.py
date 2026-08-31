@@ -26,6 +26,7 @@ import re
 SYNTAX = "implementation_syntax"
 IMPORT = "dependency_import"
 API_MISUSE = "api_misuse"
+RUNTIME = "runtime_error"
 DATA_CONTRACT = "data_contract"
 NUMERICAL = "numerical_instability"
 DIVERGENCE = "training_divergence"
@@ -70,6 +71,7 @@ _PATTERNS = [
     (EVALUATION, r"evaluate\(|ndcg|gauc", ),
     (API_MISUSE, r"AttributeError|KeyError|TypeError|ValueError|IndexError|"
                  r"NameError|UnboundLocalError"),
+    (RUNTIME, r"RuntimeError|AssertionError"),
 ]
 
 _GUIDANCE = {
@@ -80,7 +82,10 @@ _GUIDANCE = {
              "the dependency."),
     API_MISUSE: ("The code called a train_lib/numpy API incorrectly (wrong key, "
                  "wrong argument, wrong shape). Re-read the API section for the "
-                 "exact signature; the hypothesis itself may still be sound."),
+                  "exact signature; the hypothesis itself may still be sound."),
+    RUNTIME: ("Generated code raised during execution. Use the captured "
+              "exception and traceback to repair the implementation without "
+              "changing the untested hypothesis."),
     DATA_CONTRACT: ("The script ran but violated the output contract "
                     "(metrics.json / scores_*.npy shape or presence). Fix the "
                     "output writing; the modelling idea is untouched."),
@@ -125,7 +130,7 @@ _GUIDANCE = {
 # MECHANISM_BLOCKED is deliberately NOT retry-worthwhile: the idea is
 # arithmetically incapable of moving the metric, so a repaired version of the
 # same idea is equally incapable. It needs a different mechanism, not a fix.
-_RETRY_WORTHWHILE = {SYNTAX, IMPORT, API_MISUSE, DATA_CONTRACT, NUMERICAL,
+_RETRY_WORTHWHILE = {SYNTAX, IMPORT, API_MISUSE, RUNTIME, DATA_CONTRACT, NUMERICAL,
                      DIVERGENCE, INVALID_PREDICTIONS, EVALUATION, LLM_RESPONSE,
                      LEAKAGE_BLOCKED, UNKNOWN}
 # Classes needing the experiment made materially cheaper/smaller, not just fixed.

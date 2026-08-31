@@ -35,10 +35,13 @@ COMPETITION_PROFILE = {
     "research_state": True,
     "feature_discovery": True,
     "n_candidates": 4,
-    "min_branching_iterations": 3,
+    # The organizer rule, not a demonstration quota, decides when a scored run
+    # stops. Branching remains available after the eligible artifact exists but
+    # may never defer official convergence.
+    "min_branching_iterations": 0,
     # resource caps
-    "max_iterations": 12,
-    "wall_clock_limit_h": 4.0,
+    "max_iterations": 50,
+    "wall_clock_limit_h": 6.0,
     "max_spend_usd": 6.0,
     "exec_timeout": 1800,
     "seed": 0,
@@ -120,6 +123,15 @@ def validate(args, resolved: dict) -> list:
             "--competition with --inject-error-at: that deliberately breaks an "
             "iteration to exercise the debug path, so it must not be part of a "
             "scored run.")
+    if active and getattr(args, "max_iterations", None) != 50:
+        problems.append(
+            "--competition requires --max-iterations 50: 50 is the organizer "
+            "cap. Use the default/research profile for a shorter diagnostic run.")
+    if active and getattr(args, "wall_clock_limit_h", None) != 6.0:
+        problems.append(
+            "--competition requires --wall-clock-limit-h 6.0: 6h is the "
+            "organizer ceiling. Use the default/research profile for a shorter "
+            "diagnostic run.")
 
     n_iter = getattr(args, "max_iterations", 0) or 0
     n_train = getattr(args, "max_training_runs", 0) or 0
@@ -153,6 +165,8 @@ def render(args, resolved: dict) -> str:
         v, src = resolved.get(k, (getattr(args, k, None), "default"))
         L.append(f"    {k:<28}{str(v):<10}[{src}]   {_WHY.get(k, '')}")
     L.append("  safety")
+    L.append(f"    {'convergence':<28}{'official':<10}[profile] "
+             f"epsilon=0.002, N=3; no research gate may defer it")
     L.append(f"    {'allow_locked_options':<28}"
              f"{str(getattr(args, 'allow_locked_options', False)):<10}"
              f"[cli]     locked/leakage-sensitive options stay OFF in this profile")

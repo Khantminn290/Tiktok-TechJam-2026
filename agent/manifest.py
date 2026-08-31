@@ -80,8 +80,14 @@ def _event(n, kind):
 def _incumbent() -> dict:
     """The submitted result, RECOMPUTED now -- never quoted."""
     rec = _load(os.path.join(LOGS, "ensemble_results.json")) or {}
+    agent_produced = bool(
+        rec.get("produced_by") == "autonomous competition run"
+        or (rec.get("provenance") or {}).get("agent_produced"))
     out = {
         "kind": "ensemble",
+        "source_node": rec.get("source_node"),
+        "official_eligible": rec.get("official_eligible"),
+        "official_convergence_node": rec.get("official_convergence_node"),
         "members": rec.get("k"),
         "aggregation": (rec.get("provenance") or {}).get("aggregation"),
         "reported": {k: rec.get(k) for k in ("primary", "GAUC", "nDCG@5")},
@@ -91,6 +97,10 @@ def _incumbent() -> dict:
         "config": rec.get("config"),
         "provenance": rec.get("provenance"),
         "reproduce": rec.get("reproduce"),
+        "artifacts": {
+            "record": "logs/ensemble_results.json",
+            "members_dir": rec.get("members_dir", "logs/final_ensemble"),
+        },
         "split": "validation",
         "verified": None,
         "how_produced": {
@@ -110,8 +120,11 @@ def _incumbent() -> dict:
                      ROOT, rec.get("members_dir", "logs/final_ensemble")))
                  else []) if d.startswith("seed_")),
             "seeds": rec.get("seeds_used"),
-            "originally_built_by": "human-invoked command "
-                                   "(`agent.final_ensemble --seeds 16`)",
+            "originally_built_by": (
+                "autonomous competition run (`AgentLoop` ensemble action)"
+                if agent_produced else
+                "human-invoked command (`agent.final_ensemble --seeds 16`)"),
+            "agent_produced": agent_produced,
             "agent_can_reproduce": True,
             "agent_reproduction_evidence":
                 "logs/opus_research/agent_reproduced_incumbent.jsonl -- a "
@@ -198,6 +211,7 @@ def _run_facts(journal: str) -> dict:
     return {
         "available": True,
         "journal": os.path.relpath(journal, ROOT),
+        "run_profile": summary.get("run_profile", "legacy/unknown"),
         "outer_iterations": m["nodes"],
         "iterations_charged": m["iterations_consumed"],
         "training_runs_spent": led.get("training_runs_used",
@@ -261,6 +275,32 @@ def _tests(run: bool) -> dict:
             "seconds": round(time.time() - t0, 1)}
 
 
+def _submission_artifacts() -> dict:
+    out = {}
+    for split in ("valid", "test"):
+        path = os.path.join(ROOT, f"submission_{split}.csv")
+        if not os.path.exists(path):
+            out[split] = {"available": False,
+                          "expected_path": os.path.relpath(path, ROOT)}
+            continue
+        import hashlib
+        h = hashlib.sha256()
+        rows = -1
+        with open(path, "rb") as fh:
+            for rows, line in enumerate(fh):
+                h.update(line)
+        out[split] = {
+            "available": True,
+            "path": os.path.relpath(path, ROOT),
+            "sha256": h.hexdigest(),
+            "data_rows": max(0, rows),
+            "generation_command": ("python3 -m agent.make_submission --split "
+                                   f"{split} --ensemble"
+                                   + (" --score" if split == "valid" else "")),
+        }
+    return out
+
+
 def _robustness() -> dict:
     """What the fault suite measured, plus the one live run that proves it.
 
@@ -271,6 +311,7 @@ def _robustness() -> dict:
     """
     fr = _load(os.path.join(RESULTS, "fault_report.json")) or {}
     live = _load(os.path.join(RESULTS, "live_fault_run", "report.json")) or {}
+    closed = _load(os.path.join(RESULTS, "recovery_eval.json")) or {}
     out = {
         "fault_suite": {
             "available": bool(fr),
@@ -296,6 +337,19 @@ def _robustness() -> dict:
             "manual_interventions": 0,
             "artifacts": "results/live_fault_run/",
             "command": live.get("reproduce"),
+        },
+        "closed_loop_recovery": {
+            "available": bool(closed),
+            "evaluation_mode": closed.get("evaluation_mode"),
+            "competition_evidence": closed.get("competition_evidence"),
+            "hidden_labels_available": closed.get("hidden_labels_available"),
+            "recovered": closed.get("recovered"),
+            "total": closed.get("total"),
+            "all_passed": closed.get("all_passed"),
+            "manual_interventions": closed.get("manual_interventions"),
+            "scenarios": closed.get("scenarios") or [],
+            "artifacts": "results/recovery_eval.json",
+            "command": "python3 -m agent.recovery_eval",
         },
     }
     if live.get("nodes"):
@@ -323,6 +377,7 @@ def _robustness() -> dict:
 def build(journal: str | None = None, run_tests: bool = False) -> dict:
     from agent import convergence_report as CR
     from agent import provenance as PR
+    from agent import results_report as RR
 
     journal = journal or os.path.join(LOGS, "journal.jsonl")
     nodes = _load_jsonl(journal)
@@ -336,7 +391,10 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
         "generator": "python3 -m agent.manifest",
         "repository": PR.git_state(),
         "dataset": {"name": "KuaiRand-Pure", "scope": "Pure only",
-                    "fingerprint": PR.data_fingerprint()},
+                    "fingerprint": PR.data_fingerprint(),
+                    "evaluator_sha256": PR.code_fingerprint(
+                        ["kuairand-starter-kit/evaluate.py"]).get(
+                            "kuairand-starter-kit/evaluate.py")},
 
         "baseline": {"validation": BASELINE_VALID, "hidden_test": BASELINE_TEST,
                      "source": "kuairand-starter-kit/baseline_scores.json"},
@@ -357,7 +415,16 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
 
         "tests": _tests(run_tests),
 
+        "submission_artifacts": _submission_artifacts(),
+
         "robustness": _robustness(),
+
+        "epoch_sensitivity": (
+            _load(os.path.join(RESULTS, "epoch_sensitivity.json"))
+            or {"available": False,
+                "command": "python3 -m agent.epoch_sensitivity"}),
+
+        "path_b": RR.path_b(),
 
         "hidden_test": {
             "evaluated": os.path.exists(lock),
@@ -375,11 +442,14 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
                 "submitted number is an ensemble of all seeds trained for one "
                 "configuration.",
             "agent_vs_human":
-                "The submitted configuration was discovered by an agent run, "
-                "and the agent has since reproduced the full pipeline "
-                "(discovery, confirmation, 16-member ensemble) unaided. The "
-                "originally submitted artifact was built by a human-invoked "
-                "command.",
+                ("The canonical artifact was produced by the autonomous "
+                 "competition run and stamped from its ensemble action."
+                 if (inc.get("how_produced") or {}).get("agent_produced") else
+                 "The submitted configuration was discovered by an agent run, "
+                 "and the agent has since reproduced the full pipeline "
+                 "(discovery, confirmation, 16-member ensemble) unaided. The "
+                 "current canonical artifact was built by a human-invoked "
+                 "command."),
             "fresh_vs_reuse":
                 "fresh_executions is compute actually spent. reused_artifacts "
                 "are previously completed ensemble members on disk: real "
@@ -400,8 +470,7 @@ def build(journal: str | None = None, run_tests: bool = False) -> dict:
             "valid_submission": ("python3 -m agent.make_submission --split "
                                  "valid --score --ensemble"),
             "dashboard": "streamlit run app.py",
-            "agent_run": ("python3 run_agent.py --competition --fresh "
-                          "--wall-clock-limit-h 2.0")},
+            "agent_run": "python3 run_agent.py --competition --fresh"},
     }
 
 

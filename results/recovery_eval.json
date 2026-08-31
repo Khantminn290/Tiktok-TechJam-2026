@@ -1,0 +1,120 @@
+{
+  "schema": "closed_loop_recovery/1",
+  "evaluation_mode": "real AgentLoop and executor; deterministic scripted LLM",
+  "competition_evidence": false,
+  "hidden_labels_available": false,
+  "scenarios": [
+    {
+      "name": "runtime_error",
+      "injected_failure_class": "runtime_error",
+      "first_status": "error",
+      "recovery_action": "debug",
+      "later_success": true,
+      "later_primary": 0.6014769439448429,
+      "training_runs_spent": 2,
+      "crashed_runs": 1,
+      "unique_observations": 1,
+      "manual_interventions": 0,
+      "recovered": true,
+      "elapsed_s": 20.89,
+      "nodes": [
+        {
+          "iteration_id": 0,
+          "parent_id": null,
+          "action": "draft",
+          "status": "error",
+          "primary": null,
+          "wall_clock_seconds": 0.026,
+          "error_head": "exit code 1",
+          "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+        },
+        {
+          "iteration_id": 1,
+          "parent_id": 0,
+          "action": "debug",
+          "status": "success",
+          "primary": 0.6014769439448429,
+          "wall_clock_seconds": 20.097,
+          "error_head": "",
+          "decide_reason": "last attempt (node 0) errored; debug chain length 0 < 2, feeding the error trace back to fix it"
+        }
+      ]
+    },
+    {
+      "name": "malformed_artifact",
+      "injected_failure_class": "invalid_predictions",
+      "first_status": "error",
+      "recovery_action": "debug",
+      "later_success": true,
+      "later_primary": 0.6014769439448429,
+      "training_runs_spent": 2,
+      "crashed_runs": 1,
+      "unique_observations": 1,
+      "manual_interventions": 0,
+      "recovered": true,
+      "elapsed_s": 19.51,
+      "nodes": [
+        {
+          "iteration_id": 0,
+          "parent_id": null,
+          "action": "draft",
+          "status": "error",
+          "primary": null,
+          "wall_clock_seconds": 0.121,
+          "error_head": "script exited 0 but violated the output contract:",
+          "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+        },
+        {
+          "iteration_id": 1,
+          "parent_id": 0,
+          "action": "debug",
+          "status": "success",
+          "primary": 0.6014769439448429,
+          "wall_clock_seconds": 18.95,
+          "error_head": "",
+          "decide_reason": "last attempt (node 0) errored; debug chain length 0 < 2, feeding the error trace back to fix it"
+        }
+      ]
+    },
+    {
+      "name": "timeout_reroute",
+      "injected_failure_class": "timeout",
+      "first_status": "error",
+      "recovery_action": "draft",
+      "later_success": true,
+      "later_primary": 0.6014769439448429,
+      "training_runs_spent": 2,
+      "crashed_runs": 1,
+      "unique_observations": 1,
+      "manual_interventions": 0,
+      "recovered": true,
+      "elapsed_s": 20.58,
+      "nodes": [
+        {
+          "iteration_id": 0,
+          "parent_id": null,
+          "action": "draft",
+          "status": "error",
+          "primary": null,
+          "wall_clock_seconds": 1.005,
+          "error_head": "TIMEOUT: training run exceeded 1s and was killed.",
+          "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+        },
+        {
+          "iteration_id": 1,
+          "parent_id": null,
+          "action": "draft",
+          "status": "success",
+          "primary": 0.6014769439448429,
+          "wall_clock_seconds": 19.047,
+          "error_head": "",
+          "decide_reason": "pivoting away from node 0: timeout requires a materially cheaper experiment, not an unchanged debug retry"
+        }
+      ]
+    }
+  ],
+  "recovered": 3,
+  "total": 3,
+  "manual_interventions": 0,
+  "all_passed": true
+}

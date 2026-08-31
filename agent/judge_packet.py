@@ -67,6 +67,34 @@ def _problem(d) -> list:
     ]
 
 
+def _judge_route(d) -> list:
+    s = d.get("submitted") or {}
+    r = d.get("latest_run") or {}
+    cl = ((d.get("robustness") or {}).get("closed_loop_recovery") or {})
+    return [
+        "## Three-minute judge route", "",
+        "1. **0:00 - Result and boundary.** Verify the validation artifact "
+        f"({_f((s.get('reported') or {}).get('primary'))}, "
+        f"{s.get('members')} fixed seeds) and confirm the hidden-test lock is "
+        f"{'spent' if d.get('hidden_test', {}).get('evaluated') else 'unspent'}.",
+        "2. **0:30 - Autonomous loop.** Open the dashboard's **Watch it run** "
+        "tab: START RUN is the root; each child preserves its hypothesis, "
+        "complete executable, official metrics, evidence state, and next action.",
+        "3. **1:15 - Official eligibility.** Read section 10. The competition "
+        "profile uses the organizer rule during execution and freezes the best "
+        "artifact available when it first fires.",
+        "4. **1:45 - Robustness.** Read section 9. Component routing, real "
+        "subprocess termination, and full-loop recovery are reported separately; "
+        f"the deterministic full-loop suite currently recovers "
+        f"{cl.get('recovered', 'not recorded')}/{cl.get('total', 'not recorded')} "
+        "scenarios to a later scored action.",
+        "5. **2:20 - Cost and reproduction.** Section 8 reports provider tokens, "
+        f"training runs, wall-clock, and {r.get('manual_interventions', 'unknown')} "
+        "manual interventions. Run the first two commands in section 12 for an "
+        "independent artifact and harness check.", "",
+    ]
+
+
 def _loop(d) -> list:
     return [
         "## 2. The research loop", "",
@@ -218,9 +246,8 @@ def _results(d) -> list:
         "### Who did what", "",
         f"This is the part most easily overstated, so it is stated plainly.", "",
         f"- The **configuration** was discovered by an agent run.",
-        f"- The **submitted artifact** was originally produced by a "
-        f"{hp.get('originally_built_by', 'n/a')} — a human typed that command, "
-        f"after the agent had stopped.",
+        f"- The **submitted artifact** was originally produced by "
+        f"{hp.get('originally_built_by', 'n/a')}.",
         f"- The agent has **since reproduced the whole pipeline unaided**: "
         f"from a cold `--fresh` start it found the same configuration, ran its "
         f"own paired confirmation, queued its own 16-member ensemble, and "
@@ -274,6 +301,7 @@ def _robustness(d) -> list:
     rb = d.get("robustness") or {}
     fs = rb.get("fault_suite") or {}
     lv = rb.get("live_injected_failure_run") or {}
+    cl = rb.get("closed_loop_recovery") or {}
     L = ["## 9. Robustness", ""]
     if not fs.get("available"):
         L += ["No fault report on disk. Run `python3 -m agent.faults --live`.",
@@ -327,9 +355,30 @@ def _robustness(d) -> list:
             f"costs compute and earns no evidence, and the books say both",
             f"- stopped on `{lv.get('stop_reason')}`, not on a crash",
             f"- manual interventions: **{lv.get('manual_interventions')}**", "",
-            f"Artifacts: `{lv.get('artifacts')}`  \nReproduce: "
+            f"Artifacts: `{lv.get('artifacts')}`<br>Reproduce: "
             f"`{lv.get('command')}`", "",
         ]
+        L += ["**Status: incomplete recovery.** The run selected a safe next "
+              "action, but network failures prevented a later scored success.", ""]
+    if cl.get("available"):
+        L += [
+            "### Full-loop recovery evaluation", "",
+            "This level drives the real `AgentLoop.iterate`, search policy, "
+            "preflight, sandbox and subprocess executor. A deterministic "
+            "scripted model removes network and sampling as confounders; the "
+            "evaluation is isolated, non-scored, and has no hidden labels.", "",
+            f"- recovered to a later scored action: **{cl.get('recovered')}/"
+            f"{cl.get('total')}**",
+            f"- manual interventions: **{cl.get('manual_interventions')}**",
+        ]
+        for x in cl.get("scenarios") or []:
+            L += [f"- `{x.get('name')}`: {x.get('first_status')} -> "
+                  f"`{x.get('recovery_action')}` -> "
+                  f"{'success' if x.get('later_success') else 'no later success'}; "
+                  f"{x.get('training_runs_spent')} runs spent, "
+                  f"{x.get('unique_observations')} observation credited"]
+        L += ["", f"Artifacts: `{cl.get('artifacts')}`<br>Reproduce: "
+              f"`{cl.get('command')}`", ""]
     t = d.get("tests") or {}
     if t.get("executed"):
         L += [f"Test harness: **{t.get('passed')} passed, {t.get('failed')} "
@@ -418,9 +467,9 @@ def _limitations(d) -> list:
         f"3. **The agent matched the incumbent; it has not beaten it.** From a "
         f"cold start it reproduced {_f((s.get('reported') or {}).get('primary'))} "
         f"unaided. No result in this repository exceeds it.",
-        f"4. **The submitted artifact was originally human-invoked.** The "
-        f"reproduction is real and journalled, but the file that will be "
-        f"submitted was built by a person typing a command.",
+        (f"4. **Artifact attribution.** The canonical artifact was produced by "
+         f"{(s.get('how_produced') or {}).get('originally_built_by', 'unknown')}. "
+         f"This attribution is read from provenance, not inferred from its score."),
         f"5. **One configuration family.** The ensemble is 16 seeds of a "
         f"single configuration, not a diverse ensemble. Diversity across "
         f"configurations is untested and is the most obvious place left to "
@@ -451,6 +500,9 @@ def _reproduce(d) -> list:
              ("run the full test harness", rp.get("tests")),
              ("run the fault-injection suite, including live faults",
               rb.get("command")),
+             ("run isolated full-loop recovery scenarios",
+              ((d.get("robustness") or {}).get("closed_loop_recovery") or {}).get(
+                  "command")),
              ("reproduce the live injected-failure run", lv.get("command")),
              ("rebuild the 16-member ensemble from scratch",
               rp.get("rebuild_ensemble")),
@@ -485,7 +537,7 @@ def _header(d) -> list:
 
 
 def build(d: dict) -> str:
-    parts = (_header(d) + _problem(d) + _loop(d) + _action_space(d)
+    parts = (_header(d) + _judge_route(d) + _problem(d) + _loop(d) + _action_space(d)
              + _choosing(d) + _confirmation(d) + _ensembling(d) + _results(d)
              + _work_done(d) + _robustness(d) + _convergence(d)
              + _limitations(d) + _reproduce(d))

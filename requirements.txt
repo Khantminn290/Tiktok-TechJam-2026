@@ -1,0 +1,6 @@
+# Verified with Python 3.12.10 on the committed harness and dashboard.
+numpy==1.26.3
+openai==3.5.0
+anthropic==1.2.0
+streamlit==1.62.0
+torch==2.3.0

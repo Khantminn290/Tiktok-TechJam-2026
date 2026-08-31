@@ -113,6 +113,16 @@ def test_policy():
 
     with tempfile.TemporaryDirectory() as td:
         t = ExperimentTree(td)
+        timeout = _node(0, "error")
+        timeout.error_trace = "TIMEOUT: training run exceeded 1s and was killed."
+        t.add(timeout)
+        act, target, reason = decide_action(t, draft_count=1)
+        check("a timeout pivots instead of entering the debug chain",
+              act == "draft" and target is None and "materially cheaper" in reason,
+              reason)
+
+    with tempfile.TemporaryDirectory() as td:
+        t = ExperimentTree(td)
         t.add(_node(0, "success", 0.60))
         t.add(_node(1, "success", 0.61, choices={"loss": "bpr_pairwise"}))
         t.add(_node(2, "success", 0.605))
@@ -663,7 +673,29 @@ def test_final_eval_lock():
     """Item 3: the one-time hidden-test evaluation is enforced, not just documented."""
     print("\n[final_evaluation.lock: one-time-eval guard]")
     from agent.make_submission import (_sha256_file, check_final_eval_guard,
+                                       finalization_issues,
                                        write_final_eval_lock)
+
+    ready = {
+        "convergence": {
+            "official": {"converged": True},
+            "eligible_checkpoint": {"determined": True, "eligible_node": 3}},
+        "submitted": {"source_node": 3, "verified": True,
+                      "kind": "ensemble", "members": 16,
+                      "official_eligible": True},
+        "latest_run": {"run_profile": "competition", "manual_interventions": 0,
+                       "llm_tokens_total": 1000},
+        "hidden_test": {"evaluated": False, "lock_present": False},
+        "submission_artifacts": {"valid": {"available": True,
+                                              "sha256": "abc"}},
+    }
+    check("a fully eligible frozen manifest passes finalization",
+          finalization_issues(ready) == [])
+    stale = json.loads(json.dumps(ready))
+    stale["submitted"]["source_node"] = 4
+    check("a post-convergence ensemble is refused before hidden evaluation",
+          any("official eligible node" in x
+              for x in finalization_issues(stale)))
 
     with tempfile.TemporaryDirectory() as td:
         lock_path = os.path.join(td, "results", "final_evaluation.lock")
@@ -2159,7 +2191,9 @@ def test_candidate_policy():
     check("if every candidate is gated, selection returns None (falls back)",
           w2 is None)
 
-    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    import inspect
+    from agent.loop import AgentLoop
+    lsrc = inspect.getsource(AgentLoop._plan_candidates)
     check("planning uses ONE call for N candidates (token-efficient)",
           "build_candidate_prompt" in lsrc and lsrc.count("json_call(p)") >= 1)
     check("the full candidate set is journalled for offline replay",
@@ -2232,7 +2266,8 @@ def test_inquiry_layer():
     check("the inquiry section leaks no teacher answer",
           not any(w in C.lower() for w in ("checkpoint", "snapshot", "0.87")))
 
-    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    import inspect
+    lsrc = inspect.getsource(AgentLoop._plan_candidates)
     check("the inquiry is journalled so the trajectory is auditable",
           '"type": "inquiry"' in lsrc)
 
@@ -2600,7 +2635,8 @@ def test_mechanism_audit():
     check("a syntax error is reported, not raised",
           MA.audit("def (:", "x")["verdict"] == "does not parse")
 
-    lsrc = open(os.path.join(_ROOT, "agent", "loop.py")).read()
+    import inspect
+    lsrc = inspect.getsource(AgentLoop.iterate)
     check("the audit runs BEFORE the training run, not after",
           "mechanism_audit" in lsrc.split("run_solution(code")[0])
     check("a blocked mechanism is journalled as an error, not silently skipped",
@@ -3793,7 +3829,8 @@ def test_results_manifest_is_the_single_source():
     d = MF.build(run_tests=False)
     for key in ("schema", "repository", "dataset", "baseline", "submitted",
                 "convergence", "latest_run", "tests", "hidden_test",
-                "distinctions", "reproduce"):
+                "distinctions", "reproduce", "submission_artifacts",
+                "robustness", "epoch_sensitivity", "path_b"):
         check(f"manifest carries `{key}`", key in d)
 
     sub = d["submitted"]
@@ -3844,6 +3881,51 @@ def test_results_manifest_is_the_single_source():
           "from agent import manifest as MF" in app
           and "INCUMBENT = 0.60541" not in app,
           "a typed-in score is exactly what goes stale")
+    rb = d["robustness"]
+    check("robustness keeps component, subprocess and full-loop levels separate",
+          all(k in rb for k in ("fault_suite", "live_injected_failure_run",
+                                "closed_loop_recovery")))
+
+
+def test_epoch_sensitivity_is_diagnostic_only():
+    print("\n[epoch sensitivity]")
+    from agent import epoch_sensitivity as ES
+
+    curves = {
+        "0": [[8, 0.6034], [9, 0.6043], [10, 0.6041]],
+        "1": [[8, 0.6039], [9, 0.6030], [10, 0.6040]],
+    }
+    out = ES.analyse(curves)
+    check("epoch peaks are measured per seed", out["peak_epoch_range"] == [9, 10])
+    check("validation captures cannot promote a new stopping rule",
+          out["decision"] == "do_not_promote_rolling_origin"
+          and out["split"] == "validation only")
+    check("the reason requires future selection inside train dates",
+          "train dates" in out["reason"] and "official validation" in out["reason"])
+
+
+def test_closed_loop_recovery_evidence():
+    print("\n[closed-loop recovery evidence]")
+    p = os.path.join(_ROOT, "results", "recovery_eval.json")
+    check("the isolated recovery report exists", os.path.exists(p))
+    if not os.path.exists(p):
+        return
+    d = json.load(open(p))
+    check("all three pre-registered scenarios reach a later success",
+          d["all_passed"] and d["recovered"] == d["total"] == 3)
+    check("the full loop uses no hidden labels or manual interventions",
+          d["hidden_labels_available"] is False
+          and d["manual_interventions"] == 0)
+    by = {x["name"]: x for x in d["scenarios"]}
+    check("runtime and malformed artifacts route to debug",
+          by["runtime_error"]["recovery_action"] == "debug"
+          and by["malformed_artifact"]["recovery_action"] == "debug")
+    check("timeout reroutes to a fresh materially cheaper draft",
+          by["timeout_reroute"]["injected_failure_class"] == "timeout"
+          and by["timeout_reroute"]["recovery_action"] == "draft")
+    check("each crash spends compute but earns no evidence",
+          all(x["training_runs_spent"] == 2
+              and x["unique_observations"] == 1 for x in by.values()))
 
 
 def test_organizer_convergence_is_not_our_own_rule():
@@ -4011,13 +4093,15 @@ def test_competition_profile():
     r = profiles.resolve(a, argv=["--competition"])
     check("competition enables research state, data tools and feature discovery",
           a.data_tools and a.research_state and a.feature_discovery)
-    check("...and multi-candidate planning with branching",
-          a.n_candidates >= 2 and a.min_branching_iterations >= 1)
+    check("...and multi-candidate planning without a convergence gate",
+          a.n_candidates >= 2 and a.min_branching_iterations == 0,
+          "the official rule must not be deferred to manufacture branching")
     check("...and sets a training-run cap, not just an iteration cap",
           a.max_training_runs and a.max_training_runs > a.max_iterations,
           "a paired confirmation is six training runs for one iteration")
     check("...with conservative wall-clock and spend caps",
-          0 < a.wall_clock_limit_h <= 6 and 0 < a.max_spend_usd <= 10)
+          a.max_iterations == 50 and a.wall_clock_limit_h == 6.0
+          and 0 < a.max_spend_usd <= 10)
 
     # Explicit CLI must win over the profile.
     a = _profile_args(competition=True, max_iterations=4, n_candidates=2)
@@ -4027,6 +4111,8 @@ def test_competition_profile():
           a.max_iterations == 4 and r["max_iterations"][1] == "cli")
     check("...while unspecified values still come from the profile",
           r["max_spend_usd"][1] == "profile")
+    check("an explicit non-official iteration cap is refused for scoring",
+          any("organizer cap" in p for p in profiles.validate(a, r)))
 
     # Unsafe or contradictory combinations are refused BEFORE any spend.
     check("competition + allow-locked-options is refused",
@@ -4041,14 +4127,15 @@ def test_competition_profile():
     check("a training-run cap below the iteration cap is refused",
           bool(profiles.validate(
               _profile_args(max_iterations=10, max_training_runs=3), r)))
+    clean = _profile_args(competition=True, max_training_runs=90)
+    clean_r = profiles.resolve(clean, argv=["--competition"])
     check("a clean competition config raises no objection",
-          profiles.validate(_profile_args(competition=True,
-                                          max_training_runs=90), r) == [])
+          profiles.validate(clean, clean_r) == [])
 
-    txt = profiles.render(_profile_args(competition=True), r)
+    txt = profiles.render(clean, clean_r)
     check("the resolved configuration is printed in full, with sources",
           "RESOLVED CONFIGURATION" in txt and "[profile]" in txt
-          and "max_training_runs" in txt)
+          and "max_training_runs" in txt and "epsilon=0.002" in txt)
 
 
 def test_training_run_budget():
@@ -4093,6 +4180,15 @@ def test_training_run_budget():
                              control={"a": 1}, treatment={"a": 2},
                              seeds=(0, 1, 2))
     check("a paired 3-seed spec declares six runs", spec.n_runs == 6)
+
+    ensemble = XS.ExperimentSpec(
+        hypothesis="average fixed seeds",
+        experiment_type=XS.ENSEMBLE_CONSTRUCTION,
+        control={"model": "fm"}, treatment={"model": "fm"},
+        seeds=tuple(range(16)))
+    check("a 16-member ensemble declares 16 runs, not a fake paired 32",
+          ensemble.n_runs == 16 and not ensemble.is_paired,
+          "the same configuration is trained once per seed and then aggregated")
     check("affordability is checked against the spec's own cost",
           B.Ledger(max_training_runs=5).can_afford(spec.n_runs) is False
           and B.Ledger(max_training_runs=6).can_afford(spec.n_runs) is True)
@@ -5195,6 +5291,10 @@ def test_provenance():
     check("a dirty tree is reported, not hidden",
           (p.get("git") or {}).get("dirty") is not None,
           "a SHA from a dirty tree does not identify the code that ran")
+    check("run evidence is distinguished from dirty executable source",
+          PR.is_generated_path("logs/journal.jsonl")
+          and PR.is_generated_path("results/manifest.json")
+          and not PR.is_generated_path("agent/loop.py"))
     check("the dataset scope is recorded as KuaiRand-Pure only",
           "KuaiRand-Pure" in p.get("dataset_scope", ""))
 
@@ -5518,6 +5618,145 @@ def test_official_checkpoint_eligibility():
           f"eligible {eg.get('eligible_primary')} at node "
           f"{eg.get('eligible_node')}, stop node {eg.get('converged_at_node')}")
 
+    # Runtime, not just reporting: official mode uses the organizer epsilon and
+    # cannot be held open by the research-only pending-ensemble gate.
+    import types
+    from agent import budget as B
+    from agent.loop import AgentLoop
+    lp = AgentLoop.__new__(AgentLoop)
+    lp.competition_mode = True
+    lp.active_epsilon = CR.ORGANIZER_EPSILON
+    lp.active_n_converge = CR.ORGANIZER_N
+    lp._ensemble_done = False
+    lp._ensemble_k = 16
+    lp.ledger = B.Ledger(max_training_runs=40)
+    lp.tree = types.SimpleNamespace(nodes=[
+        types.SimpleNamespace(status="success", metrics={"primary": p})
+        for p in (0.60330, 0.60497, 0.60327, 0.60497)])
+    conv, why = lp.converged()
+    check("competition runtime stops on the organizer rule",
+          conv and "organizer rule" in why, why)
+    check("...even while an affordable ensemble is pending",
+          conv, "research gates may not extend official eligibility")
+
+    # Scheduling, not a hand-written ideal sequence: candidate confirmation is
+    # against the organizer baseline, then a CONFIRMED result queues the fixed
+    # ensemble immediately for the next node.
+    sched = _bare_loop(k=16, max_training_runs=40)
+    sched.competition_mode = True
+    sched.menu = Menu(MENU_PATH)
+    sched._confirm_seeds = (0, 1, 2)
+    sched._confirmed_nodes = set()
+    incumbent = json.load(open(os.path.join(
+        _ROOT, "logs", "ensemble_results.json")))["config"]
+    base = n(0, 0.60148, "baseline")
+    base["menu_choices"] = sched.menu.default_choices()
+    candidate = n(1, 0.60497)
+    candidate["menu_choices"] = incumbent
+    events = []
+    sched._maybe_queue_confirmation(
+        [base, candidate], {"category": "confirmation"}, events, 48)
+    spec = sched._confirmation_queue[0]
+    check("competition confirms the candidate against the organizer baseline",
+          spec.control == sched.menu.default_choices()
+          and spec.treatment == incumbent and spec.parent_node == 1)
+    sched._confirmation_queue.clear()
+    sched._confirmed_nodes.add(1)
+    confirm = n(2, 0.60446, "confirm")
+    confirm["menu_choices"] = incumbent
+    confirm["events"] = [{"type": "paired_result",
+                          "evidence": {"state": "CONFIRMED"}}]
+    sched._maybe_queue_ensemble([base, candidate, confirm], events, 47)
+    check("a confirmed candidate queues the fixed ensemble for the next node",
+          len(sched._confirmation_queue) == 1
+          and sched._confirmation_queue[0].treatment == incumbent
+          and sched._confirmation_queue[0].n_runs == 16)
+
+    # The mandatory node 0 is an executed validation-only observation, not a
+    # synthetic hard-coded score. Stub only the expensive subprocess here; the
+    # real executor's label redaction is covered by the data-boundary tests.
+    from agent import loop as LOOP
+    with tempfile.TemporaryDirectory() as td:
+        for name in ("runtime", "logs", "logs/solutions", "logs/runs",
+                     "logs/diffs"):
+            os.makedirs(os.path.join(td, name), exist_ok=True)
+        __import__("shutil").copyfile(
+            os.path.join(_ROOT, "runtime", "seed_solution.py"),
+            os.path.join(td, "runtime", "seed_solution.py"))
+        bl = AgentLoop.__new__(AgentLoop)
+        bl.root = td
+        bl.log_dir = os.path.join(td, "logs")
+        bl.solutions_dir = os.path.join(td, "logs", "solutions")
+        bl.runs_dir = os.path.join(td, "logs", "runs")
+        bl.diffs_dir = os.path.join(td, "logs", "diffs")
+        bl.tree = ExperimentTree(bl.log_dir)
+        bl.menu = Menu(MENU_PATH)
+        bl.ledger = B.Ledger(max_iterations=50, max_training_runs=90)
+        bl.competition_mode = True
+        bl.exec_timeout_s = 60
+        bl.seed = 0
+        fake = types.SimpleNamespace(
+            ok=True, metrics={"GAUC": 0.66723, "nDCG@5": 0.53572,
+                              "primary": 0.60148},
+            error_trace=None, wall_clock_seconds=18.0)
+        real_run = LOOP.run_solution
+        LOOP.run_solution = lambda *a, **k: fake
+        try:
+            bl._ensure_competition_baseline()
+        finally:
+            LOOP.run_solution = real_run
+        bn = bl.tree.nodes[0]
+        be = next(e for e in bn.events if e["type"] == "official_baseline")
+        check("node 0 is an executed organizer baseline",
+              bn.action == "baseline" and bn.status == "success"
+              and bl.ledger.training_runs == 1)
+        check("...and records that hidden labels were unavailable",
+              be["hidden_test_labels_available_to_subprocess"] is False
+              and "validation only" in be["provenance"]["evaluation"])
+
+    # Publishing is atomic and preserves the previous canonical evidence.
+    from agent import experiment_spec as XS
+    with tempfile.TemporaryDirectory() as td:
+        logs = os.path.join(td, "logs")
+        work = os.path.join(logs, "ensemble_exp", "node_003")
+        os.makedirs(os.path.join(logs, "final_ensemble", "seed_old"))
+        os.makedirs(work)
+        old_record = os.path.join(logs, "ensemble_results.json")
+        with open(old_record, "w") as fh:
+            json.dump({"source_node": 99}, fh)
+        members = {}
+        for seed, primary in ((0, 0.6045), (1, 0.6047)):
+            d = os.path.join(work, f"seed_{seed:02d}")
+            os.makedirs(d)
+            with open(os.path.join(d, "metrics.json"), "w") as fh:
+                json.dump({"GAUC": 0.67, "nDCG@5": 0.539,
+                           "primary": primary}, fh)
+            members[seed] = {"dir": d, "metrics": {"primary": primary}}
+        pub_loop = AgentLoop.__new__(AgentLoop)
+        pub_loop.root = td
+        pub_loop.log_dir = logs
+        pub_loop.competition_mode = True
+        pub_spec = XS.ExperimentSpec(
+            hypothesis="fixed ensemble", experiment_type=XS.ENSEMBLE_CONSTRUCTION,
+            control=incumbent, treatment=incumbent, seeds=(0, 1))
+        pub_out = {
+            "promote": True, "members": members,
+            "result": {"ensemble": {"GAUC": 0.672, "nDCG@5": 0.539,
+                                      "primary": 0.6055},
+                       "mean_member": 0.6046, "sd_member": 0.0001,
+                       "best_member": 0.6047,
+                       "gain_over_mean_member": 0.0009}}
+        published = pub_loop._publish_competition_ensemble(
+            3, pub_spec, pub_out, work)
+        rec = json.load(open(old_record))
+        history = os.listdir(os.path.join(logs, "submission_history"))
+        check("eligible agent ensemble becomes the canonical artifact",
+              published["published"] and rec["source_node"] == 3
+              and rec["provenance"]["agent_produced"] is True)
+        check("...while the previous canonical artifact is archived",
+              any(x.endswith("_final_ensemble") for x in history)
+              and any(x.endswith("_ensemble_results.json") for x in history))
+
     # A crash cannot advance or trigger the window: the rule is over SCORED
     # iterations, so an errored node must not be able to end the run.
     crashy = [n(0, 0.6016), n(1, None, status="error"),
@@ -5634,6 +5873,7 @@ def test_judge_packet_is_generated():
 
     # Everything the brief requires the packet to explain.
     required = {
+        "the three-minute route": "Three-minute judge route",
         "the problem": "KuaiRand-Pure",
         "the research loop": "research loop",
         "the unified action space": "unified action space",
@@ -5685,7 +5925,7 @@ def test_judge_packet_is_generated():
     # Limitations must be real limitations, not a modesty paragraph.
     lim = text.split("## 11. Limitations")[1].split("## 12.")[0]
     for needed in ("hidden test has not been evaluated",
-                   "has not beaten it", "originally human-invoked",
+                   "has not beaten it", "Artifact attribution",
                    "One configuration family", "close to the noise floor",
                    "Level B, not Level A"):
         check(f"  limitation stated: {needed[:40]}", needed in lim)
@@ -5713,6 +5953,13 @@ def test_judge_packet_is_generated():
         check("...and matches what the current manifest generates",
               norm(disk) == norm(text),
               "run `python3 -m agent.judge_packet` to refresh it")
+
+    from agent import devpost as DP
+    dev = DP.build(d)
+    check("the Devpost narrative is generated from the same score",
+          f"{s['reported']['primary']:.5f}" in dev)
+    check("...and carries dynamic artifact attribution",
+          s["how_produced"]["originally_built_by"] in dev)
 
 
 def test_submission_artifacts_survive_fresh():
@@ -5808,6 +6055,8 @@ if __name__ == "__main__":
               test_live_view_state, test_experiment_tree_visualisation,
               test_execution_events_separate_compute_from_evidence,
               test_results_manifest_is_the_single_source,
+              test_epoch_sensitivity_is_diagnostic_only,
+              test_closed_loop_recovery_evidence,
               test_organizer_convergence_is_not_our_own_rule,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,

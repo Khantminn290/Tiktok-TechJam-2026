@@ -569,6 +569,7 @@ with tabs[3]:
     _rb = _M.get("robustness") or {}
     _fs = _rb.get("fault_suite") or {}
     _lv = _rb.get("live_injected_failure_run") or {}
+    _cl = _rb.get("closed_loop_recovery") or {}
 
     if not _fs.get("available"):
         st.info("No fault report yet. Generate one with "
@@ -653,6 +654,32 @@ with tabs[3]:
                 + (w.get("unplanned_fault_note") or ""))
         st.caption(f"Artifacts: `{_lv.get('artifacts')}` · reproduce with "
                    f"`{_lv.get('command')}`")
+        st.warning("**Incomplete recovery:** the agent chose a debug action, but "
+                   "network failures prevented a later scored result in this "
+                   "historical run.")
+
+    if _cl.get("available"):
+        st.divider()
+        st.markdown("#### Full-loop recovery to a later success")
+        st.caption("Real AgentLoop, policy, preflight, sandbox and executor. A "
+                   "deterministic scripted model removes network and sampling "
+                   "as confounders; this is isolated non-competition evidence.")
+        c = st.columns(3)
+        c[0].metric("Recovered", f"{_cl.get('recovered')} / {_cl.get('total')}")
+        c[1].metric("Manual interventions", _cl.get("manual_interventions"))
+        c[2].metric("Hidden labels available",
+                    "yes" if _cl.get("hidden_labels_available") else "no")
+        st.dataframe([
+            {"scenario": x.get("name"),
+             "failure": x.get("injected_failure_class"),
+             "next action": x.get("recovery_action"),
+             "later success": x.get("later_success"),
+             "compute spent": x.get("training_runs_spent"),
+             "observations": x.get("unique_observations")}
+            for x in _cl.get("scenarios") or []],
+            width="stretch", hide_index=True)
+        st.caption(f"Artifacts: `{_cl.get('artifacts')}` · reproduce with "
+                   f"`{_cl.get('command')}`")
 
 
 # --------------------------------------------------------------------- run ---

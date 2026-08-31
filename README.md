@@ -35,11 +35,14 @@ train + validation only.
 ## Setup
 
 ```bash
-git clone <this repo> && cd Tiktok-TechJam-2026
+git clone https://github.com/Khantminn290/Tiktok-TechJam-2026.git
+cd Tiktok-TechJam-2026
 
 # 1. dependencies
-python3 -m pip install numpy torch openai        # add `anthropic` only if PROVIDER=anthropic
-python3 -m pip install streamlit                 # optional: the dashboard (streamlit run app.py)
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 
 # 2. dataset (~45 MB download, ~194 MB extracted; not committed)
 cd kuairand-starter-kit
@@ -116,6 +119,16 @@ A full live agent run with a deliberate failure in it is recorded under
 python3 run_agent.py --fresh --max-iterations 4 --inject-error-at 1 --max-training-runs 4
 ```
 
+That historical run is intentionally labelled **incomplete**: it selected the
+right debug action, then two network failures prevented a later scored result.
+The deterministic full-loop evaluation removes that network confounder while
+still driving the real policy, preflight, sandbox, and executor:
+
+```bash
+python3 -m agent.recovery_eval       # three faults, each must reach later success
+python3 -m agent.epoch_sensitivity   # diagnostic only; never promotes a model
+```
+
 ### 2. Budget-capped smoke test (cheap, ~3 iterations)
 
 ```bash
@@ -132,7 +145,7 @@ layer. It is a plumbing check, not a scored run.
 > authenticates before anything is spent — `--no-verify-key` skips it if you're
 > offline.
 
-### 3. A real run (only after the smoke test passes)
+### 3. A real research run (only after the smoke test passes)
 
 ```bash
 python3 run_agent.py --fresh --max-spend-usd 15
@@ -156,9 +169,10 @@ benchmark's noise floor; see `agent/validity.py::convergence_epsilon`). At
 2.5σ the loop stops on differences larger than anything the benchmark still has
 to offer, so a search that wants to keep looking needs a tighter bar.
 
-Stricter is the safe direction: a tighter ε can only make the loop run *longer*
-than the organizer rule would, never stop it earlier, so no scored checkpoint is
-missed. Both are reported, and never conflated:
+The stricter controller is useful for research but **does not extend submission
+eligibility**. Anything discovered after the organizer rule fires is later
+research evidence, not a checkpoint the competition can score. Both rules are
+reported, and never conflated:
 
 ```bash
 python3 -m agent.convergence_report
@@ -173,6 +187,18 @@ confirmation is one node and six training executions, which is why there is a
 separate `--max-training-runs` cap. For a run that demonstrates the full
 system, use `--competition` (prints its fully resolved configuration before
 spending anything).
+
+The official competition command is deliberately separate:
+
+```bash
+python3 run_agent.py --competition --fresh
+```
+
+It runs an actual validation-only FM baseline as node 0, reproduces the verified
+incumbent as agent-authored code, performs paired confirmation, and schedules the
+fixed 16-seed ensemble before the organizer convergence window can close. In
+this profile epsilon is exactly `0.002`, N is `3`, and no branching or pending-
+ensemble gate may defer the official stop.
 
 Current figures — test count, incumbent, convergence threshold, latest run —
 are generated, not retyped:
@@ -192,6 +218,7 @@ python3 -m agent.report              # per-iteration history, spend, tokens, GPU
 python3 -m agent.results_report --run-tests   # regenerate RESULTS.md from artifacts
 python3 -m agent.manifest --run-tests         # the one canonical results/manifest.json
 python3 -m agent.judge_packet                 # writes results/JUDGE_PACKET.md
+python3 -m agent.devpost                      # writes docs/DEVPOST_SUBMISSION.md
 ```
 
 `results/manifest.json` is the single source every other artifact reads —
@@ -211,13 +238,14 @@ streamlit run app.py                 # http://localhost:8501
 ```
 
 Five tabs, in the order someone actually evaluates this: **Overview** (the
-result, how the loop works, and each competition criterion mapped to evidence
-in this repo — including what we are *not* claiming), **Watch it run** (the
+result, how the loop works, and each competition criterion mapped to auditable
+evidence and its limits), **Watch it run** (the
 search as it grows, as a real parent-linked tree, with decisions, errors and
 recoveries), **Iteration log** (every node, filterable, with the raw journal
 record and the script the agent wrote), **Robustness** (every injected fault
-and what the agent did about it, plus the live run with a deliberate failure in
-it), and **Start a run** (the resolved configuration is shown first).
+and what the agent did about it, with component, real-subprocess, and full-loop
+evidence kept separate), and **Start a run** (the resolved configuration is
+shown first).
 
 Every headline figure in the dashboard is read from `results/manifest.json`,
 so the dashboard and this README cannot disagree with the artifacts.

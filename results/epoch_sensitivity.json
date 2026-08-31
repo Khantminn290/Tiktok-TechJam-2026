@@ -1,0 +1,40 @@
+{
+  "schema": "epoch_sensitivity/1",
+  "source": "logs/opus_research/epoch_primaries.json",
+  "split": "validation only",
+  "seeds": 3,
+  "noise_floor": 0.0008,
+  "peaks": [
+    {
+      "seed": 0,
+      "peak_epoch": 14,
+      "peak_primary": 0.6049679520554694,
+      "local_window_spread": 0.0013168158058636248,
+      "local_window_sigma": 1.646019757329531
+    },
+    {
+      "seed": 1,
+      "peak_epoch": 10,
+      "peak_primary": 0.6039293203486753,
+      "local_window_spread": 0.0009063592595695003,
+      "local_window_sigma": 1.1329490744618753
+    },
+    {
+      "seed": 2,
+      "peak_epoch": 13,
+      "peak_primary": 0.604491078544492,
+      "local_window_spread": 0.0009267072685467115,
+      "local_window_sigma": 1.1583840856833894
+    }
+  ],
+  "peak_epoch_range": [
+    10,
+    14
+  ],
+  "peak_primary_std": 0.00042449138695582425,
+  "mean_local_window_spread": 0.001049960777993279,
+  "mean_local_window_sigma": 1.3124509724915985,
+  "stopping_is_materially_seed_sensitive": true,
+  "decision": "do_not_promote_rolling_origin",
+  "reason": "The captures show stopping sensitivity, but contain validation predictions only. Choosing a rule from them now would tune on the official validation split, and no matching per-epoch test artifact exists. Keep the verified fixed ensemble unchanged. A future rolling-origin experiment must be preregistered and selected entirely inside train dates before official validation is read."
+}

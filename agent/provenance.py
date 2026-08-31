@@ -37,6 +37,14 @@ CACHE_DIR = os.path.join(ROOT, "runtime", "cache")
 SCHEMA = "provenance/1"
 
 
+def is_generated_path(path: str) -> bool:
+    """Whether a dirty path is run evidence rather than executable source."""
+    path = path.strip()
+    return (path.startswith(("logs/", "results/", "submission_"))
+            or path in ("RESULTS.md", "docs/DEVPOST_SUBMISSION.md",
+                        "agent/experience.md"))
+
+
 def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(("git", *args), cwd=ROOT, capture_output=True,
@@ -49,13 +57,22 @@ def _git(*args: str) -> str | None:
 def git_state() -> dict:
     sha = _git("rev-parse", "HEAD")
     status = _git("status", "--porcelain")
+    paths = [line[3:].strip() for line in (status or "").splitlines()]
+    source = [p for p in paths if not is_generated_path(p)]
+    generated = [p for p in paths if is_generated_path(p)]
     return {"sha": sha,
             "short_sha": sha[:12] if sha else None,
             "branch": _git("rev-parse", "--abbrev-ref", "HEAD"),
             # A dirty tree means the SHA does not fully identify the code that
             # ran. Recorded, never hidden.
             "dirty": bool(status) if status is not None else None,
-            "dirty_files": len(status.splitlines()) if status else 0}
+            "dirty_files": len(paths),
+            # A run necessarily writes journals and result artifacts. Keep raw
+            # Git dirtiness above, but distinguish it from changes to code,
+            # config, or dependency definitions that make the SHA insufficient.
+            "source_dirty": bool(source),
+            "source_dirty_files": source,
+            "generated_dirty_files": generated}
 
 
 def data_fingerprint(cache_dir: str = CACHE_DIR) -> dict:

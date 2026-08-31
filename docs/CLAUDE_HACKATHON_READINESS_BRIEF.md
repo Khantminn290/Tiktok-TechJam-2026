@@ -1,5 +1,27 @@
 # Claude Code Brief: Make the Pure Agent Hackathon-Ready
 
+> ## Codex implementation status - 2026-08-31
+>
+> The recommendations below are retained as the decision record. Current code
+> now implements: organizer-rule competition execution; an executed baseline
+> node; candidate -> paired confirmation -> fixed ensemble scheduling;
+> canonical agent-ensemble publication and eligibility stamping; fail-closed
+> finalization; provider-token and artifact hashes; pinned dependencies; a
+> three-level robustness report with 3/3 full-loop recoveries; a generated
+> three-minute judge route and Devpost narrative; and a validation-only epoch
+> sensitivity diagnostic.
+>
+> The epoch diagnostic found peak epochs 10-14 and a mean local-window spread
+> of 1.31 sigma, but correctly returns `do_not_promote_rolling_origin`: these
+> captures are official-validation-only, so selecting a new rule from them now
+> would be validation tuning. Path B remains an honest null outcome (lifecycle
+> machinery tested, no Pure feature cleared the real paired gate).
+>
+> **Still intentionally open:** run the now-implemented competition profile from
+> a frozen clean commit and regenerate its manifest. The existing legacy journal
+> still makes node 1 at 0.60497 eligible and node 4 at 0.60541 ineligible. The
+> hidden test remains untouched and must not run until finalization passes.
+
 > ## Review note — 2026-08-31, after commit `4b4282c`
 >
 > I fact-checked this brief against the repository. **The central finding is
@@ -627,7 +649,8 @@ python3 -m agent.verify_incumbent
 python3 -m agent.manifest --run-tests
 python3 -m agent.results_report --run-tests
 python3 -m agent.make_submission --split valid --score --ensemble
-python3 kuairand-starter-kit/submit.py --check submission_valid.csv --split valid
+python3 kuairand-starter-kit/submit.py --check submission_valid.csv --split valid \
+  --data_dir kuairand-starter-kit/KuaiRand-Pure/data
 ```
 
 Verify each command and output path from the repository root; update filenames

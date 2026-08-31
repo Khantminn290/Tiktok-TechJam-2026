@@ -85,6 +85,17 @@ def decide_action(tree: ExperimentTree, draft_count: int = MIN_DRAFTS,
     # 1) most recent attempt errored -> debug it (unless its lineage is hopeless)
     if nodes and nodes[-1].status == "error":
         last = nodes[-1]
+        # Some failures invalidate the execution strategy rather than the
+        # implementation. Retrying a timed-out script unchanged is not repair;
+        # it spends the same budget to learn the same fact. Start a materially
+        # different draft and leave the failed artifact out of the lineage.
+        from .failure import classify
+        failure = classify(last.error_trace)
+        if failure.get("needs_shrink") and not failure.get("retry_worthwhile"):
+            return ("draft", None,
+                    f"pivoting away from node {last.iteration_id}: "
+                    f"{failure['class']} requires a materially cheaper "
+                    "experiment, not an unchanged debug retry")
         chain = _debug_chain_len(tree, last)
         if chain < MAX_DEBUG_CHAIN:
             return ("debug", last,

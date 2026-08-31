@@ -1,13 +1,43 @@
 {
   "schema": "results_manifest/1",
-  "generated_utc": "2026-08-31T06:51:01Z",
+  "generated_utc": "2026-08-31T13:30:08Z",
   "generator": "python3 -m agent.manifest",
   "repository": {
-    "sha": "4b4282c1434b2c0e72339db54fd31175f6d1b875",
-    "short_sha": "4b4282c1434b",
+    "sha": "87788ddbe7cd807b80029643c27184967afaddd1",
+    "short_sha": "87788ddbe7cd",
     "branch": "opus-research-agent",
     "dirty": true,
-    "dirty_files": 7
+    "dirty_files": 25,
+    "source_dirty": true,
+    "source_dirty_files": [
+      "EADME.md",
+      "agent/experiment_spec.py",
+      "agent/failure.py",
+      "agent/judge_packet.py",
+      "agent/loop.py",
+      "agent/make_submission.py",
+      "agent/manifest.py",
+      "agent/policy.py",
+      "agent/profiles.py",
+      "agent/provenance.py",
+      "agent/run_metrics.py",
+      "app.py",
+      "docs/CLAUDE_HACKATHON_READINESS_BRIEF.md",
+      "run_agent.py",
+      "tests/test_harness.py",
+      "agent/devpost.py",
+      "agent/epoch_sensitivity.py",
+      "agent/recovery_eval.py",
+      "requirements.txt"
+    ],
+    "generated_dirty_files": [
+      "RESULTS.md",
+      "results/JUDGE_PACKET.md",
+      "results/manifest.json",
+      "docs/DEVPOST_SUBMISSION.md",
+      "results/epoch_sensitivity.json",
+      "results/recovery_eval.json"
+    ]
   },
   "dataset": {
     "name": "KuaiRand-Pure",
@@ -87,7 +117,8 @@
         }
       },
       "dataset": "KuaiRand-Pure"
-    }
+    },
+    "evaluator_sha256": "ecfde28392eb14fe"
   },
   "baseline": {
     "validation": {
@@ -104,6 +135,9 @@
   },
   "submitted": {
     "kind": "ensemble",
+    "source_node": 4,
+    "official_eligible": null,
+    "official_convergence_node": null,
     "members": 16,
     "aggregation": "rank_normalise_then_mean",
     "reported": {
@@ -244,6 +278,10 @@
       "verified": "recomputed from stored member predictions; metrics matched the reported values exactly"
     },
     "reproduce": "python3 -m agent.final_ensemble --seeds 16",
+    "artifacts": {
+      "record": "logs/ensemble_results.json",
+      "members_dir": "logs/final_ensemble"
+    },
     "split": "validation",
     "verified": true,
     "how_produced": {
@@ -291,6 +329,7 @@
         15
       ],
       "originally_built_by": "human-invoked command (`agent.final_ensemble --seeds 16`)",
+      "agent_produced": false,
       "agent_can_reproduce": true,
       "agent_reproduction_evidence": "logs/opus_research/agent_reproduced_incumbent.jsonl -- a --fresh run reached the identical configuration and produced 0.60541 via its own ensemble action"
     },
@@ -352,6 +391,7 @@
   "latest_run": {
     "available": true,
     "journal": "logs/journal.jsonl",
+    "run_profile": "legacy/unknown",
     "outer_iterations": 8,
     "iterations_charged": 8,
     "training_runs_spent": 28,
@@ -409,9 +449,22 @@
   },
   "tests": {
     "executed": true,
-    "passed": 1077,
+    "passed": 1108,
     "failed": 0,
-    "seconds": 21.9
+    "seconds": 22.4
+  },
+  "submission_artifacts": {
+    "valid": {
+      "available": true,
+      "path": "submission_valid.csv",
+      "sha256": "acfbedac210f528aa7df2c6e53d01dab7eee7d7036b239dfaf1aa0ffaa7506c3",
+      "data_rows": 124909,
+      "generation_command": "python3 -m agent.make_submission --split valid --ensemble --score"
+    },
+    "test": {
+      "available": false,
+      "expected_path": "submission_test.csv"
+    }
   },
   "robustness": {
     "fault_suite": {
@@ -456,7 +509,181 @@
         "unplanned_faults": 2,
         "unplanned_fault_note": "the network dropped mid-run and two LLM calls failed. Nothing about this was staged; both were journalled, the agent correctly declined to debug a node that had produced no code, and the run continued to its cap."
       }
+    },
+    "closed_loop_recovery": {
+      "available": true,
+      "evaluation_mode": "real AgentLoop and executor; deterministic scripted LLM",
+      "competition_evidence": false,
+      "hidden_labels_available": false,
+      "recovered": 3,
+      "total": 3,
+      "all_passed": true,
+      "manual_interventions": 0,
+      "scenarios": [
+        {
+          "name": "runtime_error",
+          "injected_failure_class": "runtime_error",
+          "first_status": "error",
+          "recovery_action": "debug",
+          "later_success": true,
+          "later_primary": 0.6014769439448429,
+          "training_runs_spent": 2,
+          "crashed_runs": 1,
+          "unique_observations": 1,
+          "manual_interventions": 0,
+          "recovered": true,
+          "elapsed_s": 20.89,
+          "nodes": [
+            {
+              "iteration_id": 0,
+              "parent_id": null,
+              "action": "draft",
+              "status": "error",
+              "primary": null,
+              "wall_clock_seconds": 0.026,
+              "error_head": "exit code 1",
+              "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+            },
+            {
+              "iteration_id": 1,
+              "parent_id": 0,
+              "action": "debug",
+              "status": "success",
+              "primary": 0.6014769439448429,
+              "wall_clock_seconds": 20.097,
+              "error_head": "",
+              "decide_reason": "last attempt (node 0) errored; debug chain length 0 < 2, feeding the error trace back to fix it"
+            }
+          ]
+        },
+        {
+          "name": "malformed_artifact",
+          "injected_failure_class": "invalid_predictions",
+          "first_status": "error",
+          "recovery_action": "debug",
+          "later_success": true,
+          "later_primary": 0.6014769439448429,
+          "training_runs_spent": 2,
+          "crashed_runs": 1,
+          "unique_observations": 1,
+          "manual_interventions": 0,
+          "recovered": true,
+          "elapsed_s": 19.51,
+          "nodes": [
+            {
+              "iteration_id": 0,
+              "parent_id": null,
+              "action": "draft",
+              "status": "error",
+              "primary": null,
+              "wall_clock_seconds": 0.121,
+              "error_head": "script exited 0 but violated the output contract:",
+              "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+            },
+            {
+              "iteration_id": 1,
+              "parent_id": 0,
+              "action": "debug",
+              "status": "success",
+              "primary": 0.6014769439448429,
+              "wall_clock_seconds": 18.95,
+              "error_head": "",
+              "decide_reason": "last attempt (node 0) errored; debug chain length 0 < 2, feeding the error trace back to fix it"
+            }
+          ]
+        },
+        {
+          "name": "timeout_reroute",
+          "injected_failure_class": "timeout",
+          "first_status": "error",
+          "recovery_action": "draft",
+          "later_success": true,
+          "later_primary": 0.6014769439448429,
+          "training_runs_spent": 2,
+          "crashed_runs": 1,
+          "unique_observations": 1,
+          "manual_interventions": 0,
+          "recovered": true,
+          "elapsed_s": 20.58,
+          "nodes": [
+            {
+              "iteration_id": 0,
+              "parent_id": null,
+              "action": "draft",
+              "status": "error",
+              "primary": null,
+              "wall_clock_seconds": 1.005,
+              "error_head": "TIMEOUT: training run exceeded 1s and was killed.",
+              "decide_reason": "only 0 attempts exist (< draft_count=1); drafting a fresh combination, prioritizing untried high-priority axes"
+            },
+            {
+              "iteration_id": 1,
+              "parent_id": null,
+              "action": "draft",
+              "status": "success",
+              "primary": 0.6014769439448429,
+              "wall_clock_seconds": 19.047,
+              "error_head": "",
+              "decide_reason": "pivoting away from node 0: timeout requires a materially cheaper experiment, not an unchanged debug retry"
+            }
+          ]
+        }
+      ],
+      "artifacts": "results/recovery_eval.json",
+      "command": "python3 -m agent.recovery_eval"
     }
+  },
+  "epoch_sensitivity": {
+    "schema": "epoch_sensitivity/1",
+    "source": "logs/opus_research/epoch_primaries.json",
+    "split": "validation only",
+    "seeds": 3,
+    "noise_floor": 0.0008,
+    "peaks": [
+      {
+        "seed": 0,
+        "peak_epoch": 14,
+        "peak_primary": 0.6049679520554694,
+        "local_window_spread": 0.0013168158058636248,
+        "local_window_sigma": 1.646019757329531
+      },
+      {
+        "seed": 1,
+        "peak_epoch": 10,
+        "peak_primary": 0.6039293203486753,
+        "local_window_spread": 0.0009063592595695003,
+        "local_window_sigma": 1.1329490744618753
+      },
+      {
+        "seed": 2,
+        "peak_epoch": 13,
+        "peak_primary": 0.604491078544492,
+        "local_window_spread": 0.0009267072685467115,
+        "local_window_sigma": 1.1583840856833894
+      }
+    ],
+    "peak_epoch_range": [
+      10,
+      14
+    ],
+    "peak_primary_std": 0.00042449138695582425,
+    "mean_local_window_spread": 0.001049960777993279,
+    "mean_local_window_sigma": 1.3124509724915985,
+    "stopping_is_materially_seed_sensitive": true,
+    "decision": "do_not_promote_rolling_origin",
+    "reason": "The captures show stopping sensitivity, but contain validation predictions only. Choosing a rule from them now would tune on the official validation split, and no matching per-epoch test artifact exists. Keep the verified fixed ensemble unchanged. A future rolling-origin experiment must be preregistered and selected entirely inside train dates before official validation is read."
+  },
+  "path_b": {
+    "features_probed": 8,
+    "probe_statuses": {
+      "REJECTED": 6,
+      "PROBED": 2
+    },
+    "features_stored_with_lineage": 0,
+    "features_trained_paired": 0,
+    "end_to_end_complete": false,
+    "tier": "OBSERVED",
+    "note": "end-to-end means a proposed feature cleared the probe AND was retrained from its stored source in a paired experiment"
   },
   "hidden_test": {
     "evaluated": false,
@@ -467,7 +694,7 @@
   "distinctions": {
     "validation_vs_hidden_test": "Every score in this manifest is VALIDATION unless a field says hidden_test. The hidden test has not been evaluated.",
     "single_seed_vs_ensemble": "A single-seed score is one draw and is PRELIMINARY. The submitted number is an ensemble of all seeds trained for one configuration.",
-    "agent_vs_human": "The submitted configuration was discovered by an agent run, and the agent has since reproduced the full pipeline (discovery, confirmation, 16-member ensemble) unaided. The originally submitted artifact was built by a human-invoked command.",
+    "agent_vs_human": "The submitted configuration was discovered by an agent run, and the agent has since reproduced the full pipeline (discovery, confirmation, 16-member ensemble) unaided. The current canonical artifact was built by a human-invoked command.",
     "fresh_vs_reuse": "fresh_executions is compute actually spent. reused_artifacts are previously completed ensemble members on disk: real historical evidence, but free. unique_observations is what evidence may rest on, keyed by (configuration, seed), so reusing the same member twice adds nothing. There is no general execution cache in this repository.",
     "preliminary_vs_confirmed": "Only CONFIRMED evidence may change the submission. A single seed is PRELIMINARY at any effect size."
   },
@@ -479,6 +706,6 @@
     "regenerate_report": "python3 -m agent.results_report --run-tests",
     "valid_submission": "python3 -m agent.make_submission --split valid --score --ensemble",
     "dashboard": "streamlit run app.py",
-    "agent_run": "python3 run_agent.py --competition --fresh --wall-clock-limit-h 2.0"
+    "agent_run": "python3 run_agent.py --competition --fresh"
   }
 }

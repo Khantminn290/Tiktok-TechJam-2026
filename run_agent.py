@@ -33,6 +33,7 @@ from agent.pricing import RateTable  # noqa: E402
 # ensemble is a separate, later artifact from any single search run, so a new
 # search must not carry it off.
 SUBMISSION_ARTIFACTS = ("final_ensemble", "ensemble_results.json",
+                        "submission_history",
                         "ab_test",              # A/B evidence, not a search product
                         "feature_registry.jsonl",  # accumulated feature research
                         # Research memory is KNOWLEDGE, not a search product. A
@@ -251,6 +252,7 @@ def main():
         enable_feature_discovery=a.feature_discovery,
         n_candidates=a.n_candidates,
         max_training_runs=a.max_training_runs,
+        competition_mode=a.competition,
     )
     summary = loop.run()
 

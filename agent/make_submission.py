@@ -19,6 +19,7 @@ import argparse
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import time
 
@@ -94,6 +95,94 @@ def write_final_eval_lock(submission_path: str, test_metrics: dict,
             "timestamp_iso": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "metrics": test_metrics,
         }, fh, indent=2)
+
+
+def finalization_issues(manifest: dict) -> list[str]:
+    """Pure checks that must hold before the one hidden-test evaluation."""
+    issues = []
+    conv = manifest.get("convergence") or {}
+    official = conv.get("official") or {}
+    eligible = conv.get("eligible_checkpoint") or {}
+    submitted = manifest.get("submitted") or {}
+    latest = manifest.get("latest_run") or {}
+    hidden = manifest.get("hidden_test") or {}
+    if not official.get("converged"):
+        issues.append("the organizer convergence rule has not fired")
+    if not eligible.get("determined"):
+        issues.append("no official eligible checkpoint is determined")
+    if submitted.get("source_node") != eligible.get("eligible_node"):
+        issues.append(
+            "canonical ensemble source node does not equal the official eligible "
+            f"node ({submitted.get('source_node')} vs "
+            f"{eligible.get('eligible_node')})")
+    if submitted.get("official_eligible") is not True:
+        issues.append("canonical ensemble is not stamped official_eligible=true")
+    if not submitted.get("verified"):
+        issues.append("canonical ensemble does not recompute exactly")
+    if submitted.get("kind") != "ensemble" or not submitted.get("members"):
+        issues.append("canonical submission is not a complete fixed ensemble")
+    if latest.get("run_profile") != "competition":
+        issues.append("latest run was not produced by the competition profile")
+    if latest.get("manual_interventions") != 0:
+        issues.append("competition run contains manual interventions")
+    if not latest.get("llm_tokens_total"):
+        issues.append("provider-level LLM token total is missing")
+    if hidden.get("evaluated") or hidden.get("lock_present"):
+        issues.append("hidden-test evaluation is already recorded")
+    valid = (manifest.get("submission_artifacts") or {}).get("valid") or {}
+    if not valid.get("available") or not valid.get("sha256"):
+        issues.append("validated submission_valid.csv and its hash are missing")
+    return issues
+
+
+def check_finalization_readiness(root: str = _ROOT) -> dict:
+    """Rebuild facts live and fail closed before hidden labels are available."""
+    from agent import manifest as MF
+
+    manifest_path = os.path.join(root, "results", "manifest.json")
+    if not os.path.exists(manifest_path):
+        sys.exit("FINALIZATION REFUSED: results/manifest.json is missing; run "
+                 "python3 -m agent.manifest first")
+    with open(manifest_path) as fh:
+        recorded = json.load(fh)
+    live = MF.build(run_tests=False)
+    issues = finalization_issues(live)
+
+    # Generated presentation files may legitimately change after the source
+    # commit. Code/config/data changes may not: a dirty source tree means the
+    # manifest's commit cannot identify what is being submitted.
+    proc = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+                          capture_output=True, text=True, timeout=20)
+    dirty_source = []
+    if proc.returncode != 0:
+        issues.append("git status failed; source cleanliness is unknown")
+    else:
+        for line in proc.stdout.splitlines():
+            path = line[3:].strip()
+            from agent.provenance import is_generated_path
+            if not is_generated_path(path):
+                dirty_source.append(path)
+        if dirty_source:
+            issues.append("source worktree is dirty: " + ", ".join(dirty_source))
+
+    # The disk manifest need not reproduce its own generating commit hash (that
+    # is self-referential when tracked), but its decision-critical facts must
+    # match a live rebuild.
+    for path in (("submitted", "source_node"),
+                 ("submitted", "reported", "primary"),
+                 ("convergence", "eligible_checkpoint", "eligible_node"),
+                 ("latest_run", "llm_tokens_total")):
+        def get(doc):
+            cur = doc
+            for key in path:
+                cur = (cur or {}).get(key)
+            return cur
+        if get(recorded) != get(live):
+            issues.append("results/manifest.json is stale at " + ".".join(path))
+
+    if issues:
+        sys.exit("FINALIZATION REFUSED:\n" + "\n".join(f"  - {x}" for x in issues))
+    return live
 
 
 def _rank_normalize(x: np.ndarray) -> np.ndarray:
@@ -232,8 +321,12 @@ def main():
                          "results/final_evaluation.lock guard. Logged either way.")
     a = ap.parse_args()
     if a.final_test_eval:
+        if not a.ensemble:
+            sys.exit("FINALIZATION REFUSED: --final-test-eval requires --ensemble; "
+                     "the canonical submitted result is the fixed ensemble")
         a.split = "test"
         check_final_eval_guard(a.admin_override)
+        check_finalization_readiness()
 
     k = a.top_k
     if k is None:
@@ -249,8 +342,11 @@ def main():
     with open(best_meta_path) as fh:
         best = json.load(fh)
     run_dir = os.path.join(_ROOT, "logs", "runs", f"node_{best['iteration_id']:03d}")
-    single_scores = np.load(os.path.join(run_dir, f"scores_{a.split}.npy"))
+    single_path = os.path.join(run_dir, f"scores_{a.split}.npy")
+    single_scores = np.load(single_path) if os.path.exists(single_path) else None
 
+    ens_meta = None
+    members = []
     if a.legacy_topk_ensemble:
         members = top_k_distinct_nodes(_ROOT, k)
         ens_scores = ensemble_scores(_ROOT, a.split, members) if len(members) > 1 else None
@@ -268,12 +364,15 @@ def main():
     which = f"best single node {best['iteration_id']}"
     if a.ensemble:
         if ens_scores is None:
-            print("! ensemble unavailable — falling back to the single best node. "
-                  "For the reported result, build it first: "
-                  "python3 -m agent.final_ensemble --seeds 16")
+            sys.exit("ensemble unavailable or incomplete; refusing to fall back "
+                     "to a different single-node artifact. Rebuild with: "
+                     "python3 -m agent.final_ensemble --seeds 16")
         else:
             scores = ens_scores
             which = ens_desc
+    if scores is None:
+        sys.exit(f"scores for best node {best['iteration_id']} are not stored in "
+                 f"{run_dir}; use --ensemble for an ensemble checkpoint")
 
     out = a.out or os.path.join(_ROOT, f"submission_{a.split}.csv")
     print(f"loading official split rows ({a.data_dir}) ...")
@@ -296,7 +395,9 @@ def main():
     comparison = None
     if a.split == "valid" and (a.score or a.ensemble):
         base = BASELINE_VALID
-        comparison = {"single": _score(single_scores)}
+        comparison = {}
+        if single_scores is not None:
+            comparison["single"] = _score(single_scores)
         if ens_scores is not None:
             comparison["ensemble"] = _score(ens_scores)
             # `members` only exists on the legacy top-k path; the submitted
@@ -328,9 +429,16 @@ def main():
             "best_node": best["iteration_id"],
             "menu_choices": best["menu_choices"],
             "ensemble_used": bool(a.ensemble and ens_scores is not None),
-            "ensemble_members": [m["iteration_id"] for m in members]
-            if (a.ensemble and ens_scores is not None) else None,
-            "valid": best["valid_metrics"],
+            "ensemble_members": (
+                [m["iteration_id"] for m in members]
+                if (a.legacy_topk_ensemble and a.ensemble
+                    and ens_scores is not None)
+                else (ens_meta or {}).get("seeds_used")
+                if (a.ensemble and ens_scores is not None) else None),
+            "valid": ({k: ens_meta[k]
+                       for k in ("GAUC", "nDCG@5", "primary")}
+                      if (a.ensemble and ens_meta)
+                      else best["valid_metrics"]),
             "test": r,
             "baseline_test": base,
             "delta_test": {m: round(r[m] - base[m], 4) for m in

@@ -150,6 +150,9 @@ def compute(nodes: list, label: str = "") -> dict:
     # Distinguishing a single-seed exploratory run from a paired confirmatory
     # one is the whole point; before this existed every node was seed 0.
     confirm_nodes = [n for n in nodes if (n.get("action") or "") == "confirm"]
+    ensemble_nodes = [n for n in nodes if (n.get("action") or "") == "ensemble"]
+    single_nodes = [n for n in scored
+                    if (n.get("action") or "") not in ("confirm", "ensemble")]
     # A "debug" action IS the automatic repair path: the harness feeds the error
     # trace back and the agent rewrites. Counting them separately from crashes
     # distinguishes "it broke" from "it broke and recovered by itself".
@@ -179,7 +182,7 @@ def compute(nodes: list, label: str = "") -> dict:
         "nodes": len(nodes),
         "confirmation_runs": len(confirm_nodes),
         "paired_experiments": len(paired_events),
-        "single_seed_exploratory_runs": len(nodes) - len(confirm_nodes),
+        "single_seed_exploratory_runs": len(single_nodes),
         "distinct_seeds_used": sorted(seeds_used),
         "results_promoted": promoted,
         "paired_evidence_states": ev_states,
@@ -211,8 +214,9 @@ def compute(nodes: list, label: str = "") -> dict:
         "promotion_criterion_stated": promo,
         "categories": {c: cats.count(c) for c in set(cats) if c},
         "confirmation_nodes": cats.count("confirmation"),
-        "best_primary": (round(max(n["metrics"]["primary"] for n in scored), 5)
-                         if scored else None),
+        "best_primary": (round(max(n["metrics"]["primary"] for n in single_nodes), 5)
+                         if single_nodes else None),
+        "ensemble_runs": len(ensemble_nodes),
         "manual_interventions": 0,
     }
 

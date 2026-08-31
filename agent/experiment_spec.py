@@ -98,6 +98,8 @@ class ExperimentSpec:
 
     @property
     def is_paired(self) -> bool:
+        if self.experiment_type == ENSEMBLE_CONSTRUCTION:
+            return False
         return bool(self.control) and bool(self.treatment)
 
     @property
