@@ -46,15 +46,15 @@ scored action using the real loop and executor. Its model is deterministic in
 that evaluation so network or sampling cannot be mistaken for orchestration
 quality.
 
-The canonical artifact attribution is: **human-invoked command (`agent.final_ensemble --seeds 16`)**.
+The canonical artifact attribution is: **autonomous competition run (`AgentLoop` ensemble action)**.
 This sentence changes automatically when an agent-produced competition artifact
 becomes canonical.
 
 ## Resources and feasibility
 
-The latest run used 28 training executions,
-269807 provider-reported tokens, $0.913193
-in model spend, and 2545.4 seconds wall-clock. Training is
+The latest run used 27 training executions,
+203602 provider-reported tokens, $0.718218
+in model spend, and 2567.3 seconds wall-clock. Training is
 CPU-capable and all limits are explicit before a run starts.
 
 ## Challenges and lessons

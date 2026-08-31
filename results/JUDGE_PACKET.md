@@ -1,6 +1,6 @@
 # Autonomous ML Research Agent — KuaiRand-Pure
 
-*Generated from `results/manifest.json` on 2026-08-31T13:30:08Z at commit `87788ddbe7cd` (opus-research-agent).*
+*Generated from `results/manifest.json` on 2026-08-31T14:27:52Z at commit `882f54906e68` (opus-research-agent).*
 
 Every number in this document is read from that manifest, which is generated from artifacts on disk. Nothing is transcribed by hand.
 
@@ -104,7 +104,7 @@ The ensemble beats the **mean** of its own members by +0.00078 (members: 0.60463
 ### Verification
 
 - recomputed from the stored member predictions at packet-generation time: **exact match** (0.60541 vs reported 0.60541)
-- member predictions on disk: 16 directories, listed in the manifest
+- member predictions on disk: 32 directories, listed in the manifest
 - issues: none
 
 ### Who did what
@@ -112,7 +112,7 @@ The ensemble beats the **mean** of its own members by +0.00078 (members: 0.60463
 This is the part most easily overstated, so it is stated plainly.
 
 - The **configuration** was discovered by an agent run.
-- The **submitted artifact** was originally produced by human-invoked command (`agent.final_ensemble --seeds 16`).
+- The **submitted artifact** was originally produced by autonomous competition run (`AgentLoop` ensemble action).
 - The agent has **since reproduced the whole pipeline unaided**: from a cold `--fresh` start it found the same configuration, ran its own paired confirmation, queued its own 16-member ensemble, and produced 0.60541 with a byte-identical config. Evidence: `logs/opus_research/agent_reproduced_incumbent.jsonl`.
 - It **matched** that number. It did not beat it, and no new improvement is claimed.
 
@@ -120,27 +120,27 @@ This is the part most easily overstated, so it is stated plainly.
 
 | | |
 |---|---|
-| experiments (outer-loop decisions) | 8 |
-| training runs spent | 28 of 150 |
-| fresh executions | 28 |
-| reused artifacts | 0 (no compute) |
+| experiments (outer-loop decisions) | 9 |
+| training runs spent | 27 of 90 |
+| fresh executions | 27 |
+| reused artifacts | 6 (no compute) |
 | duplicate-reuse attempts | 0 (no compute, no evidence) |
-| unique observations | 8 |
-| confirmations run | 1 |
-| candidates rejected by confirmation | 1 |
-| crashes | 0 |
-| preflight rejections (free) | 0 |
+| unique observations | 25 |
+| confirmations run | 2 |
+| candidates rejected by confirmation | 0 |
+| crashes | 3 |
+| preflight rejections (free) | 1 |
 | automatic recoveries | 0 |
 | **manual interventions** | **0** |
-| training wall-clock | 2321.5 s |
-| total agent wall-clock | 2545.4 s |
-| LLM tokens | 269,807 (in 250,713, out 19,094) |
-| LLM spend | $0.9132 |
+| training wall-clock | 1691.3 s |
+| total agent wall-clock | 2567.3 s |
+| LLM tokens | 203,602 (in 186,865, out 16,737) |
+| LLM spend | $0.7182 |
 | devices | cpu |
 
-> derived from scored nodes: this journal predates execution-event instrumentation
+> ledger
 
-Stop reason: `converged: running-best valid primary improved only 0.00000 (≤ ε=0.00048, the 0.60σ upward drift a running max shows by luck alone) over the last 3 scored iterations`
+Stop reason: `converged: running-best valid primary improved only 0.00044 (<= epsilon=0.00200, organizer rule) over the last 3 scored iterations`
 
 ## 9. Robustness
 
@@ -182,7 +182,7 @@ This level drives the real `AgentLoop.iterate`, search policy, preflight, sandbo
 
 Artifacts: `results/recovery_eval.json`<br>Reproduce: `python3 -m agent.recovery_eval`
 
-Test harness: **1108 passed, 0 failed** (22.4s).
+Test harness: **1114 passed, 0 failed** (25.5s).
 
 ## 10. Convergence
 
@@ -190,8 +190,8 @@ Two rules, kept separate, because conflating them would be a compliance problem 
 
 **Official (organizers').** `epsilon=0.002, N=3` — converged when the validation primary has not improved by more than epsilon over the last N consecutive scored iterations, or at the 50-iteration cap, or the 6.0h ceiling, whichever comes first.
 
-- scored iterations: 8
-- converged: **yes**, first at node 3 (gain 0.001672 over the window)
+- scored iterations: 5
+- converged: **yes**, first at node 8 (gain 0.000442 over the window)
 - best validation primary: 0.60541
 
 **Internal research controller.** `epsilon=0.00048, N=3` (0.6 sigma) — *not* the official rule. It is calibrated to the upward drift a running maximum shows by luck at this noise floor, and it is stricter, so the search keeps going past the point the organizers' rule would end it.
@@ -200,27 +200,20 @@ Two rules, kept separate, because conflating them would be a compliance problem 
 
 ### Eligible checkpoint — an open compliance risk
 
-The organizers' rule fixes *what is scored*, not just when to stop: the validation-best checkpoint **at the point it fires**. On the recorded journal it fires at **node 3**, where the validation-best checkpoint is **0.60497** (node 1).
-
-Later nodes score higher, but were produced after that point:
-
-- node 4 — 0.60541 (`ensemble`)
-- node 6 — 0.60509 (`improve`)
-
-**We are not claiming these are eligible for this journal.** A stricter internal epsilon keeps a search alive; it does not make a later artifact scoreable. The fix is a clean run under the organizers' rule that reaches the ensemble before the first no-progress window can close — not a reinterpretation of this one after the fact.
+The organizers' rule fixes *what is scored*, not just when to stop: the validation-best checkpoint **at the point it fires**. On the recorded journal it fires at **node 8**, where the validation-best checkpoint is **0.60541** (node 4).
 
 ## 11. Limitations
 
 Stated because they are true, not because they are small.
 
-1. **The submitted ensemble may not be an eligible checkpoint for the recorded journal.** The organizers' rule fires at node 3 and the ensemble is later than that (section 10). This is a compliance gap, not a scoring one, and it is fixed by a clean run under the organizers' rule — not by reinterpreting this journal.
+1. **The submitted ensemble may not be an eligible checkpoint for the recorded journal.** The organizers' rule fires at node 8 and the ensemble is later than that (section 10). This is a compliance gap, not a scoring one, and it is fixed by a clean run under the organizers' rule — not by reinterpreting this journal.
 2. **The hidden test has not been evaluated** (`evaluated: False`). Every number in this packet is validation. The gap between validation and test on the official baseline is -0.0070, and there is no reason to expect this submission to be exempt from a gap of that order.
 3. **The agent matched the incumbent; it has not beaten it.** From a cold start it reproduced 0.60541 unaided. No result in this repository exceeds it.
-4. **Artifact attribution.** The canonical artifact was produced by human-invoked command (`agent.final_ensemble --seeds 16`). This attribution is read from provenance, not inferred from its score.
+4. **Artifact attribution.** The canonical artifact was produced by autonomous competition run (`AgentLoop` ensemble action). This attribution is read from provenance, not inferred from its score.
 5. **One configuration family.** The ensemble is 16 seeds of a single configuration, not a diverse ensemble. Diversity across configurations is untested and is the most obvious place left to look.
 6. **The effect being claimed is close to the noise floor.** +0.00078 over the mean member is about 1 sigma. It is real and reproducible by re-aggregating the stored predictions, but it is not large.
 7. **Autonomy is Level B, not Level A.** The agent transfers capabilities and writes its own experiments, but the capability contract and the modification menu are human-authored; a new axis requires human approval before it becomes live.
-8. **The search is short.** The recorded run is 8 outer iterations. The organizers allow 50.
+8. **The search is short.** The recorded run is 9 outer iterations. The organizers allow 50.
 
 ## 12. Exact reproduction commands
 

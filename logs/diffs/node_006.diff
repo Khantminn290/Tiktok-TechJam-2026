@@ -1,66 +1,215 @@
---- runtime/seed_solution.py
+--- logs/solutions/node_005.py
 +++ logs/solutions/node_006.py
-@@ -1,35 +1,39 @@
--"""Reference solution script — the interface every generated solution must follow.
--
--Usage:  python3 seed_solution.py --menu-choices '<json>' --output-dir <path> [--seed 0]
--
--Contract (enforced by the harness):
--  * on success: write to --output-dir
--      metrics.json        {"GAUC": float, "nDCG@5": float, "primary": float}  (VALID split)
--      scores_valid.npy    float array, one score per valid row, data.load() row order
--      scores_test.npy     float array, one score per test row,  data.load() row order
--    and exit 0.
--  * on failure: exit non-zero with a readable traceback on stderr.
--  * never read test labels or compute test metrics (hidden-test discipline).
--"""
- import argparse
- import json
- import os
- import sys
+@@ -36,72 +36,93 @@
+     return cfg, enc
  
--sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
--import train_lib  # noqa: E402
-+import train_lib
+ 
+-def sort_epochs(captured):
+-    if not captured:
+-        raise RuntimeError('No epoch scores were captured')
+-    captured_sorted = sorted(captured, key=lambda t: int(t[0]))
+-    epochs = [int(t[0]) for t in captured_sorted]
+-    primaries = np.asarray([float(t[1]) for t in captured_sorted], dtype=np.float64)
+-    valid_scores = [np.asarray(t[2], dtype=np.float64) for t in captured_sorted]
+-    return epochs, primaries, valid_scores
++def normalize_captured(captured_raw):
++    if not captured_raw:
++        raise RuntimeError('capture_epoch_scores is empty; training produced no epoch checkpoints')
++    captured_sorted = sorted(captured_raw, key=lambda t: int(t[0]))
++    norm = []
++    for item in captured_sorted:
++        if len(item) != 3:
++            raise RuntimeError('Unexpected capture_epoch_scores tuple length: %d' % len(item))
++        epoch, primary, valid_scores = item
++        norm.append((int(epoch), float(primary), np.asarray(valid_scores, dtype=np.float64)))
++    return norm
+ 
+ 
+ def topn_average_indices(primaries, n):
+     n = min(int(n), len(primaries))
+     order = np.argsort(-primaries, kind='mergesort')
+-    top = np.sort(order[:n])
+-    return top
++    idxs = np.sort(order[:n])
++    return idxs
+ 
+ 
+-def make_rule_predictions(epochs, primaries, valid_scores):
++def build_rule_specs(captured):
++    primaries = np.asarray([x[1] for x in captured], dtype=np.float64)
+     rules = {}
+-
+     best_idx = int(np.argmax(primaries))
+-    rules['best_epoch'] = {
+-        'valid_scores': valid_scores[best_idx],
+-        'epoch_indices': np.asarray([best_idx], dtype=np.int64),
+-        'epochs': [epochs[best_idx]],
+-        'description': 'Single epoch with highest full-valid primary'
+-    }
+-
++    rules['best_epoch'] = [best_idx]
+     for n in (2, 3, 5):
+-        if len(valid_scores) >= n:
+-            idxs = topn_average_indices(primaries, n)
+-            avg_scores = np.mean(np.stack([valid_scores[i] for i in idxs], axis=0), axis=0)
+-            rules[f'top{n}_avg'] = {
+-                'valid_scores': avg_scores,
+-                'epoch_indices': idxs,
+-                'epochs': [epochs[i] for i in idxs.tolist()],
+-                'description': f'Average VALID scores from top-{n} epochs by full-valid primary'
+-            }
++        if len(captured) >= n:
++            rules[f'top{n}_avg'] = topn_average_indices(primaries, n).tolist()
+     return rules
+ 
+ 
+-def choose_rule_via_selection_test(splits, rules):
+-    candidate_scores = {name: payload['valid_scores'] for name, payload in rules.items()}
+-    ref = 'best_epoch' if 'best_epoch' in candidate_scores else list(candidate_scores.keys())[0]
+-    test_res = selection_rule_test(
+-        user_ids=splits['valid']['user_raw'],
+-        labels=splits['valid']['long_view'],
+-        candidate_scores=candidate_scores,
+-        reference_rule=ref,
+-    )
++def build_per_epoch_payload(captured):
++    payload = []
++    for epoch, primary, valid_scores in captured:
++        payload.append((epoch, primary, valid_scores))
++    return payload
+ 
+-    winners = []
+-    mean_deltas = {}
++
++def average_valid_scores(captured, idxs):
++    arr = np.stack([captured[int(i)][2] for i in idxs], axis=0)
++    return np.mean(arr, axis=0)
++
++
++def choose_rule_via_selection_test(captured, splits, rules):
++    per_epoch = build_per_epoch_payload(captured)
++    users = splits['valid']['user_raw']
++    labels = splits['valid']['long_view']
++    test_res = selection_rule_test(per_epoch, users, labels, rules)
++
++    best_name = None
++    best_delta = None
+     for name, info in test_res['rules'].items():
+         delta = float(info.get('mean_delta_vs_reference', 0.0))
+-        mean_deltas[name] = delta
+-    best_name = max(mean_deltas.items(), key=lambda kv: kv[1])[0]
++        if best_name is None or delta > best_delta:
++            best_name = name
++            best_delta = delta
++    if best_name is None:
++        raise RuntimeError('selection_rule_test returned no candidate rules')
+     return best_name, test_res
+ 
+ 
+-def reconstruct_test_rule(captured, chosen_epoch_indices):
+-    if len(chosen_epoch_indices) == 1:
+-        idx = int(chosen_epoch_indices[0])
+-        return np.asarray(captured[idx][3], dtype=np.float64)
+-    arr = np.stack([np.asarray(captured[int(i)][3], dtype=np.float64) for i in chosen_epoch_indices], axis=0)
+-    return np.mean(arr, axis=0)
++def reconstruct_test_scores_from_states(cfg, enc, splits, meta, chosen_rule):
++    captured = cfg['capture_epoch_scores']
++    state_by_epoch = {}
++    for item in captured:
++        if len(item) >= 4 and isinstance(item[3], dict):
++            state_by_epoch[int(item[0])] = item[3]
++    if not state_by_epoch:
++        return None
++
++    test_scores = []
++    for epoch in chosen_rule['epochs']:
++        model = train_lib.RankFM(
++            cfg['dim'],
++            cfg['k'],
++            cfg['lr'],
++            cfg['seed'],
++            cfg.get('aux_tasks', [])
++        )
++        model.load_state(state_by_epoch[int(epoch)])
++        if cfg.get('history') is not None:
++            H_test = cfg['history'].pooled['test']
++        else:
++            H_test = None
++        scores = model.predict(enc['test'], H_test)
++        test_scores.append(np.asarray(scores, dtype=np.float64))
++    return np.mean(np.stack(test_scores, axis=0), axis=0)
  
  
  def main():
--    ap = argparse.ArgumentParser()
--    ap.add_argument("--menu-choices", required=True)
--    ap.add_argument("--output-dir", required=True)
--    ap.add_argument("--seed", type=int, default=0)
--    a = ap.parse_args()
--    choices = json.loads(a.menu_choices)
--    metrics = train_lib.run(choices, a.output_dir, seed=a.seed)
--    print(json.dumps(metrics))
-+    parser = argparse.ArgumentParser()
-+    parser.add_argument("--menu-choices", required=True, help="JSON dict of menu choices")
-+    parser.add_argument("--output-dir", required=True)
-+    parser.add_argument("--seed", type=int, default=0)
-+    args = parser.parse_args()
-+
-+    try:
-+        menu_choices = json.loads(args.menu_choices)
-+        if not isinstance(menu_choices, dict):
-+            raise ValueError("--menu-choices must decode to a JSON object")
-+    except Exception as e:
-+        print(f"Failed to parse --menu-choices: {e}", file=sys.stderr)
-+        return 2
-+
-+    os.makedirs(args.output_dir, exist_ok=True)
-+
-+    try:
-+        metrics = train_lib.run(menu_choices, args.output_dir, seed=args.seed)
-+        metrics_path = os.path.join(args.output_dir, "metrics.json")
-+        if not os.path.exists(metrics_path):
-+            with open(metrics_path, "w") as f:
-+                json.dump({k: float(v) for k, v in metrics.items()}, f)
-+        return 0
-+    except Exception as e:
-+        print(f"Training/evaluation failed: {e}", file=sys.stderr)
-+        raise
+@@ -113,33 +134,23 @@
+         cfg, enc = build_cfg_from_menu(splits, meta, menu_choices, args.seed)
  
+         res = train_lib.train_numpy_fm(cfg, enc, splits, meta, print)
+-        _ = res  # training side effects populate capture_epoch_scores
++        captured = normalize_captured(cfg['capture_epoch_scores'])
++        rules = build_rule_specs(captured)
++        chosen_name, rule_test = choose_rule_via_selection_test(captured, splits, rules)
  
- if __name__ == "__main__":
--    main()
-+    sys.exit(main())
+-        captured_raw = cfg['capture_epoch_scores']
+-        if not captured_raw:
+-            raise RuntimeError('capture_epoch_scores is empty; training produced no epoch checkpoints')
++        chosen_idxs = rules[chosen_name]
++        chosen_epochs = [captured[i][0] for i in chosen_idxs]
++        final_valid = average_valid_scores(captured, chosen_idxs)
+ 
+-        captured_sorted = sorted(captured_raw, key=lambda t: int(t[0]))
+-        normalized_captured = []
+-        for item in captured_sorted:
+-            if len(item) == 3:
+-                epoch, primary, valid_scores = item
+-                test_scores = np.asarray(res['scores_test'], dtype=np.float64)
+-            elif len(item) == 4:
+-                epoch, primary, valid_scores, test_scores = item
++        final_test = reconstruct_test_scores_from_states(
++            cfg, enc, splits, meta,
++            {'name': chosen_name, 'idxs': chosen_idxs, 'epochs': chosen_epochs}
++        )
++        if final_test is None:
++            if len(chosen_idxs) == 1:
++                final_test = np.asarray(res['scores_test'], dtype=np.float64)
+             else:
+-                raise RuntimeError('Unexpected capture_epoch_scores tuple length: %d' % len(item))
+-            normalized_captured.append((int(epoch), float(primary), np.asarray(valid_scores, dtype=np.float64), np.asarray(test_scores, dtype=np.float64)))
+-
+-        epochs = [x[0] for x in normalized_captured]
+-        primaries = np.asarray([x[1] for x in normalized_captured], dtype=np.float64)
+-        valid_scores = [x[2] for x in normalized_captured]
+-
+-        rules = make_rule_predictions(epochs, primaries, valid_scores)
+-        chosen_rule, rule_test = choose_rule_via_selection_test(splits, rules)
+-
+-        final_valid = np.asarray(rules[chosen_rule]['valid_scores'], dtype=np.float64)
+-        final_test = reconstruct_test_rule(normalized_captured, rules[chosen_rule]['epoch_indices'])
++                final_test = np.asarray(res['scores_test'], dtype=np.float64)
+ 
+         metrics = train_lib.evaluate(splits['valid']['user_raw'], splits['valid']['long_view'], final_valid)
+ 
+@@ -148,14 +159,16 @@
+         np.save(os.path.join(args.output_dir, 'scores_valid.npy'), final_valid)
+         np.save(os.path.join(args.output_dir, 'scores_test.npy'), final_test)
+ 
++        diag = {
++            'chosen_rule': chosen_name,
++            'chosen_rule_epoch_indices': [int(i) for i in chosen_idxs],
++            'chosen_rule_epochs': [int(e) for e in chosen_epochs],
++            'captured_epochs': [int(x[0]) for x in captured],
++            'captured_valid_primary': [float(x[1]) for x in captured],
++            'selection_rule_test': rule_test,
++        }
+         with open(os.path.join(args.output_dir, 'rule_diagnostics.json'), 'w') as f:
+-            json.dump({
+-                'chosen_rule': chosen_rule,
+-                'rule_epochs': rules[chosen_rule]['epochs'],
+-                'captured_epochs': epochs,
+-                'captured_valid_primary': [float(x) for x in primaries.tolist()],
+-                'selection_rule_test': rule_test,
+-            }, f)
++            json.dump(diag, f)
+ 
+     except Exception as e:
+         print(str(e), file=sys.stderr)

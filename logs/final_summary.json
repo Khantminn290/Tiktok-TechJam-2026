@@ -1,8 +1,8 @@
 {
-  "stop_reason": "converged: running-best valid primary improved only 0.00000 (\u2264 \u03b5=0.00048, the 0.60\u03c3 upward drift a running max shows by luck alone) over the last 3 scored iterations",
-  "journal_nodes": 8,
+  "stop_reason": "converged: running-best valid primary improved only 0.00044 (<= epsilon=0.00200, organizer rule) over the last 3 scored iterations",
+  "journal_nodes": 9,
   "iterations_used": 8,
-  "iteration_cap": 20,
+  "iteration_cap": 50,
   "best_node": 4,
   "best_valid_metrics": {
     "GAUC": 0.67212,
@@ -11,18 +11,18 @@
   },
   "delta_valid_primary_over_baseline": 0.0038,
   "total_llm_tokens": {
-    "input_tokens": 250713,
-    "output_tokens": 19094,
+    "input_tokens": 186865,
+    "output_tokens": 16737,
     "cache_creation_input_tokens": 0,
     "cache_read_input_tokens": 0,
-    "calls": 24,
+    "calls": 17,
     "provider": "openai",
     "model": "gpt-5.4",
-    "input_plus_output": 269807
+    "input_plus_output": 203602
   },
-  "total_training_wall_clock_s": 2321.5,
+  "total_training_wall_clock_s": 1691.3,
   "delta_in_baseline_seed_sigmas": 4.76,
-  "total_agent_wall_clock_s": 2545.4,
+  "total_agent_wall_clock_s": 2567.3,
   "gpu_hours": 0.0,
   "gpu_seconds_measured": 0.0,
   "devices_used": [
@@ -31,26 +31,68 @@
   "spend": {
     "provider": "openai",
     "model": "gpt-5.4",
-    "total_usd": 0.913193,
-    "ceiling_usd": 12.0,
-    "iterations_billed": 24,
-    "mean_usd_per_iteration": 0.03805,
-    "max_usd_per_iteration": 0.08367,
+    "total_usd": 0.718218,
+    "ceiling_usd": 6.0,
+    "iterations_billed": 17,
+    "mean_usd_per_iteration": 0.042248,
+    "max_usd_per_iteration": 0.093408,
     "rate_card": "$2.50/1M in, $15.00/1M out"
   },
   "draft_count": 5,
   "manual_interventions": 0,
   "budget_ledger": {
-    "max_iterations": 20,
-    "max_training_runs": 150,
-    "training_runs_used": 28,
-    "training_runs_left": 122,
-    "training_crashes": 0
+    "max_iterations": 50,
+    "max_training_runs": 90,
+    "training_runs_used": 27,
+    "training_runs_left": 63,
+    "training_crashes": 2,
+    "reused_artifacts": 6,
+    "duplicate_reuse_attempts": 0,
+    "unique_observations": 25,
+    "note": "training_runs_used is FRESH COMPUTE. reused_artifacts are previously completed members: real historical evidence, no compute, excluded from the budget. unique_observations is what evidence may rest on; crashes and duplicates add neither."
   },
   "budget_counting_note": "An outer-loop node is one decision; a training execution is one model actually trained. A paired 3-seed confirmation is 1 node and 6 training executions. A preflight rejection is neither: no compute was spent and no decision was consumed, though repeated rejections are capped.",
+  "run_profile": "competition",
   "convergence_rule": {
-    "epsilon": 0.00047746678414832246,
+    "epsilon": 0.002,
     "N": 3,
+    "source": "organizer",
     "counted_iterations": "scored (successful) only"
-  }
+  },
+  "official_convergence": {
+    "official": {
+      "rule": "epsilon=0.002, N=3",
+      "source": "competition brief",
+      "scored_iterations": 5,
+      "converged": true,
+      "converged_at_node": 8,
+      "gain_over_window": 0.000442,
+      "best_primary": 0.60541
+    },
+    "internal": {
+      "rule": "epsilon=0.00048, N=3",
+      "source": "internal research controller (NOT the organizer rule)",
+      "scored_iterations": 5,
+      "converged": true,
+      "converged_at_node": 8,
+      "gain_over_window": 0.000442,
+      "best_primary": 0.60541,
+      "epsilon_sigma": 0.6,
+      "rationale": "calibrated to the upward drift a running maximum shows by luck over N iterations. Stricter than the organizer rule, so it extends the SEARCH -- but anything it finds after the official stopping point is research evidence, not an eligible scored checkpoint."
+    },
+    "caps": {
+      "iterations": 50,
+      "wall_clock_hours": 6.0
+    },
+    "compliance_note": "The organizer rule is the official definition of convergence AND of which checkpoint is scored: the validation-best checkpoint at the point it fires. The internal controller is stricter, so the loop keeps searching past that point -- which is useful for research and does NOT make a later artifact eligible. Check official.converged_at_node before treating any result as the submission.",
+    "eligible_checkpoint": {
+      "determined": true,
+      "converged_at_node": 8,
+      "eligible_node": 4,
+      "eligible_primary": 0.60541,
+      "better_but_ineligible": [],
+      "note": "anything in better_but_ineligible was produced AFTER the official stopping point and cannot be the scored submission for this journal"
+    }
+  },
+  "canonical_artifact_official_eligible": true
 }

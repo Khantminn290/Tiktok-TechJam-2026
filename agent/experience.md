@@ -1,8 +1,5 @@
 <!-- Curated experience memory: lessons, not events. Auto-compacted to a fixed character budget -- oldest whole entries are dropped first, never truncated mid-entry. Distinct from logs/journal.jsonl (the complete, unpruned run log). Written by the harness only; generated code cannot write here (see agent/executor.py PROTECTED_PATHS). -->
 
-### [NEUTRAL] iter 7 -- A matched confirmation ablation of node 6 without checkpoint combination should clarify whether its
-menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "none", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 4, "lr": 0.0005, "epochs": 20, "patience": 5, "n_checkpoints": 1, "checkpoint_combine": false} scored 0.6038 vs the then-best 0.6040 (-0.00026 = -0.3 sigma) -- INSIDE the 0.0008 noise floor, so this says nothing either way. Treat as untested, not as evidence.
-
 ### [HELPED] iter 0 -- The incumbent single-model FM+BPR+recency recipe may still gain a small but real amount from forced
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "n_checkpoints": 5, "checkpoint_combine": true} scored 0.6049 as the first scored node (no prior best to compare against).
 
@@ -38,4 +35,10 @@ menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history
 
 ### [CRASHED] iter 1 -- Adding top-checkpoint combination to the current strongest FM+BPR+recency+time+aux_click_like_forwar
 menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "aux_click_like_forward", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "n_checkpoints": 5, "checkpoint_combine": true} failed with evaluation_failure: RuntimeError: injected failure (harness robustness test) -- Scoring itself failed. Use train_lib's official evaluate on (user_raw, labels, scores); never reimplement the metric.
+
+### [HELPED] iter 1 -- Capability transfer from the accumulated research record: reproduce the verified incumbent single-mo
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default"} raised valid primary to 0.6050 from 0.6015 (+0.00349 = +4.4 sigma).
+
+### [DEAD_END] iter 8 -- Test whether the current best FM+BPR+recency+time recipe is mildly under-capacity specifically under
+menu_choices={"loss": "bpr_pairwise", "neg_sampling": "uniform_1", "user_history": "recency_weighted_pool", "multitask": "none", "model": "fm_numpy", "temporal": "hour_plus_dow", "training": "lower_lr_longer", "data_extras": "none", "sample_weighting": "per_row", "regularization": "l2_default", "k": 32} scored 0.6045 vs the then-best 0.6054 (-0.00087 = -1.1 sigma) -- worse beyond seed noise, not worth repeating as-is.
 
