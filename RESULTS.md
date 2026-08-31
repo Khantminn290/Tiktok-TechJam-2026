@@ -1,6 +1,6 @@
 # Results — generated
 
-Generated `2026-08-31T04:16:28Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
+Generated `2026-08-31T05:23:57Z` by `python3 -m agent.results_report`. Every figure below is read from repository artifacts at generation time; nothing here is retyped from memory.
 
 Tiers: **VERIFIED** recomputed during this generation · **OBSERVED** measured in a run and journalled · **OPEN** not established.
 
@@ -22,12 +22,15 @@ Provenance: commit `024238f2b9ec` on `opus-research-agent`, data fingerprint `60
 
 ## Harness
 
-`python3 tests/test_harness.py` → **871 passed, 0 failed** (11.7s) — **VERIFIED**
+`python3 tests/test_harness.py` → **888 passed, 0 failed** (12.0s) — **VERIFIED**
 
-## Convergence rule
+## Convergence
 
-ε = **0.000477** (0.6σ at a noise floor of 0.0008), N = 3 — **VERIFIED**
-> calibrated to the upward drift a running maximum shows by luck over N iterations, not hand-picked
+**Official (organizer) rule** — `epsilon=0.002, N=3`. Converged: **YES**, first at node 3. Best validation primary 0.60541. Hard caps: 50 iterations, 6.0h. — **VERIFIED**
+
+**Internal research controller** — `epsilon=0.00048, N=3` (0.6σ), stricter and NOT the official rule. Converged: YES.
+
+> The organizer rule is the official definition of convergence and of which checkpoint is scored. The internal controller is STRICTER, so the loop stops no earlier than the organizer rule would; it never skips a scored checkpoint. Both are reported so neither is mistaken for the other.
 
 ## Latest run
 

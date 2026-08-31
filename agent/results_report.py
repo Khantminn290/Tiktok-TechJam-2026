@@ -139,12 +139,17 @@ def harness(run: bool = False) -> dict:
 
 
 def convergence() -> dict:
+    """BOTH rules, never conflated: the organizers' is the official one."""
     from agent.loop import EPSILON, N_CONVERGE, BASELINE_SEED_STD
-    return {"epsilon": round(EPSILON, 6),
+    from agent import convergence_report as CR
+    nodes = _load_jsonl(os.path.join(LOGS, "journal.jsonl"))
+    r = CR.report(nodes)
+    return {"official": r["official"], "internal": r["internal"],
+            "caps": r["caps"], "compliance_note": r["compliance_note"],
+            "epsilon": round(EPSILON, 6),
             "epsilon_sigma": round(EPSILON / BASELINE_SEED_STD, 2),
-            "N": N_CONVERGE, "noise_floor": BASELINE_SEED_STD, "tier": VERIFIED,
-            "note": ("calibrated to the upward drift a running maximum shows by "
-                     "luck over N iterations, not hand-picked")}
+            "N": N_CONVERGE, "noise_floor": BASELINE_SEED_STD,
+            "tier": VERIFIED}
 
 
 def latest_run() -> dict:
@@ -282,10 +287,20 @@ def render(d: dict) -> str:
     else:
         L.append(f"**OPEN** — {h.get('note') or h.get('error')}")
 
-    L += ["", "## Convergence rule", "",
-          f"ε = **{cv['epsilon']}** ({cv['epsilon_sigma']}σ at a noise floor of "
-          f"{cv['noise_floor']}), N = {cv['N']} — **VERIFIED**",
-          f"> {cv['note']}"]
+    o, itl = cv.get("official", {}), cv.get("internal", {})
+    L += ["", "## Convergence", "",
+          f"**Official (organizer) rule** — `{o.get('rule')}`. "
+          f"Converged: **{'YES' if o.get('converged') else 'no'}**"
+          + (f", first at node {o.get('converged_at_node')}"
+             if o.get("converged") else "")
+          + f". Best validation primary {o.get('best_primary')}. "
+            f"Hard caps: {cv.get('caps', {}).get('iterations')} iterations, "
+            f"{cv.get('caps', {}).get('wall_clock_hours')}h. — **VERIFIED**",
+          "",
+          f"**Internal research controller** — `{itl.get('rule')}` "
+          f"({cv['epsilon_sigma']}σ), stricter and NOT the official rule. "
+          f"Converged: {'YES' if itl.get('converged') else 'no'}.",
+          "", f"> {cv.get('compliance_note')}"]
 
     L += ["", "## Latest run", ""]
     if run.get("tier") == OBSERVED:

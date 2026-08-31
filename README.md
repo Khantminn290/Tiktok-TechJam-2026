@@ -108,11 +108,29 @@ whichever comes first: convergence (ε over N = 3 scored iterations), the
 iteration cap, the **training-run** cap, the wall-clock ceiling, or the spend
 ceiling.
 
-ε is **not** a hand-picked constant — it is calibrated to this benchmark's noise
-as the upward drift a running maximum shows by luck over N iterations
-(currently 0.00048, or 0.60σ; see `agent/validity.py::convergence_epsilon`).
-The earlier hard-coded 0.002 was 2.5σ and stopped runs on differences larger
-than anything the benchmark still had to offer.
+**Two convergence rules, and they are not the same thing.**
+
+The **organizers'** rule is the official one — it defines when a run stops and
+which checkpoint is scored: **ε = 0.002, N = 3**, or the 50-iteration cap, or
+the 6-hour ceiling, whichever comes first.
+
+This project additionally runs a **stricter internal controller** at
+ε = 0.00048 (0.60σ — the upward drift a running maximum shows by luck at this
+benchmark's noise floor; see `agent/validity.py::convergence_epsilon`). At
+2.5σ the loop stops on differences larger than anything the benchmark still has
+to offer, so a search that wants to keep looking needs a tighter bar.
+
+Stricter is the safe direction: a tighter ε can only make the loop run *longer*
+than the organizer rule would, never stop it earlier, so no scored checkpoint is
+missed. Both are reported, and never conflated:
+
+```bash
+python3 -m agent.convergence_report
+```
+
+> An earlier version of this README described 0.002 as "the earlier hard-coded
+> constant" that a calibrated value replaced. That was wrong: 0.002 is the
+> organizers' published rule, not a bug that got fixed.
 
 Note that an outer iteration is **not** one training run: a paired 3-seed
 confirmation is one node and six training executions, which is why there is a

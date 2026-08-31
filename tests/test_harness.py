@@ -3423,6 +3423,65 @@ def test_experiment_tree_visualisation():
           "No nodes" in V.render([], "t"))
 
 
+def test_organizer_convergence_is_not_our_own_rule():
+    """The organizers' rule is the official one and must never be replaced.
+
+    The competition brief fixes convergence at epsilon=0.002, N=3. This project
+    also runs a stricter internal controller at 0.00048, and project
+    documentation had described 0.002 as "the earlier hard-coded constant" that
+    a calibrated value replaced -- which reads as though an official rule were a
+    bug that got fixed. It is not.
+    """
+    print("\n[convergence: official vs internal]")
+    from agent import convergence_report as CR
+    from agent.loop import EPSILON
+
+    check("the organizers' published constants are recorded verbatim",
+          CR.ORGANIZER_EPSILON == 0.002 and CR.ORGANIZER_N == 3)
+    check("...along with their hard caps",
+          CR.ORGANIZER_ITERATION_CAP == 50 and CR.ORGANIZER_WALL_CLOCK_H == 6.0)
+    check("the internal controller is STRICTER, so it can only search longer",
+          EPSILON < CR.ORGANIZER_EPSILON,
+          "a looser internal rule could stop before the organizer rule would "
+          "and miss a scored checkpoint")
+
+    # A run that satisfies the organizer rule but not the stricter one.
+    nodes = [{"iteration_id": i, "status": "success",
+              "metrics": {"primary": 0.6016 + i * 0.0003}, "events": []}
+             for i in range(6)]
+    r = CR.report(nodes)
+    check("the organizer rule can be met while the internal one is not",
+          r["official"]["converged"] and not r["internal"]["converged"],
+          f"official={r['official']['converged']} "
+          f"internal={r['internal']['converged']}")
+    check("each rule names its own source",
+          "competition brief" in r["official"]["source"]
+          and "NOT the organizer rule" in r["internal"]["source"])
+    check("the report says which one is official",
+          "organizer rule is the official definition" in r["compliance_note"])
+
+    txt = CR.render(r)
+    check("the rendering labels the official rule as official",
+          "Official (organizer) rule" in txt and "scored under" in txt)
+    check("...and marks the internal one as not official",
+          "not* the official rule" in txt or "NOT the official" in txt)
+
+    # Not enough scored iterations is reported, not silently called converged.
+    thin = CR.report([{"iteration_id": 0, "status": "success",
+                       "metrics": {"primary": 0.604}, "events": []}])
+    check("too few scored iterations is stated, not treated as convergence",
+          not thin["official"]["converged"] and "only 1 scored" in
+          thin["official"].get("note", ""))
+
+    # And the README must not describe the organizer rule as a fixed mistake.
+    readme = open(os.path.join(_ROOT, "README.md")).read()
+    check("the README no longer calls 0.002 a hand-picked constant",
+          "The earlier hard-coded 0.002 was 2.5σ and stopped runs" not in readme)
+    check("...and states that 0.002 is the organizers' rule",
+          "organizers' published rule" in readme or
+          "organizers'** rule is the official one" in readme)
+
+
 def test_results_report_is_generated_not_retyped():
     """Documentation must be derivable from artifacts, or it rots."""
     print("\n[generated results report]")
@@ -4925,6 +4984,7 @@ if __name__ == "__main__":
               test_ensembling_is_an_agent_action,
               test_streamlit_dashboard_executes,
               test_live_view_state, test_experiment_tree_visualisation,
+              test_organizer_convergence_is_not_our_own_rule,
               test_results_report_is_generated_not_retyped,
               test_competition_profile, test_training_run_budget,
               test_confirmation_defers_when_runs_exhausted,
