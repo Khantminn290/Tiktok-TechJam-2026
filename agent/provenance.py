@@ -49,7 +49,10 @@ def _git(*args: str) -> str | None:
     try:
         out = subprocess.run(("git", *args), cwd=ROOT, capture_output=True,
                              text=True, timeout=15)
-        return out.stdout.strip() if out.returncode == 0 else None
+        # Preserve the first porcelain status column. ``strip()`` changed
+        # " M logs/x" into "M logs/x", then the path parser dropped its first
+        # character and falsely classified generated evidence as source code.
+        return out.stdout.rstrip() if out.returncode == 0 else None
     except (OSError, subprocess.SubprocessError):
         return None
 

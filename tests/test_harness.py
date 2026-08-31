@@ -5315,6 +5315,91 @@ def test_provenance():
           "the file recorded members and metrics but not how they were combined")
 
 
+def test_interrupted_confirmation_resume():
+    """A killed process resumes evidence work without retraining completed arms."""
+    print("\n[interrupted confirmation resume]")
+    import types
+    import numpy as np
+    from agent import budget as B
+    from agent import confirm as CF
+    from agent import executor as EXEC
+    from agent import experiment_spec as XS
+    from agent import provenance as PR
+
+    old_rows = EXEC._expected_rows
+    old_git = PR._git
+    try:
+        EXEC._expected_rows = lambda: {"valid": 3, "test": 4}
+        with tempfile.TemporaryDirectory() as td:
+            work = os.path.join(td, "logs", "confirm", "node_002")
+            for arm in ("control", "treatment"):
+                for seed in range(3):
+                    run_dir = os.path.join(work, f"{arm}_seed_{seed:02d}")
+                    os.makedirs(run_dir)
+                    with open(os.path.join(run_dir, "metrics.json"), "w") as fh:
+                        json.dump({"GAUC": .67, "nDCG@5": .54,
+                                   "primary": .605}, fh)
+                    np.save(os.path.join(run_dir, "scores_valid.npy"),
+                            np.arange(3, dtype=float))
+                    np.save(os.path.join(run_dir, "scores_test.npy"),
+                            np.arange(4, dtype=float))
+
+            spec = XS.ExperimentSpec(
+                hypothesis="resume this paired experiment",
+                experiment_type=XS.MULTI_SEED_REPLICATION,
+                control={"model": "control"}, treatment={"model": "treatment"})
+            node = Node(2, 1, "confirm", spec.treatment, spec.hypothesis,
+                        "error", None, "BrokenPipeError", 0, 12.0, time.time(), "",
+                        events=[{"type": "experiment_spec", "spec": spec.to_dict()}])
+            loop = AgentLoop.__new__(AgentLoop)
+            loop.root = td
+            loop.log_dir = os.path.join(td, "logs")
+            loop.tree = types.SimpleNamespace(nodes=[node])
+            loop.llm = types.SimpleNamespace(total_usage={
+                "input_tokens": 0, "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0, "calls": 0})
+            loop.spend = types.SimpleNamespace(total_usd=0.0, per_call=[])
+            loop.ledger = B.Ledger(max_iterations=50, max_training_runs=90)
+            loop._confirmed_nodes = set()
+            loop._ensemble_done = False
+            loop._confirmation_queue = []
+            loop._resume_work_dirs = {}
+            loop.run_started = time.time()
+            loop.max_iterations = 50
+            loop._restore_runtime_state()
+
+            restored = loop._confirmation_queue[0]
+            check("the interrupted spec is reconstructed from the journal",
+                  restored.to_dict() == spec.to_dict())
+            check("six completed arms remain charged as historical compute",
+                  loop.ledger.training_runs == 6)
+            check("the retry points at the original artifact directory",
+                  loop._resume_work_dirs[id(restored)] == work)
+
+            events = []
+            arm = CF._arm(spec.control, spec.seeds, "control", work, 1,
+                          code="raise AssertionError('must not execute')",
+                          log=lambda *_a, **_k: None, events=events)
+            tally = __import__("agent.execution_events", fromlist=["tally"]).tally(events)
+            check("contract-valid interrupted arms are reused without compute",
+                  len(arm) == 3 and tally["fresh_executions"] == 0
+                  and tally["reused_artifacts"] == 3)
+
+        # Reproduce the first-line porcelain case that caused "logs" to become
+        # "ogs" and generated evidence to be reported as dirty source.
+        PR._git = lambda *args: (
+            " M logs/journal.jsonl\n M agent/loop.py"
+            if args and args[0] == "status" else "abc123")
+        state = PR.git_state()
+        check("porcelain parsing preserves the first path character",
+              state["generated_dirty_files"] == ["logs/journal.jsonl"]
+              and state["source_dirty_files"] == ["agent/loop.py"])
+    finally:
+        EXEC._expected_rows = old_rows
+        PR._git = old_git
+
+
 def test_incumbent_still_reproduces():
     """The protected result must follow from the artifacts on disk."""
     print("\n[incumbent protection]")
@@ -6070,7 +6155,8 @@ if __name__ == "__main__":
               test_capability_contract, test_preflight, test_budget_accounting,
               test_evidence_states, test_research_memory,
               test_redundancy_reasoning, test_failure_repeat_detection,
-              test_provenance, test_fault_recovery, test_judge_packet_is_generated,
+              test_provenance, test_interrupted_confirmation_resume,
+              test_fault_recovery, test_judge_packet_is_generated,
               test_official_checkpoint_eligibility,
               test_manifest_accounting_matches_the_provider,
               test_incumbent_still_reproduces,

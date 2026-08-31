@@ -113,6 +113,12 @@ class ExperimentSpec:
         d["is_paired"] = self.is_paired
         return d
 
+    @classmethod
+    def from_dict(cls, value: dict) -> "ExperimentSpec":
+        """Rebuild a persisted spec, ignoring derived display fields."""
+        fields = cls.__dataclass_fields__
+        return cls(**{k: v for k, v in value.items() if k in fields})
+
     def render(self) -> str:
         L = [f"EXPERIMENT SPEC — {self.experiment_type}",
              f"  hypothesis   {self.hypothesis[:150]}",

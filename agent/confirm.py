@@ -18,6 +18,7 @@ cheaper than promoting a result that is not there.
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 
@@ -27,6 +28,7 @@ RUNTIME_DIR = os.path.join(ROOT, "runtime")
 
 from .executor import run_solution  # noqa: E402
 from . import experiment_spec as XS  # noqa: E402
+from . import execution_events as EX  # noqa: E402
 
 SEED_SOLUTION = os.path.join(RUNTIME_DIR, "seed_solution.py")
 
@@ -37,8 +39,33 @@ def _flushing_print(*a, **k):
     print(*a, **k)
 
 
+def _completed_artifact(run_dir: str) -> dict | None:
+    """Load a completed member only when the executor contract still holds."""
+    import numpy as np
+    from .executor import _expected_rows
+
+    try:
+        with open(os.path.join(run_dir, "metrics.json")) as fh:
+            metrics = json.load(fh)
+        clean = {}
+        for key in ("GAUC", "nDCG@5", "primary"):
+            value = metrics.get(key)
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                return None
+            clean[key] = float(value)
+        for split, expected in _expected_rows().items():
+            scores = np.load(os.path.join(run_dir, f"scores_{split}.npy"),
+                             allow_pickle=False)
+            if scores.shape != (expected,) or not np.all(np.isfinite(scores)):
+                return None
+        return clean
+    except (OSError, ValueError, json.JSONDecodeError):
+        return None
+
+
 def _arm(choices: dict, seeds, tag: str, work_dir: str, timeout_s: int,
-         code: str | None = None, log=_flushing_print) -> dict:
+         code: str | None = None, log=_flushing_print,
+         events: list | None = None) -> dict:
     """Run one arm at each seed. Returns {seed: metrics}.
 
     A seed that fails is simply absent from the result: pairing then drops that
@@ -51,19 +78,33 @@ def _arm(choices: dict, seeds, tag: str, work_dir: str, timeout_s: int,
         with open(SEED_SOLUTION) as fh:
             src = fh.read()
     out = {}
+    events = events if events is not None else []
     for s in seeds:
         run_dir = os.path.join(work_dir, f"{tag}_seed_{s:02d}")
         code_path = os.path.join(work_dir, f"{tag}_seed_{s:02d}.py")
+        completed = _completed_artifact(run_dir)
+        if completed is not None:
+            out[s] = completed
+            events.append(EX.event(EX.REUSED_ARTIFACT, seed=s, config=choices,
+                                   detail=f"validated interrupted {tag} artifact"))
+            log(f"    [{tag}] seed {s}  primary {completed['primary']:.5f}  "
+                "(reusing validated artifact; no compute)")
+            continue
         t0 = time.time()
         res = run_solution(src, code_path, choices, run_dir,
                            timeout_s=timeout_s, seed=s)
+        elapsed = time.time() - t0
         if res.ok and res.metrics:
             out[s] = {k: float(res.metrics[k])
                       for k in ("GAUC", "nDCG@5", "primary")}
+            events.append(EX.event(EX.FRESH_EXECUTION, seed=s, seconds=elapsed,
+                                   config=choices))
             log(f"    [{tag}] seed {s}  primary {out[s]['primary']:.5f}  "
-                f"{time.time() - t0:.0f}s")
+                f"{elapsed:.0f}s")
         else:
             head = (res.error_trace or "")[:120].replace("\n", " ")
+            events.append(EX.event(EX.FAILED_EXECUTION, seed=s, seconds=elapsed,
+                                   config=choices, detail=head))
             log(f"    [{tag}] seed {s}  FAILED — {head}")
     return out
 
@@ -77,10 +118,11 @@ def run_spec(spec: XS.ExperimentSpec, work_dir: str | None = None,
 
     log(f"  [confirm] {spec.experiment_type}: {spec.n_runs} training runs "
         f"across seeds {list(spec.seeds)}")
+    events = []
     control = _arm(spec.control, spec.seeds, "control", work_dir, timeout_s,
-                   control_code, log)
+                   control_code, log, events)
     treatment = _arm(spec.treatment, spec.seeds, "treatment", work_dir,
-                     timeout_s, treatment_code, log)
+                     timeout_s, treatment_code, log, events)
 
     res = XS.paired_result(control, treatment)
     ev = XS.grade(spec, res)
@@ -89,6 +131,7 @@ def run_spec(spec: XS.ExperimentSpec, work_dir: str | None = None,
     log(XS.render_result(spec, res, ev))
     return {"spec": spec, "control": control, "treatment": treatment,
             "paired": res, "evidence": ev,
+            "events": events, "execution_tally": EX.tally(events),
             "promote": bool(ev.get("promote"))}
 
 

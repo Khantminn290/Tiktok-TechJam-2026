@@ -165,6 +165,113 @@ class AgentLoop:
         # them under-counts compute six-fold. See agent.budget.COUNTING_NOTE.
         self.ledger = budget.Ledger(max_iterations=max_iterations,
                                     max_training_runs=max_training_runs)
+        self._resume_work_dirs = {}
+        self._restore_runtime_state()
+
+    def _restore_runtime_state(self) -> None:
+        """Restore volatile scheduler and accounting state from durable evidence."""
+        if not self.tree.nodes:
+            return
+        from . import execution_events as EX
+        from . import experiment_spec as XS
+        from . import confirm as CF
+
+        # Wall time, provider usage and spend remain cumulative across process
+        # restarts. The journal is authoritative; no sidecar checkpoint is
+        # required to resume safely.
+        first = min(n.timestamp - (n.wall_clock_seconds or 0.0)
+                    for n in self.tree.nodes)
+        self.run_started = min(self.run_started, first)
+        for node in self.tree.nodes:
+            usage = node.token_breakdown or {}
+            if usage:
+                for key in ("input_tokens", "output_tokens",
+                            "cache_creation_input_tokens",
+                            "cache_read_input_tokens"):
+                    self.llm.total_usage[key] += int(usage.get(key, 0) or 0)
+                self.llm.total_usage["calls"] += 1
+            for event in node.events or []:
+                if event.get("type") == "spend":
+                    cost = float(event.get("iteration_usd") or 0.0)
+                    self.spend.total_usd += cost
+                    self.spend.per_call.append(cost)
+
+            execution = [e for e in (node.events or [])
+                         if e.get("type") == "execution_event"]
+            if execution:
+                tally = EX.tally(execution)
+                self.ledger.record_training(
+                    tally["training_runs_spent"],
+                    crashed=tally["by_kind"].get(EX.FAILED_EXECUTION, 0),
+                    reused=tally["reused_artifacts"],
+                    unique=tally["unique_observations"],
+                    duplicates=tally["duplicate_reuse_attempts"])
+            elif node.action in ("confirm", "ensemble"):
+                # An interruption can occur after subprocesses finish but
+                # before their execution events reach the journal. Count each
+                # contract-valid artifact as compute already spent.
+                work = os.path.join(
+                    self.log_dir,
+                    "confirm" if node.action == "confirm" else "ensemble_exp",
+                    f"node_{node.iteration_id:03d}")
+                complete = 0
+                if os.path.isdir(work):
+                    complete = sum(
+                        CF._completed_artifact(os.path.join(work, name)) is not None
+                        for name in os.listdir(work)
+                        if os.path.isdir(os.path.join(work, name)))
+                graded = any(e.get("type") in ("paired_result", "ensemble_result")
+                             for e in (node.events or []))
+                # Interrupted artifacts consumed compute, but they become
+                # evidence only when the recovered action grades them. This
+                # avoids counting the same six observations once from disk and
+                # again when the retry journals their result.
+                self.ledger.record_training(complete,
+                                            unique=complete if graded else 0)
+            elif (node.code_path and not budget.was_preflight_rejection(node)):
+                self.ledger.record_training(1, crashed=int(node.status == "error"))
+
+            if any(e.get("type") == "paired_result" for e in node.events or []):
+                if node.parent_id is not None:
+                    self._confirmed_nodes.add(node.parent_id)
+            if node.action == "ensemble" and node.status == "success":
+                self._ensemble_done = True
+
+        # Retry the latest interrupted evidence action from its exact persisted
+        # spec. Its old directory is retained so valid completed arms are reused.
+        latest = self.tree.nodes[-1]
+        if latest.action in ("confirm", "ensemble") and latest.status == "error":
+            raw = next((e.get("spec") for e in latest.events or []
+                        if e.get("type") == "experiment_spec"), None)
+            if raw:
+                spec = XS.ExperimentSpec.from_dict(raw)
+                self._confirmation_queue.append(spec)
+                old_work = os.path.join(
+                    self.log_dir,
+                    "confirm" if latest.action == "confirm" else "ensemble_exp",
+                    f"node_{latest.iteration_id:03d}")
+                self._resume_work_dirs[id(spec)] = old_work
+                print(f"  [resume] restored interrupted {spec.experiment_type} "
+                      f"from node {latest.iteration_id}", flush=True)
+                return
+
+        # Queue decisions are written on the producing node before persistence.
+        # Rebuild an unanswered one when the process stopped between nodes.
+        import dataclasses
+        nodes = [dataclasses.asdict(n) for n in self.tree.nodes]
+        pending_confirm = any(
+            e.get("type") == "confirmation_queued"
+            and e.get("parent_node") not in self._confirmed_nodes
+            for n in self.tree.nodes for e in (n.events or []))
+        if pending_confirm:
+            self._maybe_queue_confirmation(
+                nodes, {"category": "confirmation"}, [],
+                max(0, self.max_iterations - len(self.tree.nodes)))
+        elif any(e.get("type") == "ensemble_queued"
+                 for n in self.tree.nodes for e in (n.events or [])) \
+                and not self._ensemble_done:
+            self._maybe_queue_ensemble(
+                nodes, [], max(0, self.max_iterations - len(self.tree.nodes)))
 
     # ---------- convergence ----------
     def converged(self) -> tuple[bool, str]:
@@ -1071,13 +1178,24 @@ class AgentLoop:
         print(spec.render(), flush=True)
 
         t0 = now()
-        work = os.path.join(self.log_dir, "confirm", f"node_{it:03d}")
+        work = self._resume_work_dirs.pop(
+            id(spec), os.path.join(self.log_dir, "confirm", f"node_{it:03d}"))
+        if os.path.basename(work) != f"node_{it:03d}":
+            events.append({"type": "interrupted_work_recovered",
+                           "source_work_dir": os.path.relpath(work, self.root),
+                           "recovery_node": it})
         try:
             out = CF.run_spec(spec, work_dir=work, timeout_s=self.exec_timeout_s)
-            done = len(out.get("control") or {}) + len(out.get("treatment") or {})
+            tally = out.get("execution_tally") or {}
+            fresh = tally.get("fresh_executions", 0)
+            reused = tally.get("reused_artifacts", 0)
             if getattr(self, "ledger", None):
-                self.ledger.record_training(done,
-                                            crashed=max(0, spec.n_runs - done))
+                self.ledger.record_training(
+                    fresh,
+                    crashed=max(0, spec.n_runs - fresh - reused),
+                    reused=reused,
+                    unique=tally.get("unique_observations"),
+                    duplicates=tally.get("duplicate_reuse_attempts", 0))
         except Exception as e:                      # noqa: BLE001
             events.append({"type": "execution_error", "failure_class": "unknown",
                            "error_head": f"{type(e).__name__}: {str(e)[:300]}"})
@@ -1096,6 +1214,7 @@ class AgentLoop:
             return node
 
         res, ev = out["paired"], out["evidence"]
+        events.extend(out.get("events") or [])
         events.append({"type": "paired_result", "result": res,
                        "evidence": {k: v for k, v in ev.items() if k != "paired"},
                        "promote": out["promote"]})
